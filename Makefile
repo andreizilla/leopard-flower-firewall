@@ -31,7 +31,7 @@ gui/IPC_wrapper.so: ipc_wrapper.c
 ipcwrapper_debug: GCCFLAGS += -g -DDEBUG 
 ipcwrapper_debug: ipcwrapper
 	
-debug: GCCFLAGS += -g -DDEBUG
+debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfw lpfwcli
 
 

@@ -207,7 +207,7 @@ void* commandthread(void* ptr){
 
                 temp = temp->next;
                 //check if the list is empty and let frontend know
-                if (temp == NULL) {
+		if (temp == NULL) {
                     strcpy(msg_d2flist.item.path, "EOF");
                     if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
                         m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -266,7 +266,17 @@ void* commandthread(void* ptr){
 
                 //TODO come up with a way to calculate sha without having user to wait when the rule appears
                //chaeck if the app is still running
-	      if (!strcmp(sent_to_fe_struct.path, KERNEL_PROCESS)) goto inkernel;
+
+	      if (!strcmp(msg_f2d.item.path, KERNEL_PROCESS)){ //don't set fe_awaiting_reply flags
+		    int nfmark;
+		    pthread_mutex_lock ( &nfmark_count_mutex );
+		    nfmark = NFMARK_BASE + nfmark_count;
+		    nfmark_count++;
+		    pthread_mutex_unlock ( &nfmark_count_mutex );
+
+		    dlist_add(KERNEL_PROCESS, msg_f2d.item.pid, msg_f2d.item.perms, TRUE, "", 0, 0, nfmark ,TRUE);
+		    continue;
+	      }
 
               char exepath[32] = "/proc/";
               strcat(exepath, sent_to_fe_struct.pid);
@@ -307,8 +317,6 @@ void* commandthread(void* ptr){
                 }
 
 //TODO SECURITY. We should check now that /proc/PID inode wasn't changed while we were shasumming and exesizing
-		inkernel:
-	       ;
 
 		  int nfmark;
 		   pthread_mutex_lock ( &nfmark_count_mutex );

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file './frontend.ui'
+# Form implementation generated from reading ui file 'frontend.ui'
 #
-# Created: Tue Oct  4 23:49:19 2011
+# Created: Wed Oct 26 19:43:56 2011
 #      by: PyQt4 UI code generator 4.7.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -78,6 +78,10 @@ class Ui_MainWindow(object):
         self.actionPreferences.setObjectName("actionPreferences")
         self.actionSave = QtGui.QAction(MainWindow)
         self.actionSave.setObjectName("actionSave")
+        self.actionPreferences_2 = QtGui.QAction(MainWindow)
+        self.actionPreferences_2.setObjectName("actionPreferences_2")
+        self.menuFile.addAction(self.actionPreferences_2)
+        self.menuFile.addSeparator()
         self.menuFile.addAction(self.actionExit)
         self.menuRules.addAction(self.actionDelete_selected)
         self.menuRules.addSeparator()
@@ -102,4 +106,5 @@ class Ui_MainWindow(object):
         self.actionShow_all.setText(QtGui.QApplication.translate("MainWindow", "Show &all", None, QtGui.QApplication.UnicodeUTF8))
         self.actionPreferences.setText(QtGui.QApplication.translate("MainWindow", "Preferences", None, QtGui.QApplication.UnicodeUTF8))
         self.actionSave.setText(QtGui.QApplication.translate("MainWindow", "Save all to Rulesfile", None, QtGui.QApplication.UnicodeUTF8))
+        self.actionPreferences_2.setText(QtGui.QApplication.translate("MainWindow", "Preferences", None, QtGui.QApplication.UnicodeUTF8))
 

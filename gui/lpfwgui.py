@@ -1,11 +1,12 @@
 import sys, os, thread, time, string, threading
 sys.path.append('/sda/newrepo/gui/')
-from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow
+from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator
 import resource
-from PyQt4.QtCore import pyqtSignal
+from PyQt4.QtCore import pyqtSignal, Qt
 from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
+from prefs import Ui_Form
 import IPC_wrapper
 from multiprocessing import Pipe, Process
 
@@ -114,6 +115,16 @@ def getFromProcess_thread():
         #if there's only one element, it's EOF; dont go through iterations,just leave the model empty
         if (len(flist) == 1): continue
         for item in flist[0:-1]:#leave out the last EOF from iteration
+            if (item[1] == "KERNEL PROCESS"):
+                #a whole different ball game starts here
+                name = QStandardItem("KERNEL")
+                pid = QStandardItem("N/A")
+                perms = QStandardItem("ALLOW ALWAYS")
+                fullpath = QStandardItem("KERNEL-> "+item[2])
+                modelAll.appendRow((name,pid,perms,fullpath))
+                del fullpath,pid,perms,name
+                continue
+            
             fullpath = QStandardItem(item[1])
             if (item[2] == "0"):
                 pid_string = "N/A"
@@ -250,8 +261,43 @@ class myDialogIn(QDialog, Ui_DialogIn):
         IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
         listRules()        
         
-   
+class mForm(QWidget, Ui_Form):
+    def __init__(self):
+        QWidget.__init__(self)
+        self.setupUi(self)
+        self.pushButton_Add.clicked.connect(self.addIP)
+        validator = QIntValidator()
+        validator.setRange(0,255)
+        self.lineEdit_IP_1.setValidator(validator)
+        self.lineEdit_IP_2.setValidator(validator)
+        self.lineEdit_IP_3.setValidator(validator)
+        self.lineEdit_IP_4.setValidator(validator)
+
         
+    def addIP(self):
+        ip1 = str(self.lineEdit_IP_1.text())
+        ip2 = str(self.lineEdit_IP_2.text())
+        ip3 = str(self.lineEdit_IP_3.text())
+        ip4 = str(self.lineEdit_IP_4.text())
+        
+        if (ip1 == ""):
+            self.lineEdit_IP_1.setFocus()
+            return
+        elif (ip2 == ""):
+            self.lineEdit_IP_2.setFocus()
+            return
+        elif (ip3 == ""):
+            self.lineEdit_IP_3.setFocus()
+            return
+        elif (ip4 == ""): 
+            self.lineEdit_IP_4.setFocus()
+            return
+        ip = ip1+"."+ip2+"."+ip3+"."+ip4
+        
+        self.hide()
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "ALLOW ALWAYS", path = "KERNEL PROCESS", pid = ip)   
+        listRules()
+
         
         
 class myMainWindow(QMainWindow, Ui_MainWindow):
@@ -330,7 +376,11 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             mpid = str(activeModel.itemFromIndex(activeModel.index(foundRow,1)).text())
             print "start sending item to delete to backend"
             if (mpid == "N/A"): 
-                mpid = "0"
+                if (mpath.find("KERNEL-> ") == 0):
+                    mpid = mpath.lstrip("KERNEL-> ") #IP goes to pid field
+                    mpath = "KERNEL PROCESS"
+                else:    
+                    mpid = "0"
             IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_DELANDACK, path=mpath, pid=mpid)
             print "finished sending item to delete to backend"
             #the backend sends an acknowledgement after rule has been deleted, so we could request a fresh dlist
@@ -361,9 +411,13 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             quitApp()
         
     def realQuit(self):
+        
         self.quitflag = 1
         self.close()
-      
+
+    def showPrefs(self):
+        prefs_dialog.show()
+        
     def __init__(self):
         QMainWindow.__init__(self)
         self.setupUi(self)
@@ -374,6 +428,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.askuserINsig.connect(self.askUserIN)
         self.actionShow_active_only.triggered.connect(self.showActiveOnly)
         self.actionShow_all.triggered.connect(self.showAll)
+        self.actionPreferences_2.triggered.connect(self.showPrefs)
         self.actionExit.triggered.connect(self.realQuit)
         self.actionSave.triggered.connect(self.saveRules)
         
@@ -412,6 +467,7 @@ dialogOut = myDialogOut()
 dialogOut.setWindowTitle("Leopard Flower firewall")
 dialogIn = myDialogIn()
 dialogIn.setWindowTitle("Leopard Flower firewall")
+prefs_dialog = mForm()
 
 #start the thread which initializes msgq and listens for be requests
 #thread.start_new_thread(getFromProcess_thread, ())

@@ -393,6 +393,19 @@ void dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, un
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
+
+    if (!strcmp(path, KERNEL_PROCESS)){ //make sure it is not a duplicate from the user
+	while ( temp->next != NULL ) //find a KERNEL PROCESS entry
+	{
+	    temp = temp->next;
+	    if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+	    if (!strcmp(temp->pid, pid)){ //same IP, quit
+		pthread_mutex_unlock ( &dlist_mutex );
+		return;
+	    }
+	}
+    }
+    temp = first;
     //find the last element in dlist i.e. the one that has .next == NULL...
     while ( temp->next != NULL )
     {
@@ -511,8 +524,9 @@ int parsecache(int socket, char *path, char *pid){
     dlist *temp;
     pthread_mutex_lock(&dlist_mutex);
     temp = first;
-    while (temp->next != NULL && temp->next->is_active){
+    while (temp->next != NULL){
 	temp = temp->next;
+	if(!temp->is_active) continue;
 	i = 0;
 	while (temp->sockets_cache[i] != CACHE_EOL_MAGIC){
 	    if (i >= MAX_CACHE-1) break;
@@ -548,8 +562,9 @@ void* cachebuildthread ( void *pid ){
 	pthread_mutex_lock(&dlist_mutex);
 	temp = first;
 	//cache only running PIDs && not kernel processes
-	while (temp->next->is_active && temp->next != NULL && strcmp(temp->path, KERNEL_PROCESS)){
+	while (temp->next != NULL){
 	    temp = temp->next;
+	    if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS)) continue;
 	    pathlen = strlen(temp->pidfdpath);
 	    strcpy(mpath, temp->pidfdpath);
 	    rewinddir(temp->dirstream);
@@ -563,6 +578,7 @@ void* cachebuildthread ( void *pid ){
 		    errno=0;
 		    continue; //no trailing 0
 		}
+		if (buf[7] != '[') continue; //not a socket
 		char *end;
 		end = strrchr(&buf[8],']'); //put 0 instead of ]
 		*end = 0;
@@ -1355,6 +1371,170 @@ int icmp_check_only_one_inode ( int *m_inodeint )
     return 0;
 }
 
+int socket_check_kernel_udp(int *socket){
+    //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
+    //The ony diffrnc is they have uid=0 (but so are root's)
+    //rescan /proc/net to see if this socket might be kernel's or (root's)
+
+    char sockstr[12];
+    int sockstr_sz;
+
+    sprintf(sockstr,"%d", *socket);
+    //add space to the end of string for easier strcmp
+    sockstr_sz = strlen(sockstr);
+    sockstr[sockstr_sz] = 32;
+    sockstr[sockstr_sz+1] = 0;
+
+    char uid;
+    FILE *mudpinfo, *mudp6info;
+    char * membuf;
+    int bytesread;
+
+    if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
+    memset(membuf,0, MEMBUF_SIZE);
+    if ( ( mudpinfo = fopen ( UDPINFO, "r" ) ) == NULL ){
+	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return PROCFS_ERROR;
+    }
+    fseek(mudpinfo,0,SEEK_SET);
+    errno = 0;
+    if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mudpinfo)){
+	    if (errno != 0) perror("fread udpinfo");
+    }
+    fclose(mudpinfo);
+    int i = 0;
+    char proc_sockstr[12];
+    proc_sockstr[0] = 1; //initialize
+
+    while(proc_sockstr[0] != 0){
+	memcpy(proc_sockstr, &membuf[220+128*i], 12);
+	if (strncmp(proc_sockstr, sockstr, sockstr_sz)){
+	    i++;
+	    continue;
+	}
+	//else match
+	memcpy(&uid, &membuf[209+128*i],1);
+	free(membuf);
+	if (uid != '0') {
+	    return SOCKET_NONE_PIDFD;
+	}
+	else return INKERNEL_SOCKET_FOUND;
+    }
+    //not found in /proc/net/tcp, search in /proc/net/tcp6
+
+    memset(membuf,0, MEMBUF_SIZE);
+    if ( ( mudp6info = fopen ( UDP6INFO, "r" ) ) == NULL ){
+	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return PROCFS_ERROR;
+    }
+    fseek(mudp6info,0,SEEK_SET);
+    errno = 0;
+    if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mudp6info)){
+	    if (errno != 0) perror("fread tcpinfo");
+    }
+    fclose(mudp6info);
+    i = 0;
+    proc_sockstr[0] = 1;
+    while(proc_sockstr[0] != 0){
+	memcpy(proc_sockstr, &membuf[284+171*i], 12);
+	if (strncmp(proc_sockstr, sockstr, sockstr_sz)){
+	    i++;
+	    continue;
+	}
+	//else match
+	memcpy(&uid, &membuf[273+171*i],1);
+	free(membuf);
+	if (uid != '0') {
+	    return SOCKET_NONE_PIDFD;
+	}
+	else return INKERNEL_SOCKET_FOUND;
+    }
+    return SOCKET_NONE_PIDFD;
+}
+
+
+int socket_check_kernel_tcp(int *socket){
+    //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
+    //The ony diffrnc is they have uid=0 (but so are root's)
+    //rescan /proc/net to see if this socket might be kernel's or (root's)
+
+    char sockstr[12];
+    int sockstr_sz;
+
+    sprintf(sockstr,"%d", *socket);
+    //add space to the end of string for easier strcmp
+    sockstr_sz = strlen(sockstr);
+    sockstr[sockstr_sz] = 32;
+    sockstr[sockstr_sz+1] = 0;
+
+    char uid;
+    FILE *mtcpinfo, *mtcp6info;
+    char * membuf;
+    int bytesread;
+
+    if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
+    memset(membuf,0, MEMBUF_SIZE);
+    if ( ( mtcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
+	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return PROCFS_ERROR;
+    }
+    fseek(mtcpinfo,0,SEEK_SET);
+    errno = 0;
+    if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mtcpinfo)){
+	    if (errno != 0) perror("fread tcpinfo");
+    }
+    fclose(mtcpinfo);
+    int i = 0;
+    char proc_sockstr[12];
+    proc_sockstr[0] = 1; //initialize
+
+    while(proc_sockstr[0] != 0){
+	memcpy(proc_sockstr, &membuf[165+150*i+76], 12);
+	if (strncmp(proc_sockstr, sockstr, sockstr_sz)){
+	    i++;
+	    continue;
+	}
+	//else match
+	memcpy(&uid, &membuf[230+150*i],1);
+	free(membuf);
+	if (uid != '0') {
+	    return SOCKET_NONE_PIDFD;
+	}
+	else return INKERNEL_SOCKET_FOUND;
+    }
+    //not found in /proc/net/tcp, search in /proc/net/tcp6
+
+    memset(membuf,0, MEMBUF_SIZE);
+    if ( ( mtcp6info = fopen ( TCP6INFO, "r" ) ) == NULL ){
+	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return PROCFS_ERROR;
+    }
+    fseek(mtcp6info,0,SEEK_SET);
+    errno = 0;
+    if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mtcp6info)){
+	    if (errno != 0) perror("fread tcpinfo");
+    }
+    fclose(mtcp6info);
+    i = 0;
+    proc_sockstr[0] = 1;
+    while(proc_sockstr[0] != 0){
+	memcpy(proc_sockstr, &membuf[284+171*i], 12);
+	if (strncmp(proc_sockstr, sockstr, sockstr_sz)){
+	    i++;
+	    continue;
+	}
+	//else match
+	memcpy(&uid, &membuf[273+171*i],1);
+	free(membuf);
+	if (uid != '0') {
+	    return SOCKET_NONE_PIDFD;
+	}
+	else return INKERNEL_SOCKET_FOUND;
+    }
+    return SOCKET_NONE_PIDFD;
+}
+
+
 //find in procfs which socket corresponds to source port
 int port2socket_udp ( int *portint, int *socketint )
 {
@@ -1428,6 +1608,7 @@ int port2socket_udp ( int *portint, int *socketint )
     while (socketstr[i] != 32){i++;}
     socketstr[i] = 0; // 0x20 == space, see /proc/net/tcp
     *socketint = atoi ( socketstr );
+    if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
         return GOTO_NEXT_STEP;
 }
 
@@ -1508,7 +1689,9 @@ int port2socket_tcp ( int *portint, int *socketint )
     while (socketstr[i] != 32){i++;}
     socketstr[i] = 0; // 0x20 == space, see /proc/net/tcp
     *socketint = atoi ( socketstr );
-        return GOTO_NEXT_STEP;
+    if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
+    //else
+    return GOTO_NEXT_STEP;
 }
 
 //Handler for TCP packets
@@ -1517,14 +1700,20 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
     char cache_path[PATHSIZE];
     char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;  
+    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
     if ((retval = parsecache(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
 	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
-    if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
+    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if (retval == SOCKET_NONE_PIDFD){
+	retval = socket_check_kernel_tcp(&socketint);
+	goto out;
+    }
+    else if (retval != GOTO_NEXT_STEP) goto out;
+
     if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
@@ -1544,7 +1733,15 @@ int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, u
 	goto out;
     }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
-    if ( (retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
+    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if (retval == SOCKET_NONE_PIDFD){
+	retval = socket_check_kernel_udp(&socketint);
+	goto out;
+    }
+    else if (retval != GOTO_NEXT_STEP) goto out;
+
+
+
     if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
@@ -1604,8 +1801,8 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
-		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+	    if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
 		    while(temp->next != NULL){
@@ -1633,10 +1830,9 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 			}
 		    }
 		    pthread_mutex_unlock(&dlist_mutex);
-		    //not found in in-kernel list, ask user reuse struct's fields
-		    strcpy(path, KERNEL_PROCESS);
-		    strcpy(pid, saddr);
-		    stime = sport_hostbo;
+		    //not found in in-kernel list, drop the bumb
+		    verdict = SOCKET_NONE_PIDFD;
+		    goto kernel_verdict;
 		}
 	    if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
 	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
@@ -1654,8 +1850,8 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;            
-	    if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
-		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+	    if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
 		    while(temp->next != NULL){
@@ -1716,6 +1912,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
     case CACHE_TRIGGERED_ALLOW:
+    case INKERNEL_RULE_ALLOW:
 
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
@@ -1750,8 +1947,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	m_printf ( MLOG_TRAFFIC, "port has no socket. Remote host has probed this machine's port\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
@@ -1784,6 +1979,10 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case SRCPORT_NOT_FOUND_IN_PROC:
 	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
+    case INKERNEL_RULE_DENY:
+	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case SOCKET_NONE_PIDFD:
+	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -1793,7 +1992,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
 
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
-int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
+int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
     struct iphdr *ip;
     u_int32_t id;
@@ -1822,8 +2021,9 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
 	//remember fe's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
-	    if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+	if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+	    if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
+
 		pthread_mutex_lock(&dlist_mutex);
 		dlist *temp = first;
 		while(temp->next != NULL){
@@ -1851,10 +2051,9 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 		    }
 		}
 		pthread_mutex_unlock(&dlist_mutex);
-		//not found in in-kernel list, ask user reuse struct's fields
-		strcpy(path, KERNEL_PROCESS);
-		strcpy(pid, daddr);
-		stime = ntohs (tcp->dest);
+		//not found in in-kernel list, drop
+		verdict = SOCKET_NONE_PIDFD;
+		goto kernel_verdict;
 	    }
 	    //drop if fe was busy before we started processing
 	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
@@ -1871,8 +2070,8 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
         
 	fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
-		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+	    if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
 		    while(temp->next != NULL){
@@ -1974,8 +2173,6 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	m_printf ( MLOG_TRAFFIC, "port has no socket, dropping\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
@@ -2010,6 +2207,8 @@ return 0;
 	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
     case INKERNEL_RULE_DENY:
 	m_printf ( MLOG_TRAFFIC, "in-kernel rule, deny\n" ); goto DROPverdict;
+    case SOCKET_NONE_PIDFD:
+	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -2300,14 +2499,8 @@ int main ( int argc, char *argv[] )
     * ( log_info->ival ) = 1;
     * ( log_traffic->ival ) = 1;
 #ifdef DEBUG
-        * ( log_debug->ival ) = 1;
+	* ( log_debug->ival ) = 1;
 #else
-    * ( log_debug->ival ) = 0;
-#endif
-
-#ifdef DEBUG2
-    * ( log_info->ival ) = 0;
-    * ( log_traffic->ival ) = 0;
     * ( log_debug->ival ) = 0;
 #endif
 
