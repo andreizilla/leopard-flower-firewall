@@ -749,7 +749,7 @@ void rules_load()
 
     while ( 1 )
     {
-        //fgets reads <newline> into the string and terminates with /0
+	//fgets reads <newline> into the string and terminates with /0
         if ( fgets ( path, PATHSIZE, stream ) == 0 ) break;
         path[strlen ( path ) - 1] = 0; //remove newline
 	if (!strcmp(path, KERNEL_PROCESS)){//separate treatment for kernel process
