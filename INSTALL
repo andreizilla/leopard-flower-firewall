@@ -1,0 +1,21 @@
+<<<----Leopard Flower 0.4 (released Oct 2011)---->>>
+
+INSTALLATION INSTRUCTIONS
+
+These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
+
+The following packaged must be installed for lpfw to compile:
+
+libnetfilter-queue-dev
+libnfnetlink-dev
+libncurses5-dev (to use frontend)
+optional: zenity(for popup notifications)
+
+Navigate into the source code folder and run "make"
+Refer to README for instructions on how to setup lpfw.
+
+
+lpfw_backend_0.4.0.tar.gz
+lpfw_backend_0.4.0_source_tar.gz
+lpfw_frontend_python_0.4.0.tar.gz
+lpfw_frontend_standalone_0.4.0.tar.gz

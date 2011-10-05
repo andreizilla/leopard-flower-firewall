@@ -1,0 +1,26 @@
+GCCFLAGS = -fno-stack-protector
+
+LPFWSOURCES 	=	lpfw.c \
+			msgq.c \
+			sha.c \
+			argtable/arg_end.c \
+			argtable/arg_file.c \
+			argtable/arg_int.c \
+			argtable/arg_lit.c \
+			argtable/arg_rem.c \
+			argtable/arg_str.c \
+			argtable/argtable2.c
+
+all: lpfw lpfwcli gui/IPC_wrapper.so
+
+lpfw: $(LPFWSOURCES)
+	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lpthread -o lpfw
+
+lpfwcli: lpfwcli.c ipc.c
+	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli
+
+gui/IPC_wrapper.so: gui/ipc_wrapper.c
+	gcc gui/ipc_wrapper.c $(GCCFLAGS) -shared -lpython2.6 -o gui/IPC_wrapper.so
+	
+debug: GCCFLAGS += -g -DDEBUG
+debug: lpfw lpfwcli gui/IPC_wrapper.so

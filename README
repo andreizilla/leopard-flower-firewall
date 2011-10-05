@@ -1,0 +1,99 @@
+<<<----Leopard Flower 0.4 (released Oct 2011)---->>>
+
+  Leopard Flower (aka LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon called "lpfw" and frontend(built with ncurses) called "lpfwcli".
+
+These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
+
+  The following packaged must be installed for lpfw to work:
+  libnetfilter-queue
+  libnfnetlink
+
+SIMPLE CONFIGURATION:
+  1. Make sure files lpfw and lpfwcli are in the same folder
+  2. In a terminal window launch "lpfw" as root
+  3. In a terminal window of an X session launch "lpfw --cli" as a regular user (not root). You will see an ncurses-based frontend.
+
+
+
+
+ADVANCED CONFIGURATION:
+  1. If you don't want lpfw to look for lpfwcli in the same folder, you can pass to lpfw a command line option --cli-path= followed by a path to lpfwcli
+  2. If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
+  3. 30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
+  4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "lpfw --cli" as a regular user (not root). You will see an ncurses-based frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
+
+
+
+
+HEADLESS MODE - WITHOUT FRONTEND:
+  If you want to run lpfw without the frontend, you may want to edit the rulesfile manually
+  By default rules are written to /etc/lpfw.rules in the following  format:
+
+  full path to the executable file <new line character>
+  ALLOW ALWAYS or DENY ALWAYS <new line character>
+  executable file's size in bytes <new line character>
+  executable file's sha512 sum in hexadecimal representation <new line character>
+
+  Example:
+  /usr/bin/wget
+  ALLOW ALWAYS
+  333356
+  083c1c88f8ded3cc1d6f83687e3092efab938d6a18ad5f95728189861e9d7bb145651a3a0b7846df69f02f10c50e45361880d4ea2549615a655643ed0bd20fa9
+  /home/wwwwww/apps/browsers/opera-11.10-2048.i386.linux/lib/opera/opera
+  ALLOW ALWAYS
+  16634040
+  7c4f6bd7c742c4bb8096e18fea5f92c6eade14152cf0ccdd36934b61ce1f578553e65be377408d34727c9aabed4ab3842f8cbbe776cd156d75f160925bea8c9f
+
+
+
+
+COMMANDLINE ARGUMENTS:
+  These can be also seen with "lpfw --help".
+
+  --rules-file=
+  File to which rules are commited (default: /etc/lpfw.rules)
+
+  --logging_facility=
+  Where to write logs. Possible values stdout(default), file, syslog
+
+  --log-file= 
+  If --logging_facility=file, then this is the file to which to write logging information. Default /tmp/lpfw.log
+
+  --pid-file=
+  Pidfile which prevents two instances of lpfw being launched at the same time. Default /var/log/lpfw.pid
+
+  --cli-path=
+  Path to lpfwcli ncurses frontend. It will be launched in xterm window. Default: in the same folder as lpfw
+
+  --gui-path=
+  Path to a standalone graphical frontend. Default: in the same folder as lpfw
+
+  --guipy-path
+  Path to python-based graphical frontend lpfwgui.py. It will be launched in python. Default: in the same folder as lpfw 
+
+  --log-info=
+  --log-traffic=
+  --log-debug=
+  Enables different levels of logging. Possible values 1 or 0 for yes/no. Default: all three 1.
+  
+  To invoke a frontend, issue the following;
+  lpfw --cli	Ncurses
+  lpfw --gui	Standalone
+  lpfw --guipy	Python-based
+
+
+
+
+KNOWN ISSUES:
+  1. lpfwcli can be invoked only from within X session, it doesn't work under pure terminal(for security reasons).
+  2. LPFW only filters OUTGOING connections.
+  3. Only one program can send ICMP packets simultaneously, if more than one does, LeopardFlower blocks both.
+  4. Only IPv4 is supported, since developers have no access to IPv6 network (although there is support for IPv4 packets over IPv6 sockets)
+  5. When a torrent is starting to download, a lot of new connections get established, thus lpfw may cause CPU usage to spike during that time.
+  6. A combination of exceptionally large executables(20Mb+) + slow CPU may result in a 2+ seconds delay when an application connects to the web for the first time, due to heavy calculations performed by sha512 checksumming function.
+  7. Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule. 
+  8. On some systems after typing "make", you may get a warning similar to the one below:
+  lpfw.c:1230:32: warning: passing argument 2 of ‘nfq_get_payload’ from
+  incompatible pointer type
+  /usr/local/include/libnetfilter_queue/libnetfilter_queue.h:107:12: note: expected ‘unsigned char **’ but argument is of type ‘char **’
+  This warning can be safely ignored.

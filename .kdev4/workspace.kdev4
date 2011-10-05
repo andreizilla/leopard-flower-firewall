@@ -1,0 +1,55 @@
+[Buildset]
+BuildItems=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x01\x00\x00\x00\x12\x00w\x00o\x00r\x00k\x00s\x00p\x00a\x00c\x00e)
+
+[Launch]
+Launch Configurations=Launch Configuration 0,Launch Configuration 1
+
+[Launch][Launch Configuration 0]
+Configured Launch Modes=execute,debug
+Configured Launchers=nativeAppLauncher,gdb
+Name=Run
+Type=Native Application
+
+[Launch][Launch Configuration 0][Data]
+Arguments=--log-debug=1 --guipy-path=/sda/workspace/gui/lpfwgui.py
+Debugger Shell=
+Dependencies=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x01\x00\x00\x00\x12\x00w\x00o\x00r\x00k\x00s\x00p\x00a\x00c\x00e)
+Dependency Action=Build
+Display Demangle Names=false
+Display Static Members=false
+EnvironmentGroup=default
+Executable=file:///sda/workspace/lpfw
+External Terminal=xterm -hold -e %exe
+GDB Path=file:///usr/bin/gdb
+Project Target=
+Remote GDB Config Script=
+Remote GDB Run Script=
+Remote GDB Shell Script=
+Use External Terminal=true
+Working Directory=
+isExecutable=true
+
+[Launch][Launch Configuration 1]
+Configured Launch Modes=execute
+Configured Launchers=nativeAppLauncher
+Name=guipy
+Type=Native Application
+
+[Launch][Launch Configuration 1][Data]
+Arguments=--guipy
+Dependencies=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x01\x00\x00\x00\x12\x00w\x00o\x00r\x00k\x00s\x00p\x00a\x00c\x00e)
+Dependency Action=Build
+EnvironmentGroup=default
+Executable=file:///sda/workspace/lpfw
+External Terminal=xterm -hold -e %exe
+Project Target=
+Use External Terminal=false
+Working Directory=
+isExecutable=true
+
+[MakeBuilder]
+Default Target=debug
+Number Of Jobs=1
+
+[Project]
+VersionControlSupport=kdevgit

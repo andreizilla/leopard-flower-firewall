@@ -1,0 +1,18 @@
+Version 0.4 (released ca. Oct 2011)
+Graphical frontend introduced both as a standalone executable or as a python application.
+
+
+Version 0.3 (released ca. Sep 2011)
+Executables are checked for their sha512 sums
+Both active and inactive rules are shown now. Inactive ones have "0" in PID column
+More verbose and polished logging
+
+
+Version 0.2
+new ncurses interface
+fixed message queue getting filled to the point where frontend can't connect to backend
+added icmp protocol filtering (only for one application at a time, if more than 1 app are sending icmp traffic, the traffic will be blocked for both application - that's the shortcoming of /proc/net/raw interface)
+added ability to log to stdout or to syslogd of to file
+added support for zenity pop-ups
+frontend shows only active/running rules rather than all rules
+
