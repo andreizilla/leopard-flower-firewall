@@ -11,7 +11,7 @@ LPFWSOURCES 	=	lpfw.c \
 			argtable/arg_str.c \
 			argtable/argtable2.c
 
-all: lpfw lpfwcli gui/IPC_wrapper.so
+all: lpfw lpfwcli
 
 lpfw: $(LPFWSOURCES)
 	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lpthread -o lpfw
@@ -19,8 +19,12 @@ lpfw: $(LPFWSOURCES)
 lpfwcli: lpfwcli.c ipc.c
 	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli
 
-gui/IPC_wrapper.so: gui/ipc_wrapper.c
-	gcc gui/ipc_wrapper.c $(GCCFLAGS) -shared -lpython2.6 -o gui/IPC_wrapper.so
+ipcwrapper: gui/IPC_wrapper.so
+gui/IPC_wrapper.so: ipc_wrapper.c
+	gcc ipc_wrapper.c $(GCCFLAGS) -shared -lpython2.6 -o gui/IPC_wrapper.so
+
+ipcwrapper_debug: GCCFLAGS += -g -DDEBUG 
+ipcwrapper_debug: ipcwrapper
 	
 debug: GCCFLAGS += -g -DDEBUG
-debug: lpfw lpfwcli gui/IPC_wrapper.so
+debug: lpfw lpfwcli

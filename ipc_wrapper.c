@@ -10,7 +10,7 @@ ssize_t msgrcv(int msqid, void* msgp, size_t msgsz, long msgtyp, int msgflg)
 #include <sys/msg.h> 
 #include <string.h> //strerror, strcpy
 #include <errno.h> 
-#include "../includes.h" //for msg_struct
+#include "includes.h" //for msg_struct
 #include "/usr/include/python2.6/Python.h"
 
 static PyObject * IPC_wrapper_ftok(PyObject *self, PyObject *args){
