@@ -13,12 +13,12 @@ Type=Native Application
 [Launch][Launch Configuration 0][Data]
 Arguments=--log-debug=1 --guipy-path=/sda/workspace/gui/lpfwgui.py
 Debugger Shell=
-Dependencies=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x01\x00\x00\x00\x12\x00w\x00o\x00r\x00k\x00s\x00p\x00a\x00c\x00e)
+Dependencies=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x02\x00\x00\x00\x0e\x00n\x00e\x00w\x00r\x00e\x00p\x00o\x00\x00\x00\n\x00d\x00e\x00b\x00u\x00g)
 Dependency Action=Build
 Display Demangle Names=false
 Display Static Members=false
 EnvironmentGroup=default
-Executable=file:///sda/workspace/lpfw
+Executable=file:///sda/newrepo/lpfw
 External Terminal=xterm -hold -e %exe
 GDB Path=file:///usr/bin/gdb
 Project Target=
@@ -40,7 +40,7 @@ Arguments=--guipy
 Dependencies=@Variant(\x00\x00\x00\t\x00\x00\x00\x00\x01\x00\x00\x00\x0b\x00\x00\x00\x00\x01\x00\x00\x00\x12\x00w\x00o\x00r\x00k\x00s\x00p\x00a\x00c\x00e)
 Dependency Action=Build
 EnvironmentGroup=default
-Executable=file:///sda/workspace/lpfw
+Executable=./lpfw
 External Terminal=xterm -hold -e %exe
 Project Target=
 Use External Terminal=false
