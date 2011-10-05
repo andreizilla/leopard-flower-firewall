@@ -156,7 +156,4 @@ conntrack -D -m MYNFMARK
 (Alternatively, use libnetfilter_conntrack API which is rather complex to wrap my head around ATM);
 
 
-Check out inclusion to GNU conditions
-
-
-add --cli --gui --pygui switch explanation  
+Check out inclusion to GNU conditionss

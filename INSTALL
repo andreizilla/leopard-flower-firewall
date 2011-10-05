@@ -8,14 +8,15 @@ The following packaged must be installed for lpfw to compile:
 
 libnetfilter-queue-dev
 libnfnetlink-dev
-libncurses5-dev (to use frontend)
+libncurses5-dev (to use ncurses frontend)
 optional: zenity(for popup notifications)
 
 Navigate into the source code folder and run "make"
-Refer to README for instructions on how to setup lpfw.
+
+Additionally you may want to compile a module IPC_wrapper.so which is used by python-based graphical frontend. This module is shipped in lpfw_frontend_python_*.tar.bz pre-compiled, so usually there is no need to compile it.
+It requires: libpython2.6 and python2.6-del
+Simply issue make ipcwrapper
 
 
-lpfw_backend_0.4.0.tar.gz
-lpfw_backend_0.4.0_source_tar.gz
-lpfw_frontend_python_0.4.0.tar.gz
-lpfw_frontend_standalone_0.4.0.tar.gz
+
+Refer to README for instructions on how to use lpfw.
