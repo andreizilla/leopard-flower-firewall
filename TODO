@@ -149,7 +149,7 @@ At long last i found an IDE that does all I ever wanted: KDevelop.
 INOTIFY: a separate thread should monitor exeptionally big executables
       
 09 Sep 2011
-Even though it is possible to set nfmark on a packet when issuing a verdict, there is no way to transfer this mark to conntrack's connection mark. Thus the only way to mark a connection associated with a packet is to take packet's source port and then
+Even though it is possible to set nfmark on a packet when issuing a verdict, there is no way to transfer this mark to conntrack's connection mark. Thus the only way to mark a connection associated with a packet is to take packet's source port and then 
 conntrack -U -p tcp --sport MYPORT -m MYNFMARK
 Then later when a rule is deleted or changed to DENY* we can
 conntrack -D -m MYNFMARK

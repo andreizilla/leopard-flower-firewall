@@ -1,6 +1,7 @@
 #include "sys/ipc.h"
 #include <syslog.h>
 #include <string.h>
+#include <stdlib.h> //for exit
 #include <pthread.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
@@ -111,7 +112,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	   }
 	    
 	   //6th arg here should be pathtofrontend
-        execl("xterm", "xterm", "-display", msg_creds.creds.display,
+        execl("/usr/bin/xterm", "/usr/bin/xterm", "-display", msg_creds.creds.display,
 	      "+hold",
 	      "-e", cli_path->filename[0],"magic_number",  
 	      msg_creds.creds.params[0][0]?msg_creds.creds.params[1]:(char*)0, //check if there are any parms and if yes,process the first one
@@ -350,8 +351,8 @@ void* commandthread(void* ptr){
     //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
 #ifndef DEBUG
     if (!(m_group->gr_mem[0] == NULL)){
-        m_printf (MLOG_INFO, "lpfwuser group contains users. This group should not contain any users. This is a security issue. Exitting\n");
-        return;
+        m_printf (MLOG_INFO, "lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
+        exit(0);
     }
 #endif
     lpfwuser_gid = m_group->gr_gid;

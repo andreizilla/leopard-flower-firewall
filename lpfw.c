@@ -1625,7 +1625,9 @@ void pidFileCheck()
             }
         }
     }
-    else perror ( "stat" );
+    else 
+        m_printf ( MLOG_DEBUG, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+
 
     //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
     if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 ) perror ( "creat PIDFILE" );
