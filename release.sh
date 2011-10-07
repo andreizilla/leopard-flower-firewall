@@ -88,6 +88,8 @@ fi
 
 cd newrepo
 
+echo "#define VERSION \"$1\"" > version.h
+
 if [ $s -eq 1 ]; then
 	LPFWSRC=lpfw_backend_$1_source
 	mkdir $LPFWSRC

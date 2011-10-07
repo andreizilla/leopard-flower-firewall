@@ -25,6 +25,7 @@
 #include "includes.h"
 #include "defines.h"
 #include "argtable/argtable2.h"
+#include "version.h" //for version string during packaging
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle* globalh;
@@ -1655,8 +1656,11 @@ int frontend_mode ( int argc, char *argv[] )
     key_t ipckey;
     int mqd;
     msg_struct_creds msg;
+    //remove memory garbage
+    memset (&msg, 0, sizeof(msg_struct_creds)); 
     msg.type = 1;
 
+    
     if ( ( ipckey = ftok ( TMPFILE, FTOKID_CREDS ) ) == -1 )
     {
         printf ( "ftok: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -1827,7 +1831,7 @@ int main ( int argc, char *argv[] )
         }
         else if ( version->count == 1 )
         {
-            printf ( "Leopard Flower ver. 0.2\n" );
+            printf ( "%s\n", VERSION );
             return 0;
         }
     }/* --leave this for future debugging purposes

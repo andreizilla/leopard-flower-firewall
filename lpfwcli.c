@@ -534,18 +534,20 @@ int zenityCheck() {
 
 }
 
-void                 fe_cleanup_and_quit(){
+void  fe_cleanup_and_quit(){
     endwin();
     frontend_unregister();
     die();
 }
 
 int main(int argc, char *argv[]) {
-    
+  
+#ifndef DEBUG 
 if (argc == 1 || strcmp(argv[1],"magic_number")){
   printf("This program is part of LeopardFlower suite and should not be executed directly by user. \n");
   return 2;
 }
+#endif
   
     if ((logfilefd = fopen(LPFWCLI_LOG, "w+")) == 0)
         printf("Can't open file for logging\n %s\n", strerror(errno));

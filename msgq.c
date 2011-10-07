@@ -112,6 +112,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	   }
 	    
 	   //6th arg here should be pathtofrontend
+	execl("/usr/bin/xterm", "/usr/bin/xterm",(char*)0);
         execl("/usr/bin/xterm", "/usr/bin/xterm", "-display", msg_creds.creds.display,
 	      "+hold",
 	      "-e", cli_path->filename[0],"magic_number",  

@@ -19,6 +19,9 @@ lpfw: $(LPFWSOURCES)
 lpfwcli: lpfwcli.c ipc.c
 	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli
 
+#gcc lpfwcli.c ipc.c $(GCCFLAGS) -static -lncurses -Bdynamic -lpthread -o lpfwcli
+
+
 ipcwrapper: gui/IPC_wrapper.so
 gui/IPC_wrapper.so: ipc_wrapper.c
 	gcc ipc_wrapper.c $(GCCFLAGS) -shared -lpython2.6 -o gui/IPC_wrapper.so
