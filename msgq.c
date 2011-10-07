@@ -72,8 +72,12 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     strcat(procpath, pidstring);
     strcat(procpath, "/exe");
     memset(exepath, 0, PATHSIZE);
+
     //lpfw --cli sleeps only 3 secs, after which procpath isnt available, so no breakpoints before the next line
     readlink(procpath, exepath, PATHSIZE - 1);
+#ifdef DEBUG
+    printf("%s, %s\n",  exepath, ownpath);
+#endif
     if (strcmp(exepath, ownpath)){
         m_printf(LOG_ALERT, "Red alert!!! Some application is trying to impersonate the frontend\n");
         return ;
@@ -102,7 +106,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	
         //check that frontend file exists and launch it
 	struct stat path_stat;
-	if (!strcmp (msg_creds.creds.params[1], "--cli")){
+	if (!strcmp (msg_creds.creds.params[0], "--cli")){
 	   if (stat(cli_path->filename[0], &path_stat) == -1 ){
             m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
@@ -112,32 +116,31 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	   }
 	    
 	   //6th arg here should be pathtofrontend
-	//execl("/usr/bin/xterm", "/usr/bin/xterm",(char*)0);
         execl("/usr/bin/xterm", "/usr/bin/xterm", "-display", msg_creds.creds.display,
 	      "+hold",
 	      "-e", cli_path->filename[0],"magic_number",  
-	      msg_creds.creds.params[0][0]?msg_creds.creds.params[1]:(char*)0, //check if there are any parms and if yes,process the first one
-	      msg_creds.creds.params[2][0]?msg_creds.creds.params[2]:(char*)0, //check if the parm is the last one
-	      msg_creds.creds.params[3][0]?msg_creds.creds.params[3]:(char*)0,
+	      msg_creds.creds.params[1][0]?msg_creds.creds.params[2]:(char*)0, //check if there are any parms and if yes,process the first one
+	      msg_creds.creds.params[3][0]?msg_creds.creds.params[3]:(char*)0, //check if the parm is the last one
 	      msg_creds.creds.params[4][0]?msg_creds.creds.params[4]:(char*)0,
 	      msg_creds.creds.params[5][0]?msg_creds.creds.params[5]:(char*)0,
 	      (char*)0);
 	//if exec returns here it means there was an error
 	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
 	}
-	else if (!strcmp (msg_creds.creds.params[1], "--gui")){
+	else if (!strcmp (msg_creds.creds.params[0], "--gui")){
 	   if (stat(gui_path->filename[0], &path_stat) == -1 ){
             m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
 	    m_printf(MLOG_INFO, "Unable to find %s\n", gui_path->filename[0]); 
 	    }
 	    return;
+
 	   }
 	  execl (gui_path->filename[0], gui_path->filename[0], (char*)0);
 	  //if exec returns here it means there was an error
 	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
 	}
-	else if (!strcmp (msg_creds.creds.params[1], "--guipy")){
+	else if (!strcmp (msg_creds.creds.params[0], "--guipy")){
 	 if (stat(guipy_path->filename[0], &path_stat) == -1 ){
             m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){

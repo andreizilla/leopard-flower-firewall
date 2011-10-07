@@ -1694,18 +1694,20 @@ int frontend_mode ( int argc, char *argv[] )
     }
     strncpy ( msg.creds.display, display, DISPLAYNAME - 1 );
 
-    int cli_args;
-    cli_args = argc-1; //first two parms are path and --cli
+    int cli_args; //number of arguments that need to be passed to frontend
+    cli_args = argc-2; //first two parms are path and --cli/--gui/--guipy
+    strncpy (msg.creds.params[0], argv[1], 16);
+    
     int i =0;
     if ( cli_args > 0 && cli_args < 5 ) //4 parms max - the last parm should be 0
     {
-        msg.creds.params[0][0] = cli_args; //first parm has the total number of parms (itself excluding)
+        msg.creds.params[1][0] = cli_args; //first parm has the total number of parms for lpfwcli (itself excluding)
         for ( i=0; i<cli_args; ++i )
         {
-            strncpy ( msg.creds.params[i+1], argv[1+i], 16 );
+            strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
         }
     }
-    msg.creds.params[i+1][0] = 0;
+    msg.creds.params[i+1][0] = 0; //the last parm should be 0
 
     if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
     {
@@ -1757,11 +1759,20 @@ int main ( int argc, char *argv[] )
     }
 
     //save own path
-    strncpy ( ownpath, argv[0], PATHSIZE - 16 ); //leave some room for a frontend's filename
+   int ownpid;
+   char ownpidstr[16];
+   ownpid = getpid();
+   char exepath[PATHSIZE];
+   strcpy(exepath,"/proc/");
+   sprintf(ownpidstr, "%d", ownpid );
+   strcat(exepath, ownpidstr);
+   strcat(exepath, "/exe");
+   memset(ownpath,0,PATHSIZE);
+   readlink(exepath,ownpath,PATHSIZE-1);   
+      
     int basenamelength;
     basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
     strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
-
 
 
 
