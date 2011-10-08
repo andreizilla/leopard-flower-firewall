@@ -12,7 +12,8 @@
 #define PIDLENGTH 16
 #define PERMSLENGTH 16
 #define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567] - max length 16 chars
-#define NFQUEUE_NUMBER 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUTPUT 11220 //arbitrary number used for iptables rule
+#define NFQNUM_INPUT 11221
 #define MAX_LINE_LENGTH 1024 //max length of a line in configfile/rulesfile
 #define DIGEST_SIZE 64
 #define TTYNAME 16

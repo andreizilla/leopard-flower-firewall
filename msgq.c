@@ -37,7 +37,7 @@ extern void child_close_nfqueue();
 extern int sha512_stream(FILE *stream, void *resblock);
 extern dlist * dlist_copy();
 extern struct arg_file *cli_path, *gui_path, *guipy_path;
-extern pthread_mutex_t nfmark_count_mutex;
+extern pthread_mutex_t nfmark_count_mutex, msgq_mutex;
 extern int nfmark_count;
 
 
@@ -547,6 +547,34 @@ int fe_ask(char *path, char *pid, unsigned long long *stime) {
                 m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             }
             fe_awaiting_reply = TRUE;
+            return SENT_TO_FRONTEND;
+}
+
+//Ask frontend if new incoming connection should be allowed
+int fe_ask_input(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport) {
+    pthread_mutex_lock(&mutex_msgq); 
+    if (fe_awaiting_reply) return FRONTEND_BUSY;
+
+    //first remember what we are sending
+    strcpy(sent_to_fe_struct.path, path);
+    strcpy(sent_to_fe_struct.pid, pid);
+    sent_to_fe_struct.stime = *stime;
+
+    //prepare a msg and send it to frontend
+    strcpy(msg_d2f.item.path, path);
+    strcpy(msg_d2f.item.pid, pid);
+    msg_d2f.item.command = D2FCOMM_ASK_IN;
+    //next fields of struct will be simply re-used. Not nice, but what's wrong with re-cycling?
+    strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.perms));
+    msg_d2f.item.stime = sport;
+    msg_d2f.item.inode = dport;
+	    
+	    
+            if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
+                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            }
+            fe_awaiting_reply = TRUE;
+	    pthread_mutex_unlock(&mutex_msgq);
             return SENT_TO_FRONTEND;
 }
 

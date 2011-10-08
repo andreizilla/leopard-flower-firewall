@@ -71,6 +71,7 @@ enum
 
 enum
 {
+    GOTO_NEXT_STEP,
     ACCEPT,
     DROP,
     PORT_NOT_FOUND,
