@@ -77,7 +77,8 @@ msg_struct msg_d2flist = {1, 0};
 msg_struct_creds msg_creds = {1, 0};
 int ( *m_printf ) ( int loglevel, char *format, ... );
 
-extern int fe_ask ( char*, char*, unsigned long long* );
+extern int fe_ask_out ( char*, char*, unsigned long long* );
+extern int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
 extern int fe_list();
 extern void msgq_init();
 extern int sha512_stream ( FILE *stream, void *resblock );
@@ -90,6 +91,9 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to access nfmark_count from main thread and commandthread
 pthread_mutex_t nfmark_count_mutex = PTHREAD_MUTEX_INITIALIZER;
+//mutex to avoid fe_ask_* to send data simultaneously
+pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, rulesdump_thread, nfqinput_thread;
@@ -1351,52 +1355,32 @@ int port2socket_tcp ( int *portint, int *socketint )
 }
 
 //Handler for TCP packets
-int packet_handle_tcp ( int *srctcp )
+int packet_handle_tcp ( int *srctcp, char *path, char *pid, unsigned long long *stime )
 {
     int retval, socketint;
+    //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
+    if ( (retval = port2socket_tcp ( srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
+    if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
+out:
+    return retval;
+}
 
+//Handler for UDP packets
+int packet_handle_udp ( int *srcudp, char *path, char *pid, unsigned long long *stime )
+{
+   int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_tcp ( srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
     if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
     char path[PATHSIZE];
     char pid[PIDLENGTH];
     unsigned long long stime;
-    if ( ( retval = socket_find_in_proc ( &socketint, path, pid, &stime ) ) != GOTO_NEXT_STEP)  goto out;
-    if ( (retval = path_find_in_dlist ( path, pid, &stime ) ) != GOTO_NEXT_STEP) goto out;
-    if ( !fe_active_flag_get() ){ return FRONTEND_NOT_ACTIVE;}
-    retval = fe_ask ( path, pid, &stime );
-    
+    if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
+    if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
-}
-
-
-
-//Handler for UDP packets
-int packet_handle_udp ( int *srcudp )
-{
-    int retval;
-    int socketint;
-
-    //each function returns 0 when it is OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( retval = port2socket_udp ( srcudp, &socketint ) ) goto out;
-    if ( retval = socket_find_in_dlist ( &socketint ) ) goto out;
-    char path[PATHSIZE];
-    char pid[PIDLENGTH];
-    unsigned long long stime;
-    if ( retval = socket_find_in_proc ( &socketint, path, pid, &stime ) ) goto out;
-    if ( retval = path_find_in_dlist ( path, pid, &stime ) ) goto out;
-
-    if ( !fe_active_flag_get() )
-    {
-        retval = FRONTEND_NOT_ACTIVE;
-        goto out;
-    }
-    if ( retval = fe_ask ( path, pid, &stime ) ) goto out;
-
-out:
-    return retval;
-
 }
 
 int packet_handle_icmp()
@@ -1444,13 +1428,12 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
     }
 #endif
     m_printf ( MLOG_DEBUG, "\n %s INPUT %s\n ", is_strange_daddr?strange_daddr:"-", saddr);
-    u_int16_t sport_netbyteorder;
-    u_int16_t dport_netbyteorder;
+    u_int16_t sport_netbyteorder, dport_netbyteorder;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
         ;
-        // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
+        // ihl field is IP header length in 32-bit words, multiply a word by 4 to get length in bytes
         struct tcphdr *tcp;
         tcp = ( struct tcphdr* ) ( data + ( 4 * ip->ihl ) );
         sport_netbyteorder = tcp->source;
@@ -1458,9 +1441,12 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         int dsttcp = ntohs ( tcp->dest );
        
         m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, ntohs(tcp->source), dsttcp );
-        if ((verdict = packet_handle_tcp ( &dsttcp )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        char path[PATHSIZE], pid[PIDLENGTH];
+        unsigned long long stime;
+        if ((verdict = packet_handle_tcp ( &dsttcp, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
         break;
+        
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
@@ -1470,8 +1456,12 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         int dstudp = ntohs ( udp->dest );
         
         m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, ntohs(udp->source), dstudp );
-        verdict = packet_handle_udp ( &dstudp );
+        char path[PATHSIZE], pid[PIDLENGTH];
+        unsigned long long stime;
+        if ((verdict = packet_handle_tcp ( &dstudp, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
         break;
+        
 //     case IPPROTO_ICMP:
 //         ;
 //         m_printf ( MLOG_TRAFFIC, "INICMP ");
@@ -1529,8 +1519,10 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         int srctcp = ntohs ( tcp->source );
        
         m_printf ( MLOG_TRAFFIC, "TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
-        verdict = packet_handle_tcp ( &srctcp );
-        break;
+        char path[PATHSIZE], pid[PIDLENGTH];
+        unsigned long long stime;
+        if ((verdict = packet_handle_tcp ( &srctcp, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;        break;
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
