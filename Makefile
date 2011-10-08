@@ -14,7 +14,7 @@ LPFWSOURCES 	=	lpfw.c \
 all: lpfw lpfwcli
 
 lpfw: $(LPFWSOURCES)
-	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lpthread -o lpfw
+	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lnetfilter_conntrack -lpthread -o lpfw
 
 lpfwcli: lpfwcli.c ipc.c
 	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli

@@ -26,6 +26,11 @@
 #include "defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
+#include <libnetfilter_conntrack/libnetfilter_conntrack.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle* globalh;
@@ -64,7 +69,7 @@ dlist *first, *copy_first;
 
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 msg_struct msg_d2f = {1, 0};
-msg_struct msg_f2d = {1, 0};
+msg_struct msg_f2d = {1, 0};   
 msg_struct msg_d2fdel = {1, 0};
 msg_struct msg_d2flist = {1, 0};
 msg_struct_creds msg_creds = {1, 0};
@@ -77,11 +82,13 @@ extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 
 //Forward declarations to make code parser happy
-void dlist_add ( char*, char*, char*, char, char*, unsigned long long, off_t, unsigned char );
-
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 
 //mutex to lock threads
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
+//mutex to access nfmark_count from main thread and commandthread
+pthread_mutex_t nfmark_count_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, rulesdump_thread;
 
@@ -94,19 +101,49 @@ int little_endian = 1;
 //mutex to lock fe_active_flag
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-//netfilter mark number for the packet (to be added to NF_MARK_BASE)
+//netfilter mark number for the packet (to be added to NFMARK_BASE)
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
-int nfmark_verdict;
+int nfmark_to_set, nfmark_to_delete;
+int family = AF_INET; //used by conntrack
+
+struct nf_conntrack *ct;
+struct nfct_handle *deletemark_handle;
+struct nfct_handle *setmark_handle;
+
+int deletemark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){ 
+  printf ("In deletemark\n");
+  if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
+     if (nfct_query(deletemark_handle, NFCT_Q_DESTROY, mct) == -1){
+      perror("query-DESTROY");}
+      printf("deleted an entry\n");
+      return NFCT_CB_CONTINUE;
+  }
+  return NFCT_CB_CONTINUE;
+}
+
+int setmark (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
+  printf ("In setmark\n");
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set);
+  nfct_query(setmark_handle, NFCT_Q_UPDATE, mct);
+  return NFCT_CB_CONTINUE;
+}
+
+void initialize_conntrack(){
+   if ((ct = nfct_new()) == NULL){perror("new");}
+   if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
+   if ((setmark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
+   if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, deletemark, NULL) == -1)) {perror("cb_reg");}
+   if ((nfct_callback_register(setmark_handle, NFCT_T_ALL, setmark, NULL) == -1)) {perror("cb_reg");}
+   return;
+}
 
 void child_close_nfqueue()
 {
-    if ( nfq_close ( globalh ) == -1 )
-    {
-        m_printf ( MLOG_INFO,"error in nfq_close\n" );
-        return;
-    }
+    nfq_close( globalh )?
+    m_printf ( MLOG_INFO,"error in nfq_close\n" ):
     m_printf ( MLOG_DEBUG, "Done closing nfqueue\n" );
+    return;
 }
 
 void fe_active_flag_set ( int boolean )
@@ -317,7 +354,7 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, unsigned char first_instance )
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance )
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
@@ -345,6 +382,7 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
     temp->stime = stime;
     memcpy ( temp->sha, sha, DIGEST_SIZE );
     temp->exesize = size;
+    temp->nfmark = nfmark;
     temp->first_instance = first_instance; //obsolete member,can be purged
     pthread_mutex_unlock ( &dlist_mutex );
 }
@@ -362,7 +400,10 @@ void dlist_del ( char *path, char *pid )
             temp->prev->next = temp->next;
             if ( temp->next != NULL )
                 temp->next->prev = temp->prev;
+            nfmark_to_delete = temp->nfmark;
             free ( temp );
+            //remove tracking for this app's active connection
+            if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
             pthread_mutex_unlock ( &dlist_mutex );
             return;
         }
@@ -544,7 +585,7 @@ void rules_load()
             sscanf ( hexchar, "%x", ( unsigned int * ) &digest[i] );
         }
 
-        dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, TRUE );
+        dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, 0, TRUE );
     }
 
     if ( fclose ( stream ) == EOF )
@@ -637,7 +678,6 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
         {
             if ( temp->current_pid == '0' ) //path is in dlist and has not a current PID. It was added to dlist from rulesfile. Exesize and shasum this app just once
             {
-
                 struct stat exestat;
                 if ( stat ( temp->path, &exestat ) == -1 )
                 {
@@ -672,6 +712,12 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                 int retval;
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
                 {
+                    pthread_mutex_lock ( &nfmark_count_mutex );
+                    temp->nfmark = NFMARK_BASE + nfmark_count;
+                    nfmark_to_set = NFMARK_BASE + nfmark_count;
+                    nfmark_count++;
+                    pthread_mutex_unlock ( &nfmark_count_mutex );
+
                     retval = PATH_FOUND_IN_DLIST_ALLOW;
 
                 }
@@ -734,6 +780,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                 strcpy ( tempperms, temp->perms );
                 strcpy ( temppid, temp->pid );
                 memcpy ( tempsha, temp->sha, DIGEST_SIZE );
+                int tempnfmark = temp->nfmark;
 
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
 
@@ -745,6 +792,11 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                         int retval;
                         if ( !strcmp ( temp->perms, ALLOW_ALWAYS ) || !strcmp ( temp->perms, ALLOW_ONCE ) )
                         {
+                            pthread_mutex_lock ( &nfmark_count_mutex );
+                            temp->nfmark = NFMARK_BASE + nfmark_count;
+                            nfmark_to_set = NFMARK_BASE + nfmark_count;
+                            nfmark_count++;
+                            pthread_mutex_unlock ( &nfmark_count_mutex );
                             retval = FORKED_CHILD_ALLOW;
 
                         }
@@ -764,7 +816,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                         unsigned long long stime;
                         stime = starttimeGet ( atoi ( pid ) );
 
-                        dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, FALSE );
+                        dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, nfmark_to_set, FALSE );
                         fe_list();
                         return retval;
                     }
@@ -832,14 +884,16 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                         if ( !strcmp ( temp2->perms, ALLOW_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, FALSE );
+                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark ,FALSE );
                             fe_list();
+                            
+                            nfmark_to_set = tempnfmark;
                             return NEW_INSTANCE_ALLOW;
                         }
                         else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, FALSE );
+                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark, FALSE );
                             fe_list();
                             return NEW_INSTANCE_DENY;
                         }
@@ -928,10 +982,9 @@ int socket_find_in_dlist ( int *mysocket )
                     return STIME_DONT_MATCH;
                 }
 
-
-
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
                 {
+                    nfmark_to_set = temp->nfmark;
                     pthread_mutex_unlock ( &dlist_mutex );
                     return INODE_FOUND_IN_DLIST_ALLOW;
                 }
@@ -1013,7 +1066,6 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
                         readlink ( path, exepathbuf, PATHSIZE - 1 );
 
 
-                        m_printf ( MLOG_DEBUG, "%s %s ", exepathbuf, proc_dirent->d_name );
                         closedir ( fd_DIR );
                         closedir ( proc_DIR );
                         strcpy ( m_path, exepathbuf );
@@ -1399,6 +1451,8 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     daddr[2] = ( ip->daddr >> 16 ) & 0xFF;
     daddr[3] = ( ip->daddr >> 24 ) & 0xFF;
     int verdict;
+    u_int16_t sport_netbyteorder;
+    u_int16_t dport_netbyteorder;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
@@ -1406,18 +1460,20 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
         struct tcphdr *tcp;
         tcp = ( struct tcphdr* ) ( data + ( 4 * ip->ihl ) );
+        sport_netbyteorder = tcp->source;
+        dport_netbyteorder = tcp->dest;
         int srctcp = ntohs ( tcp->source );
-        int dsttcp = ntohs ( tcp->dest );
-        m_printf ( MLOG_TRAFFIC, "TCP src %d dst %d.%d.%d.%d:%d ", srctcp, daddr[0], daddr[1], daddr[2], daddr[3], dsttcp );
+        m_printf ( MLOG_TRAFFIC, "TCP src %d dst %d.%d.%d.%d:%d ", srctcp, daddr[0], daddr[1], daddr[2], daddr[3], ntohs ( tcp->dest ) );
         verdict = packet_handle_tcp ( &srctcp );
         break;
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
         udp = ( struct udphdr * ) ( data + ( 4 * ip->ihl ) );
+        sport_netbyteorder = udp->source;
+        dport_netbyteorder = udp->dest;
         int srcudp = ntohs ( udp->source );
-        int dstudp = ntohs ( udp->dest );
-        m_printf ( MLOG_TRAFFIC, "UDP src %d dst %d.%d.%d.%d:%d ", srcudp, daddr[0], daddr[1], daddr[2], daddr[3], dstudp );
+        m_printf ( MLOG_TRAFFIC, "UDP src %d dst %d.%d.%d.%d:%d ", srcudp , daddr[0], daddr[1], daddr[2], daddr[3], ntohs ( udp->dest ));
         verdict = packet_handle_udp ( &srcudp );
         break;
     case IPPROTO_ICMP:
@@ -1434,108 +1490,67 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     switch ( verdict )
     {
     case ACCEPT:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
-        return 0;
-
     case INODE_FOUND_IN_DLIST_ALLOW:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
-        return 0;
-
     case PATH_FOUND_IN_DLIST_ALLOW:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
-        return 0;
-
     case NEW_INSTANCE_ALLOW:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
-        return 0;
-
     case FORKED_CHILD_ALLOW:
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
+        
+     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_DST, ip->daddr);
+     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_SRC, ip->saddr);
+     nfct_set_attr_u8 (ct, ATTR_L4PROTO, ip->protocol);
+     nfct_set_attr_u8 (ct, ATTR_L3PROTO, AF_INET);
+     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbyteorder);
+     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbyteorder) ;
+     
+     if (nfct_query(setmark_handle, NFCT_Q_GET, ct) == -1){perror("query-GET");}
+
+        
+        
+        
         return 0;
 
     case DROP:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "drop\n" );
-        return 0;
-
+        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
     case PORT_NOT_FOUND:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc. Very unusual, please report.\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc. Very unusual, please report.\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
     case INODE_NOT_FOUND_IN_PROC:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" );
-        return 0;
-
+        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "deny\n" );
-        return 0;
-
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "deny\n" );
-        return 0;
-
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case NEW_INSTANCE_DENY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "deny\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case FRONTEND_NOT_ACTIVE:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
     case FRONTEND_BUSY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
     case UNSUPPORTED_PROTOCOL:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
     case ICMP_MORE_THAN_ONE_ENTRY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
     case ICMP_NO_ENTRY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
     case SHA_DONT_MATCH:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
     case STIME_DONT_MATCH:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
     case EXESIZE_DONT_MATCH:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
     case INODE_HAS_CHANGED:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
     case EXE_HAS_BEEN_CHANGED:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" );
-        return 0;
-
+        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
     case FORKED_CHILD_DENY:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "deny\n" );
-        return 0;
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
+    DROPverdict:
+    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+        return 0;
 }
 
 void loggingInit()
@@ -1822,7 +1837,11 @@ int main ( int argc, char *argv[] )
     
     * ( log_info->ival ) = 1;
     * ( log_traffic->ival ) = 1;
+#ifdef DEBUG
+        * ( log_debug->ival ) = 1;
+#else
     * ( log_debug->ival ) = 0;
+#endif
 
     if ( arg_nullcheck ( argtable ) != 0 )
     {
@@ -1872,6 +1891,7 @@ int main ( int argc, char *argv[] )
     loggingInit();
     pidFileCheck();
     msgq_init();
+    initialize_conntrack();
    
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );

@@ -17,7 +17,7 @@
 #define DIGEST_SIZE 64
 #define TTYNAME 16
 #define DISPLAYNAME 32
-#define NF_MARK_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
+#define NFMARK_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
 
 #define CONFIGFILE "/etc/lpfw.conf" //main config file
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
