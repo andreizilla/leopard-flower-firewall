@@ -16,7 +16,9 @@
 #include "argtable/argtable2.h" //for some externs
 
 //Forward declarations needed for kdevelop to do code parsing correctly
-int fe_ask(char*, char*, unsigned long long*);
+int fe_ask_out(char*, char*, unsigned long long*);
+int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
+
 int fe_list();
 void msgq_init();
 
@@ -509,12 +511,12 @@ creds_bits = OTHERS_WRITABLE_ONLY;
 int notify_frontend(int command, char *path, char *pid, unsigned long long stime) {
 
     switch (command) {
-        case D2FCOMM_ASK:
+        case D2FCOMM_ASK_OUT:
             //prepare a msg and send it to frontend
             strcpy(msg_d2f.item.path, path);
             strcpy(msg_d2f.item.pid, pid);
             msg_d2f.item.stime = stime;
-            msg_d2f.item.command = D2FCOMM_ASK;
+            msg_d2f.item.command = D2FCOMM_ASK_OUT;
             //pthread_mutex_lock(&mutex_msgq);
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
                 m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -530,7 +532,7 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
 }
 
 //Ask frontend
-int fe_ask(char *path, char *pid, unsigned long long *stime) {
+int fe_ask_out(char *path, char *pid, unsigned long long *stime) {
     if (fe_awaiting_reply) return FRONTEND_BUSY;
 
     //first remember what we are sending
@@ -541,7 +543,7 @@ int fe_ask(char *path, char *pid, unsigned long long *stime) {
             //prepare a msg and send it to frontend
             strcpy(msg_d2f.item.path, path);
             strcpy(msg_d2f.item.pid, pid);
-            msg_d2f.item.command = D2FCOMM_ASK;
+            msg_d2f.item.command = D2FCOMM_ASK_OUT;
             //pthread_mutex_lock(&mutex_msgq);
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
                 m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -551,8 +553,9 @@ int fe_ask(char *path, char *pid, unsigned long long *stime) {
 }
 
 //Ask frontend if new incoming connection should be allowed
-int fe_ask_input(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport) {
-    pthread_mutex_lock(&mutex_msgq); 
+int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport) {
+              return SENT_TO_FRONTEND;
+    pthread_mutex_lock(&msgq_mutex); 
     if (fe_awaiting_reply) return FRONTEND_BUSY;
 
     //first remember what we are sending
@@ -565,7 +568,7 @@ int fe_ask_input(char *path, char *pid, unsigned long long *stime, char *ipaddr,
     strcpy(msg_d2f.item.pid, pid);
     msg_d2f.item.command = D2FCOMM_ASK_IN;
     //next fields of struct will be simply re-used. Not nice, but what's wrong with re-cycling?
-    strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.perms));
+    strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.item.perms));
     msg_d2f.item.stime = sport;
     msg_d2f.item.inode = dport;
 	    
@@ -574,7 +577,7 @@ int fe_ask_input(char *path, char *pid, unsigned long long *stime, char *ipaddr,
                 m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             }
             fe_awaiting_reply = TRUE;
-	    pthread_mutex_unlock(&mutex_msgq);
+	    pthread_mutex_unlock(&msgq_mutex);
             return SENT_TO_FRONTEND;
 }
 

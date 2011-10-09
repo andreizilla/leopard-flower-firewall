@@ -43,7 +43,7 @@ void* listenthread(void * ptr) {
             m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
         switch (msg_d2f.item.command) {
-            case D2FCOMM_ASK:
+            case D2FCOMM_ASK_OUT:
                 add(msg_d2f);
                 break;
 

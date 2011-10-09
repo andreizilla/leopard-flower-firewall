@@ -1248,6 +1248,9 @@ int port2socket_udp ( int *portint, int *socketint )
 //find in procfs which socket corresponds to source port
 int port2socket_tcp ( int *portint, int *socketint )
 {
+#ifdef DEBUG
+printf("searching for port %d\n", *portint);
+#endif
     //convert portint to a hex string of 4 chars with leading zeroes if necessary
     char porthex[5];
     sprintf ( porthex, "%x", *portint );
@@ -1355,11 +1358,12 @@ int port2socket_tcp ( int *portint, int *socketint )
 }
 
 //Handler for TCP packets
-int packet_handle_tcp ( int *srctcp, char *path, char *pid, unsigned long long *stime )
+int packet_handle_tcp ( int srctcp, char *path, char *pid, unsigned long long *stime )
 {
+    printf("in pac_han_tcp %d", srctcp);
     int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
     if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
     if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
@@ -1368,15 +1372,12 @@ out:
 }
 
 //Handler for UDP packets
-int packet_handle_udp ( int *srcudp, char *path, char *pid, unsigned long long *stime )
+int packet_handle_udp ( int srcudp, char *path, char *pid, unsigned long long *stime )
 {
    int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = port2socket_udp ( &srcudp, &socketint )) != GOTO_NEXT_STEP ) goto out;
     if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
-    char path[PATHSIZE];
-    char pid[PIDLENGTH];
-    unsigned long long stime;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
     if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
@@ -1401,7 +1402,7 @@ int packet_handle_icmp()
         retval = FRONTEND_NOT_ACTIVE;
         goto out;
     }
-    if ( retval = fe_ask ( path, pid, &stime ) ) goto out;
+    if ( retval = fe_ask_out ( path, pid, &stime ) ) goto out;
 
 out:
     return retval;
@@ -1409,57 +1410,61 @@ out:
 
 int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
     static int is_strange_daddr = 0;
-    static char strange_daddr[INET_ADDRSTRLEN]
-    char *data;
+    static char strange_daddr[INET_ADDRSTRLEN];
+    struct iphdr *ip;
     int id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
     if ( ph ) id = ntohl ( ph->packet_id );
-    nfq_get_payload ( ( struct nfq_data * ) nfad, &data );
-    struct iphdr *ip = ( struct iphdr* ) data;
+    nfq_get_payload ( ( struct nfq_data * ) nfad, &ip );
+    
+    printf ("%d %d \n", ip->version, ip->ihl);
+    
     char daddr[INET_ADDRSTRLEN], saddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
 
 #ifdef DEBUG
     //works only on my machine :))
-    if (strcmp(daddr, "192.168.0.2"){
+    if (strcmp(daddr, "192.168.0.2")){
         is_strange_daddr = 1;
         strcpy(strange_daddr, daddr);
     }
 #endif
-    m_printf ( MLOG_DEBUG, "\n %s INPUT %s\n ", is_strange_daddr?strange_daddr:"-", saddr);
-    u_int16_t sport_netbyteorder, dport_netbyteorder;
+    m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
+    int verdict;
+    u_int16_t sport_netbyteorder, dport_netbyteorder, sport_hostbyteorder, dport_hostbyteorder;
+    char path[PATHSIZE], pid[PIDLENGTH];
+    unsigned long long stime;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
         ;
         // ihl field is IP header length in 32-bit words, multiply a word by 4 to get length in bytes
         struct tcphdr *tcp;
-        tcp = ( struct tcphdr* ) ( data + ( 4 * ip->ihl ) );
+        tcp = ( struct tcphdr* ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = tcp->source;
         dport_netbyteorder = tcp->dest;
-        int dsttcp = ntohs ( tcp->dest );
+        sport_hostbyteorder = ntohs ( tcp->source );
+        dport_hostbyteorder = ntohs ( tcp->dest ); 
+        int ddport = htons(tcp->dest);
        
-        m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, ntohs(tcp->source), dsttcp );
-        char path[PATHSIZE], pid[PIDLENGTH];
-        unsigned long long stime;
-        if ((verdict = packet_handle_tcp ( &dsttcp, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, sport_hostbyteorder, dport_hostbyteorder );
+        if ((verdict = packet_handle_tcp ( dport_hostbyteorder, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbyteorder, dport_hostbyteorder ) : FRONTEND_NOT_ACTIVE;
         break;
         
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
-        udp = ( struct udphdr * ) ( data + ( 4 * ip->ihl ) );
+        udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = udp->source;
         dport_netbyteorder = udp->dest;
-        int dstudp = ntohs ( udp->dest );
+        sport_hostbyteorder = ntohs ( udp->source );
+        dport_hostbyteorder = ntohs ( udp->dest ); 
         
-        m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, ntohs(udp->source), dstudp );
-        char path[PATHSIZE], pid[PIDLENGTH];
-        unsigned long long stime;
-        if ((verdict = packet_handle_tcp ( &dstudp, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, sport_hostbyteorder, dport_hostbyteorder );
+        if ((verdict = packet_handle_udp ( dport_hostbyteorder, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime,saddr,sport_hostbyteorder,dport_hostbyteorder) : FRONTEND_NOT_ACTIVE;
         break;
         
 //     case IPPROTO_ICMP:
@@ -1472,15 +1477,68 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
         verdict = UNSUPPORTED_PROTOCOL;
     }
+    
+ switch ( verdict )
+    {
+    case ACCEPT:
+    case INODE_FOUND_IN_DLIST_ALLOW:
+    case PATH_FOUND_IN_DLIST_ALLOW:
+    case NEW_INSTANCE_ALLOW:
+    case FORKED_CHILD_ALLOW:
+        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
+        m_printf ( MLOG_TRAFFIC, "allow\n" );
+        
+     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_DST, ip->daddr);
+     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_SRC, ip->saddr);
+     nfct_set_attr_u8 (ct, ATTR_L4PROTO, ip->protocol);
+     nfct_set_attr_u8 (ct, ATTR_L3PROTO, AF_INET);
+     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbyteorder);
+     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbyteorder) ;
+     
+     if (nfct_query(setmark_handle, NFCT_Q_GET, ct) == -1){perror("query-GET");}  
+        return 0;
 
-    if PORT_NOT_FOUND: 
-        //alert that remote tried to probe a port for which there is no no socket
-    
-    
-    
-    
-    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-    return 0;
+    case DROP:
+        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
+    case PORT_NOT_FOUND:
+        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
+    case SENT_TO_FRONTEND:
+        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
+    case INODE_NOT_FOUND_IN_PROC:
+        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" ); goto DROPverdict;
+    case INODE_FOUND_IN_DLIST_DENY:
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case PATH_FOUND_IN_DLIST_DENY:
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case NEW_INSTANCE_DENY:
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case FRONTEND_NOT_ACTIVE:
+        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
+    case FRONTEND_BUSY:
+        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
+    case UNSUPPORTED_PROTOCOL:
+        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
+    case ICMP_MORE_THAN_ONE_ENTRY:
+        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
+    case ICMP_NO_ENTRY:
+        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
+    case SHA_DONT_MATCH:
+        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
+    case STIME_DONT_MATCH:
+        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
+    case EXESIZE_DONT_MATCH:
+        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
+    case INODE_HAS_CHANGED:
+        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
+    case EXE_HAS_BEEN_CHANGED:
+        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
+    case FORKED_CHILD_DENY:
+        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    }
+    DROPverdict:
+    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+        return 0;
+
 }
 
 
@@ -1492,46 +1550,49 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     gettimeofday ( &time_struct, NULL );
     m_printf ( MLOG_DEBUG, "%s.%d\n", ctime ( &time_struct.tv_sec ), ( int ) time_struct.tv_usec );
 #endif
-    char *data;
-    int id;
+    struct iphdr *ip;
+    u_int32_t id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
-    if ( ph ) id = ntohl ( ph->packet_id );
-    nfq_get_payload ( ( struct nfq_data * ) nfad, &data );
-    //struct iphdr takes care of endianness itself
-    struct iphdr *ip = ( struct iphdr* ) data;
+    if ( !ph ) {printf ("ph == NULL, should ever happen, please report"); return 0;}
+    id = ntohl ( ph->packet_id );
+    nfq_get_payload ( ( struct nfq_data * ) nfad, &ip );
 #ifdef DEBUG
-    m_printf ( MLOG_TRAFFIC, "%d ", ip->version );
+    m_printf ( MLOG_TRAFFIC, "%d %d ",ip->version, ip->ihl);
 #endif
     char daddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     int verdict;
-    u_int16_t sport_netbyteorder;
-    u_int16_t dport_netbyteorder;
+    u_int16_t sport_netbyteorder, dport_netbyteorder;
+      char path[PATHSIZE], pid[PIDLENGTH];
+        unsigned long long stime;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
         ;
         // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
         struct tcphdr *tcp;
-        tcp = ( struct tcphdr* ) ( data + ( 4 * ip->ihl ) );
+                
+        tcp = ( struct tcphdr* ) ((char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = tcp->source;
         dport_netbyteorder = tcp->dest;
         int srctcp = ntohs ( tcp->source );
        
         m_printf ( MLOG_TRAFFIC, "TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
-        char path[PATHSIZE], pid[PIDLENGTH];
-        unsigned long long stime;
-        if ((verdict = packet_handle_tcp ( &srctcp, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime) : FRONTEND_NOT_ACTIVE;        break;
+        
+        if ((verdict = packet_handle_tcp ( srctcp, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;  
+        break;
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
-        udp = ( struct udphdr * ) ( data + ( 4 * ip->ihl ) );
+        udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = udp->source;
         dport_netbyteorder = udp->dest;
         int srcudp = ntohs ( udp->source );
-        m_printf ( MLOG_TRAFFIC, "UDP src %d dst %d.%d.%d.%d:%d ", srcudp , daddr[0], daddr[1], daddr[2], daddr[3], ntohs ( udp->dest ));
-        verdict = packet_handle_udp ( &srcudp );
+        m_printf ( MLOG_TRAFFIC, "UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
+        
+        if ((verdict = packet_handle_udp ( srcudp, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;  
         break;
     case IPPROTO_ICMP:
         ;
@@ -1567,7 +1628,7 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     case DROP:
         m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
     case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc. Very unusual, please report.\n" ); goto DROPverdict;
+        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
     case INODE_NOT_FOUND_IN_PROC:
