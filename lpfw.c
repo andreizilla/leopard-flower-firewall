@@ -1706,7 +1706,7 @@ int frontend_mode ( int argc, char *argv[] )
             strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
         }
     }
-    msg.creds.params[i+1][0] = 0; //the last parm should be 0
+    msg.creds.params[i+2][0] = 0; //the last parm should be 0
 
     if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
     {
