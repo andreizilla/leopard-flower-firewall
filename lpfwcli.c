@@ -195,12 +195,42 @@ void * threadXmessage(void *ptr) {
     process_verdict(retval);
 }
 
-void add(msg_struct add_struct) {
+void add_out(msg_struct add_struct) {
     if (is_being_run) return;
     is_being_run = 1;
     global_struct = add_struct;
 
     waddstr(uw, add_struct.item.path);
+    wrefresh(uw);
+    if (use_zenity) {
+        pthread_t zenity_thread;
+        pthread_create(&zenity_thread, NULL, threadZenity, NULL);
+    }
+    if (use_xmessage) {
+        pthread_t xmessage_thread;
+        pthread_create(&xmessage_thread, NULL, threadXmessage, NULL);
+    }
+}
+
+
+void add_in(msg_struct add_struct) {
+    if (is_being_run) return;
+    is_being_run = 1;
+    global_struct = add_struct;
+
+    waddstr(uw, "Remote: ");
+    //the following fields are re-used:
+    //perms contain remote's IP addr
+    waddstr(uw, add_struct.item.perms);
+    waddstr(uw, ":");
+    //stime contains remote's port
+    waddstr(uw, add_struct.item.stime);
+    waddstr(uw, "is connecting to local port ");
+    //inode contains local port
+    waddstr(uw, add_struct.item.inode);
+    waddstr(uw, " owned by ");
+    waddstr(uw, add_struct.item.path);
+
     wrefresh(uw);
     if (use_zenity) {
         pthread_t zenity_thread;

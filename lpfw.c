@@ -1432,7 +1432,7 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
 #endif
     m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
     int verdict;
-    u_int16_t sport_netbyteorder, dport_netbyteorder, sport_hostbyteorder, dport_hostbyteorder;
+    u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
     char path[PATHSIZE], pid[PIDLENGTH];
     unsigned long long stime;
     switch ( ip->protocol )
@@ -1442,29 +1442,29 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         // ihl field is IP header length in 32-bit words, multiply a word by 4 to get length in bytes
         struct tcphdr *tcp;
         tcp = ( struct tcphdr* ) ( (char*)ip + ( 4 * ip->ihl ) );
-        sport_netbyteorder = tcp->source;
-        dport_netbyteorder = tcp->dest;
-        sport_hostbyteorder = ntohs ( tcp->source );
-        dport_hostbyteorder = ntohs ( tcp->dest ); 
+        sport_netbo = tcp->source;
+        dport_netbo = tcp->dest;
+        sport_hostbo = ntohs ( tcp->source );
+        dport_hostbo = ntohs ( tcp->dest );
         int ddport = htons(tcp->dest);
        
-        m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, sport_hostbyteorder, dport_hostbyteorder );
-        if ((verdict = packet_handle_tcp ( dport_hostbyteorder, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbyteorder, dport_hostbyteorder ) : FRONTEND_NOT_ACTIVE;
+        m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
+        if ((verdict = packet_handle_tcp ( dport_hostbo, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_ACTIVE;
         break;
         
     case IPPROTO_UDP:
         ;
         struct udphdr *udp;
         udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
-        sport_netbyteorder = udp->source;
-        dport_netbyteorder = udp->dest;
-        sport_hostbyteorder = ntohs ( udp->source );
-        dport_hostbyteorder = ntohs ( udp->dest ); 
+        sport_netbo = udp->source;
+        dport_netbo = udp->dest;
+        sport_hostbo = ntohs ( udp->source );
+        dport_hostbo = ntohs ( udp->dest );
         
-        m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, sport_hostbyteorder, dport_hostbyteorder );
-        if ((verdict = packet_handle_udp ( dport_hostbyteorder, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime,saddr,sport_hostbyteorder,dport_hostbyteorder) : FRONTEND_NOT_ACTIVE;
+        m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
+        if ((verdict = packet_handle_udp ( dport_hostbo, path, pid, &stime )) == GOTO_NEXT_STEP)
+            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime,saddr,sport_hostbo,dport_hostbo) : FRONTEND_NOT_ACTIVE;
         break;
         
 //     case IPPROTO_ICMP:
@@ -1492,8 +1492,8 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
      nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_SRC, ip->saddr);
      nfct_set_attr_u8 (ct, ATTR_L4PROTO, ip->protocol);
      nfct_set_attr_u8 (ct, ATTR_L3PROTO, AF_INET);
-     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbyteorder);
-     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbyteorder) ;
+     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbo);
+     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbo) ;
      
      if (nfct_query(setmark_handle, NFCT_Q_GET, ct) == -1){perror("query-GET");}  
         return 0;
@@ -1836,7 +1836,7 @@ int frontend_mode ( int argc, char *argv[] )
             strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
         }
     }
-    msg.creds.params[i+1][0] = 0; //the last parm should be 0
+    msg.creds.params[i+2][0] = 0; //the last parm should be 0
 
     if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
     {

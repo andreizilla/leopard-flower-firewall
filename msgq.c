@@ -58,7 +58,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     dlist sent_to_fe_struct;
 
  // register frontend when "lpfw --cli" is invoked.The thread is restarted by invoking phread_create towards the enf of it
- void* fe_reg_thread(void* ptr){
+ void*  fe_reg_thread(void* ptr){
     ptr = 0;
     //TODO: Paranoid anti spoofing measures: only allow one msg_struct_creds packet on the queue first get the current struct
     
@@ -104,7 +104,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     //probably some variables become unavailable in child
     pid_t child_pid;
     child_pid =  fork();
-    if (child_pid == 0){ //child process
+      if (child_pid == 0){ //child process
         child_close_nfqueue();
         setgid(lpfwuser_gid);
         setuid(msg_creds.creds.uid);
@@ -554,7 +554,6 @@ int fe_ask_out(char *path, char *pid, unsigned long long *stime) {
 
 //Ask frontend if new incoming connection should be allowed
 int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport) {
-              return SENT_TO_FRONTEND;
     pthread_mutex_lock(&msgq_mutex); 
     if (fe_awaiting_reply) return FRONTEND_BUSY;
 
