@@ -1028,7 +1028,6 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
     }
     while ( proc_dirent );
     closedir ( proc_DIR );
-    m_printf ( MLOG_TRAFFIC, "path not found in procfs " );
     return INODE_NOT_FOUND_IN_PROC;
 }
 
@@ -1473,7 +1472,7 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         return 0;
     case INODE_NOT_FOUND_IN_PROC:
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" );
+        m_printf ( MLOG_TRAFFIC, "socket associates with packet was not found in /proc. Very unusual, please report\n" );
         return 0;
 
     case INODE_FOUND_IN_DLIST_DENY:
