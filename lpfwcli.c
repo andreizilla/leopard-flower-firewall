@@ -218,17 +218,19 @@ void add_in(msg_struct add_struct) {
     is_being_run = 1;
     global_struct = add_struct;
 
-    waddstr(uw, "Remote: ");
     //the following fields are re-used:
     //perms contain remote's IP addr
     waddstr(uw, add_struct.item.perms);
     waddstr(uw, ":");
     //stime contains remote's port
-    waddstr(uw, add_struct.item.stime);
-    waddstr(uw, "is connecting to local port ");
+    char string[16];
+    sprintf ( string, "%d", add_struct.item.stime );
+    waddstr(uw, string);
+    waddstr(uw, " => port ");
     //inode contains local port
-    waddstr(uw, add_struct.item.inode);
-    waddstr(uw, " owned by ");
+    sprintf ( string, "%d", add_struct.item.inode );
+    waddstr(uw, string);
+    waddstr(uw, " ");
     waddstr(uw, add_struct.item.path);
 
     wrefresh(uw);
@@ -640,8 +642,10 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
         ch = wgetch(tw);
         switch (ch) {
             case 'q':
+            case 'Q':
                 fe_cleanup_and_quit();
             case 'a':
+            case 'A':
                 //ignore if there is nothing pending
                 if (!is_being_run) continue;
                 //ignore if zenity's in charge
@@ -675,6 +679,7 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 continue;
 
             case 'd':
+            case 'D':
                 if (view_active > 1) --view_active;
                 delindex(active, 1);
                 //delete the entry from the screen by refreshing the screnn
@@ -686,6 +691,7 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 //wrefresh(lw);
                 continue;
             case 's':
+            case 'S':
                 msgq_write();
                 wclear(sw);
                 wprintw(sw, "rules saved to file");
@@ -766,6 +772,13 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 mvwchgat(lw, view_active - 1, 0, -1, COLOR_PAIR(3), COLOR_PAIR(3), NULL);
                 wrefresh(lw);
                 continue;
+            default:
+            //see if there was a pending request
+               if (!is_being_run) continue;
+               //tell backend that request was ignored
+               process_verdict(0);
+
+
         }
     }
     return 0;

@@ -31,3 +31,6 @@ ipcwrapper_debug: ipcwrapper
 	
 debug: GCCFLAGS += -g -DDEBUG
 debug: lpfw lpfwcli
+
+newct:
+	gcc $(LPFWSOURCES) -g -DDEBUG -L/home/wwwwww/Desktop/src/libnetfilter_conntrack-0.9.1/src/.libs -lnetfilter_queue -lnewnetfilter_conntrack -lpthread -o lpfw

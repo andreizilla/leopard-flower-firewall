@@ -36,35 +36,24 @@
 struct nfq_handle* globalh;
 struct nfq_handle* globalh_input;
 
-
-//command line arguments available globally
+//command line arguments avail
+char ownpath[PATHSIZE]; //full path of lpfw executableable globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
 struct arg_file *rules_file, *pid_file, *log_file, *cli_path, *gui_path, *guipy_path;
 struct arg_int *log_info, *log_traffic, *log_debug;
 
-// holds path to /proc/<pid>/fd/<number_of_inode_opened>
-char path[32];
-char fdpath[32];
 char ownpath[PATHSIZE]; //full path of lpfw executable
 char owndir[PATHSIZE]; //full path to the dir lpfw executable is in (with trailing /)
-
-//vars for scanning through /proc dir
-struct dirent *proc_dirent, *fd_dirent;
-DIR *proc_DIR, *fd_DIR;
-
-// buffers to hold readlink()ed values of /proc/<pid>/exe and /proc/<pid>/fd/<inode>
-char exepathbuf[PATHSIZE];
-char socketbuf[SOCKETBUFSIZE];
 
 //file descriptors for /proc/net/tcd & udp
 int procnettcpfd, procnetudpfd, procnetrawfd;
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
-//cryptic stuff that is required by netfilter_queue
-struct nfq_q_handle *qh;
-struct nfgenmsg *nfmsg;
-struct nfq_data *nfad;
-void *mdata;
+////cryptic stuff that is required by netfilter_queue
+//struct nfq_q_handle *qh;
+//struct nfgenmsg *nfmsg;
+//struct nfq_data *nfad;
+//void *mdata;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
 dlist *first, *copy_first;
@@ -100,9 +89,11 @@ pthread_t refresh_thread, rulesdump_thread, nfqinput_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
-
-//in case if system's byte order is little-endian, use htonl() in nfq_set_verdict_mark due to libnetfiler_queue's bug which was fixed in v.1.0.0 but ubuntu 10.10 and 11.04 still uses old 0.17 version
-int little_endian = 1;
+//fe_was_busy is a flag to know whether frontend was processing some request
+//Normally, if path is not found in dlist, we send a request to frontend
+//But in case it was busy when we started iterating dlist, we assume FRONTEND_BUSY
+//This prevents possible duplicate entries in dlist
+int fe_was_busy_in, fe_was_busy_out;
 
 //mutex to lock fe_active_flag
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -110,39 +101,51 @@ pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 //netfilter mark number for the packet (to be added to NFMARK_BASE)
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
-int nfmark_to_set, nfmark_to_delete;
-int family = AF_INET; //used by conntrack
+int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
+u_int8_t family = AF_INET; //used by conntrack
 
-struct nf_conntrack *ct;
-struct nfct_handle *deletemark_handle;
-struct nfct_handle *setmark_handle;
+struct nf_conntrack *ct_out, *ct_in;
+struct nfct_handle *deletemark_handle, *dummy_handle;
+struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
 int nfqfd_input;
 
-int deletemark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){ 
-  printf ("In deletemark\n");
+int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
   if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
-     if (nfct_query(deletemark_handle, NFCT_Q_DESTROY, mct) == -1){
-      perror("query-DESTROY");}
+
+      if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
+	      m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	      return NFCT_CB_CONTINUE;
+      }
       printf("deleted an entry\n");
       return NFCT_CB_CONTINUE;
   }
+}
+
+int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
+    m_printf ( MLOG_DEBUG, " setmark_out ");
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_query(setmark_handle_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
-int setmark (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
-  printf ("In setmark\n");
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set);
-  nfct_query(setmark_handle, NFCT_Q_UPDATE, mct);
+int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
+    m_printf ( MLOG_DEBUG, " setmar_in ");
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_in);
+  nfct_query(setmark_handle_in, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
-void initialize_conntrack(){
-   if ((ct = nfct_new()) == NULL){perror("new");}
+void  initialize_conntrack(){
+   if ((ct_out = nfct_new()) == NULL){perror("new");}
+   if ((ct_in = nfct_new()) == NULL){perror("new");}
+   if ((dummy_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
    if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
-   if ((setmark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
-   if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, deletemark, NULL) == -1)) {perror("cb_reg");}
-   if ((nfct_callback_register(setmark_handle, NFCT_T_ALL, setmark, NULL) == -1)) {perror("cb_reg");}
+   if ((setmark_handle_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
+   if ((setmark_handle_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
+   if ((nfct_callback_register(setmark_handle_out, NFCT_T_ALL, setmark_out, NULL) == -1)) {perror("cb_reg");}
+   if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, delete_mark, NULL) == -1)) {perror("cb_reg");}
+   if ((nfct_callback_register(setmark_handle_in, NFCT_T_ALL, setmark_in, NULL) == -1)) {perror("cb_reg");}
    return;
 }
 
@@ -280,8 +283,6 @@ int m_printf_syslog ( int loglevel, char *format, ... )
     }
 }
 
-//obsolete func since we now use procfs inode to determine if the same instance is accessing network
-//yet this may prove useful in the future for extra checking
 unsigned long long starttimeGet ( int mypid )
 {
     char pidstring[8];
@@ -304,7 +305,7 @@ unsigned long long starttimeGet ( int mypid )
     if ( ( stream = fopen ( path, "r" ) ) == 0 )
     {
         m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-        return 1;
+        return ;
     };
 
     fscanf ( stream, "%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %d %d %llu",
@@ -320,7 +321,6 @@ dlist * dlist_copy()
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist* del;
-    int strlen_int;
     dlist *temp = first->next;
     dlist *copy_temp = copy_first;
     while ( temp != 0 )
@@ -339,7 +339,6 @@ dlist * dlist_copy()
         }
         copy_temp = copy_temp->next;
         copy_temp->path[0] = 0;
-        strlen_int = strlen ( temp->path );
         strcpy ( copy_temp->path, temp->path );
         strcpy ( copy_temp->perms, temp->perms );
         strcpy ( copy_temp->pid, temp->pid );
@@ -353,7 +352,7 @@ dlist * dlist_copy()
     while ( copy_temp != 0 )
     {
         del = copy_temp;
-        //prev element should point not on us but on the next element
+        //prev element should point not to us but to the next element
         copy_temp->prev->next = copy_temp->next;
         copy_temp = copy_temp->next;
         free ( del );
@@ -411,7 +410,7 @@ void dlist_del ( char *path, char *pid )
             nfmark_to_delete = temp->nfmark;
             free ( temp );
             //remove tracking for this app's active connection
-            if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
+	    if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
             pthread_mutex_unlock ( &dlist_mutex );
             return;
         }
@@ -674,7 +673,7 @@ loop:
 }
 
 //if path is in dlist already, check if it is fork()ed or a new instance
-int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
+int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
 {
     pthread_mutex_lock ( &dlist_mutex );
     //first check if app is already in our dlist
@@ -722,7 +721,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                 {
                     pthread_mutex_lock ( &nfmark_count_mutex );
                     temp->nfmark = NFMARK_BASE + nfmark_count;
-                    nfmark_to_set = NFMARK_BASE + nfmark_count;
+                    *nfmark_to_set = NFMARK_BASE + nfmark_count;
                     nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 
@@ -802,7 +801,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                         {
                             pthread_mutex_lock ( &nfmark_count_mutex );
                             temp->nfmark = NFMARK_BASE + nfmark_count;
-                            nfmark_to_set = NFMARK_BASE + nfmark_count;
+                            *nfmark_to_set = NFMARK_BASE + nfmark_count;
                             nfmark_count++;
                             pthread_mutex_unlock ( &nfmark_count_mutex );
                             retval = FORKED_CHILD_ALLOW;
@@ -824,7 +823,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                         unsigned long long stime;
                         stime = starttimeGet ( atoi ( pid ) );
 
-                        dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, nfmark_to_set, FALSE );
+                        dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, *nfmark_to_set, FALSE );
                         fe_list();
                         return retval;
                     }
@@ -895,7 +894,7 @@ int path_find_in_dlist ( char *path, char *pid, unsigned long long *stime )
                             dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark ,FALSE );
                             fe_list();
                             
-                            nfmark_to_set = tempnfmark;
+                            *nfmark_to_set = tempnfmark;
                             return NEW_INSTANCE_ALLOW;
                         }
                         else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
@@ -924,7 +923,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_in_dlist ( int *mysocket )
+int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
 {
     char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
     char path[32];
@@ -958,7 +957,7 @@ int socket_find_in_dlist ( int *mysocket )
         if ( ! ( m_dir = opendir ( path ) ) )
         {
             //This condition can happen if the PID is still in the dlist, the process exited and refresh_thread hasn't yet purged it out of the dlist
-            m_printf ( MLOG_DEBUG, "opendir %s: %s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
+            m_printf ( MLOG_DEBUG, "opendir for %s %s: %s,%s,%d\n", temp->path, path, strerror ( errno ), __FILE__, __LINE__ );
             temp = temp->next;
             closedir ( m_dir );
             continue;
@@ -992,7 +991,7 @@ int socket_find_in_dlist ( int *mysocket )
 
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
                 {
-                    nfmark_to_set = temp->nfmark;
+                    *nfmark_to_set = temp->nfmark;
                     pthread_mutex_unlock ( &dlist_mutex );
                     return INODE_FOUND_IN_DLIST_ALLOW;
                 }
@@ -1013,6 +1012,17 @@ int socket_find_in_dlist ( int *mysocket )
 //scan /proc to find which PID the socket belongs to
 int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
+    //vars for scanning through /proc dir
+    struct dirent *proc_dirent, *fd_dirent;
+    DIR *proc_DIR, *fd_DIR;
+    // holds path to /proc/<pid>/fd/<number_of_inode_opened>
+    char path[32];
+    char fdpath[32];
+    // buffers to hold readlink()ed values of /proc/<pid>/exe and /proc/<pid>/fd/<inode>
+    char exepathbuf[PATHSIZE];
+    char socketbuf[SOCKETBUFSIZE];
+
+
     //convert inode from int to string
     char socketstr[16];
     sprintf ( socketstr, "%d", *mysocket ); //convert int to char* for future use
@@ -1039,7 +1049,7 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
             fd_DIR = opendir ( path );
             if ( !fd_DIR )
             {
-                m_printf ( MLOG_INFO, "Unusual! PID exited while we were scanning /proc . opendir: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                m_printf ( MLOG_INFO, "PID quit while scanning /proc,opendir:%s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 continue;
             } // permission denied or some other error
             do
@@ -1248,9 +1258,6 @@ int port2socket_udp ( int *portint, int *socketint )
 //find in procfs which socket corresponds to source port
 int port2socket_tcp ( int *portint, int *socketint )
 {
-#ifdef DEBUG
-printf("searching for port %d\n", *portint);
-#endif
     //convert portint to a hex string of 4 chars with leading zeroes if necessary
     char porthex[5];
     sprintf ( porthex, "%x", *portint );
@@ -1357,53 +1364,40 @@ printf("searching for port %d\n", *portint);
     return PORT_NOT_FOUND;
 }
 
-//Handler for TCP packets
-int packet_handle_tcp ( int srctcp, char *path, char *pid, unsigned long long *stime )
+//Handler for TCP packets   if ((ct = nfct_new()) == NULL){perror("new");}
+
+int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
 {
-    printf("in pac_han_tcp %d", srctcp);
     int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;    
+    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
-    if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
 }
 
 //Handler for UDP packets
-int packet_handle_udp ( int srcudp, char *path, char *pid, unsigned long long *stime )
+int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
 {
    int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_udp ( &srcudp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ( (retval = socket_find_in_dlist ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
-    if ( (retval = path_find_in_dlist ( path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
 }
 
-int packet_handle_icmp()
+int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval;
-    int inodeint;
-
-    if ( retval = icmp_check_only_one_inode ( &inodeint ) ) goto out;
-    if ( retval = socket_find_in_dlist ( &inodeint ) ) goto out;
-    char path[PATHSIZE];
-    char pid[PIDLENGTH];
-    unsigned long long stime;
-
-    if ( retval = socket_find_in_proc ( &inodeint, path, pid, &stime ) ) goto out;
-    if ( retval = path_find_in_dlist ( path, pid, &stime ) ) goto out;
-    if ( !fe_active_flag_get() )
-    {
-        retval = FRONTEND_NOT_ACTIVE;
-        goto out;
-    }
-    if ( retval = fe_ask_out ( path, pid, &stime ) ) goto out;
-
+    int retval, socketint;
+    if ( (retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP ) goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP )goto out;
 out:
     return retval;
 }
@@ -1415,10 +1409,8 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
     int id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
     if ( ph ) id = ntohl ( ph->packet_id );
-    nfq_get_payload ( ( struct nfq_data * ) nfad, &ip );
-    
-    printf ("%d %d \n", ip->version, ip->ihl);
-    
+    nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
+        
     char daddr[INET_ADDRSTRLEN], saddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
@@ -1446,11 +1438,13 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         dport_netbo = tcp->dest;
         sport_hostbo = ntohs ( tcp->source );
         dport_hostbo = ntohs ( tcp->dest );
-        int ddport = htons(tcp->dest);
-       
         m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
-        if ((verdict = packet_handle_tcp ( dport_hostbo, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_ACTIVE;
+
+        fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_ACTIVE;
+        }
         break;
         
     case IPPROTO_UDP:
@@ -1460,18 +1454,24 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         sport_netbo = udp->source;
         dport_netbo = udp->dest;
         sport_hostbo = ntohs ( udp->source );
-        dport_hostbo = ntohs ( udp->dest );
-        
+        dport_hostbo = ntohs ( udp->dest );     
         m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
-        if ((verdict = packet_handle_udp ( dport_hostbo, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime,saddr,sport_hostbo,dport_hostbo) : FRONTEND_NOT_ACTIVE;
+
+        fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_ACTIVE;
+        }
         break;
-        
-//     case IPPROTO_ICMP:
-//         ;
-//         m_printf ( MLOG_TRAFFIC, "INICMP ");
-//         verdict = packet_handle_icmp();
-//         break;
+    case IPPROTO_ICMP:
+        ;
+        m_printf ( MLOG_TRAFFIC, "INICMP src %s ", saddr);
+        fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_ACTIVE;
+        }
+        break;
     default:
         m_printf ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
         m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
@@ -1488,14 +1488,28 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
         
-     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_DST, ip->daddr);
-     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_SRC, ip->saddr);
-     nfct_set_attr_u8 (ct, ATTR_L4PROTO, ip->protocol);
-     nfct_set_attr_u8 (ct, ATTR_L3PROTO, AF_INET);
-     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbo);
-     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbo) ;
+     nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_DST, ip->daddr);
+     nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_SRC, ip->saddr);
+     nfct_set_attr_u8 (ct_in, ATTR_L4PROTO, ip->protocol);
+     nfct_set_attr_u8 (ct_in, ATTR_L3PROTO, AF_INET);
+     nfct_set_attr_u16(ct_in, ATTR_PORT_SRC, sport_netbo);
+     nfct_set_attr_u16(ct_in, ATTR_PORT_DST, dport_netbo) ;
      
-     if (nfct_query(setmark_handle, NFCT_Q_GET, ct) == -1){perror("query-GET");}  
+     //EBUSY returned, when there's too much activity in conntrack. Requery the packet
+     while (nfct_query(setmark_handle_in, NFCT_Q_GET, ct_in) == -1){
+         if (errno == EBUSY){
+             m_printf ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             continue;
+         }
+         if (errno == EILSEQ){
+             m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             continue;
+         }
+         else {
+             m_printf ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             break;
+     }
+     }
         return 0;
 
     case DROP:
@@ -1555,7 +1569,7 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
     if ( !ph ) {printf ("ph == NULL, should ever happen, please report"); return 0;}
     id = ntohl ( ph->packet_id );
-    nfq_get_payload ( ( struct nfq_data * ) nfad, &ip );
+    nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
 #ifdef DEBUG
     m_printf ( MLOG_TRAFFIC, "%d %d ",ip->version, ip->ihl);
 #endif
@@ -1575,12 +1589,14 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         tcp = ( struct tcphdr* ) ((char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = tcp->source;
         dport_netbyteorder = tcp->dest;
-        int srctcp = ntohs ( tcp->source );
-       
+        int srctcp = ntohs ( tcp->source );     
         m_printf ( MLOG_TRAFFIC, "TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
-        
-        if ((verdict = packet_handle_tcp ( srctcp, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;  
+
+        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        }
         break;
     case IPPROTO_UDP:
         ;
@@ -1591,13 +1607,20 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         int srcudp = ntohs ( udp->source );
         m_printf ( MLOG_TRAFFIC, "UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
         
-        if ((verdict = packet_handle_udp ( srcudp, path, pid, &stime )) == GOTO_NEXT_STEP)
-            verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;  
+        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        }
         break;
     case IPPROTO_ICMP:
         ;
-        m_printf ( MLOG_TRAFFIC, "ICMP dst %d.%d.%d.%d ", daddr[0], daddr[1], daddr[2], daddr[3] );
-        verdict = packet_handle_icmp();
+        m_printf ( MLOG_TRAFFIC, "ICMP dst %d", daddr);
+        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+        }
         break;
     default:
         m_printf ( MLOG_INFO, "unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
@@ -1615,15 +1638,32 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
         
-     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_DST, ip->daddr);
-     nfct_set_attr_u32(ct, ATTR_ORIG_IPV4_SRC, ip->saddr);
-     nfct_set_attr_u8 (ct, ATTR_L4PROTO, ip->protocol);
-     nfct_set_attr_u8 (ct, ATTR_L3PROTO, AF_INET);
-     nfct_set_attr_u16(ct, ATTR_PORT_SRC, sport_netbyteorder);
-     nfct_set_attr_u16(ct, ATTR_PORT_DST, dport_netbyteorder) ;
-     
-     if (nfct_query(setmark_handle, NFCT_Q_GET, ct) == -1){perror("query-GET");}  
-        return 0;
+     nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
+     nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
+     nfct_set_attr_u8 (ct_out, ATTR_L4PROTO, ip->protocol);
+     nfct_set_attr_u8 (ct_out, ATTR_L3PROTO, AF_INET);
+     nfct_set_attr_u16(ct_out, ATTR_PORT_SRC, sport_netbyteorder);
+     nfct_set_attr_u16(ct_out, ATTR_PORT_DST, dport_netbyteorder) ;
+
+        //EBUSY returned, when there's too much activity in conntrack. Requery the packet
+        while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out) == -1){
+            if (errno == EBUSY){
+                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                continue;
+            }
+            if (errno == EILSEQ){
+                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                continue;
+            }
+
+            else {
+                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                break;
+        }
+        }
+
+return 0;
+
 
     case DROP:
         m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
@@ -2036,8 +2076,10 @@ int main ( int argc, char *argv[] )
     if ( nfq_unbind_pf ( globalh, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
     struct nfq_q_handle * globalqh = nfq_create_queue ( globalh, NFQNUM_OUTPUT, &queueHandle, NULL );
-    if ( !globalqh )
-        m_printf ( MLOG_INFO, "error in nfq_create_queue\n" );
+    if ( !globalqh ){
+        m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+        return 0;
+    }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
     if ( nfq_set_queue_maxlen ( globalqh, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
@@ -2052,8 +2094,10 @@ int main ( int argc, char *argv[] )
     if ( nfq_unbind_pf ( globalh_input, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh_input, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
     struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_input, NFQNUM_INPUT, &queueHandle_input, NULL );
-    if ( !globalqh_input )
-        m_printf ( MLOG_INFO, "error in nfq_create_queue\n" );
+    if ( !globalqh_input ){
+        m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+        return 0;
+    }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
     if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );

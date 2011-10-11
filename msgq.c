@@ -265,30 +265,42 @@ void* commandthread(void* ptr){
 #endif
 
                 //TODO come up with a way to calculate sha without having user to wait when the rule appears
+               //chaeck if the app is still running
+              char exepath[32] = "/proc/";
+              strcat(exepath, sent_to_fe_struct.pid);
+              strcat(exepath, "/exe");
+              char exepathbuf[PATHSIZE];
+              memset ( exepathbuf, 0, PATHSIZE );
+              readlink (exepath, exepathbuf, PATHSIZE-1 );
+              if (strcmp(exepathbuf, sent_to_fe_struct.path)){
+                  m_printf(MLOG_INFO, "Frontend asked to add a process that is no longer running,%s,%d\n", __FILE__, __LINE__);
+                  fe_awaiting_reply = FALSE;
+                  continue;
+              }
 
-	//if perms are *ALWAYS we need both exesize and sha512
-	      	    char sha[DIGEST_SIZE] = "";
-		    struct stat exestat;
-        if (!strcmp(msg_f2d.item.perms,ALLOW_ALWAYS) || !strcmp(msg_f2d.item.perms,DENY_ALWAYS)){
+                //if perms are *ALWAYS we need both exesize and sha512
+                char sha[DIGEST_SIZE] = "";
+                struct stat exestat;
+                if (!strcmp(msg_f2d.item.perms,ALLOW_ALWAYS) || !strcmp(msg_f2d.item.perms,DENY_ALWAYS)){
                
-        //Calculate the size of the executable       
-	if (stat(sent_to_fe_struct.path, &exestat) == -1 ){
-            m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-	    }
-			
-		//Calculate sha of executable
-            FILE *stream;
-            memset(sha, 0, DIGEST_SIZE+1);
-            stream = fopen(sent_to_fe_struct.path, "r");
-            sha512_stream(stream, (void *) sha);
-            fclose(stream);		
+                    //Calculate the size of the executable
+                    if (stat(sent_to_fe_struct.path, &exestat) == -1 ){
+                        m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                    }
+
+                    //Calculate sha of executable
+                    FILE *stream;
+                    memset(sha, 0, DIGEST_SIZE+1);
+                    stream = fopen(sent_to_fe_struct.path, "r");
+                    sha512_stream(stream, (void *) sha);
+                    fclose(stream);
 	       }
 	       //check if we were really dealing with the correct process all along
 	       unsigned long long stime;
-                stime = starttimeGet ( atoi ( sent_to_fe_struct.pid ) );
-                if ( sent_to_fe_struct.stime != stime )
-                {
+               stime = starttimeGet ( atoi ( sent_to_fe_struct.pid ) );
+               if ( sent_to_fe_struct.stime != stime ){
                     m_printf ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
+                    fe_awaiting_reply = FALSE;
                     continue;
                 }
 
@@ -397,7 +409,7 @@ void* commandthread(void* ptr){
     //-----------------------------------
     if ((ipckey_d2f = ftok(TMPFILE, FTOKID_D2F)) == -1)
         m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_d2f);
+    m_printf(MLOG_DEBUG, "D2FKey: %d\n", ipckey_d2f);
 
     if ((ipckey_f2d = ftok(TMPFILE, FTOKID_F2D)) == -1)
         m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -532,30 +544,37 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
 }
 
 //Ask frontend
-int fe_ask_out(char *path, char *pid, unsigned long long *stime) {
-    if (fe_awaiting_reply) return FRONTEND_BUSY;
+int  fe_ask_out(char *path, char *pid, unsigned long long *stime) {
+    if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
+    if (fe_awaiting_reply){
+        if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
+        return FRONTEND_BUSY;
+    }
 
     //first remember what we are sending
     strcpy(sent_to_fe_struct.path, path);
     strcpy(sent_to_fe_struct.pid, pid);
     sent_to_fe_struct.stime = *stime;
 
-            //prepare a msg and send it to frontend
-            strcpy(msg_d2f.item.path, path);
-            strcpy(msg_d2f.item.pid, pid);
-            msg_d2f.item.command = D2FCOMM_ASK_OUT;
-            //pthread_mutex_lock(&mutex_msgq);
-            if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
-                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-            }
-            fe_awaiting_reply = TRUE;
-            return SENT_TO_FRONTEND;
+    //prepare a msg and send it to frontend
+    strcpy(msg_d2f.item.path, path);
+    strcpy(msg_d2f.item.pid, pid);
+    msg_d2f.item.command = D2FCOMM_ASK_OUT;
+    if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
+        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    fe_awaiting_reply = TRUE;
+    if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
+    return SENT_TO_FRONTEND;
 }
 
 //Ask frontend if new incoming connection should be allowed
 int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport) {
-    pthread_mutex_lock(&msgq_mutex); 
-    if (fe_awaiting_reply) return FRONTEND_BUSY;
+    if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
+    if (fe_awaiting_reply){
+        if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
+        return FRONTEND_BUSY;
+    }
 
     //first remember what we are sending
     strcpy(sent_to_fe_struct.path, path);
@@ -570,14 +589,13 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
     strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.item.perms));
     msg_d2f.item.stime = sport;
     msg_d2f.item.inode = dport;
-	    
-	    
-            if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
-                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-            }
-            fe_awaiting_reply = TRUE;
-	    pthread_mutex_unlock(&msgq_mutex);
-            return SENT_TO_FRONTEND;
+	    	    
+    if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
+        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    fe_awaiting_reply = TRUE;
+    if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
+    return SENT_TO_FRONTEND;
 }
 
 int fe_list() {
