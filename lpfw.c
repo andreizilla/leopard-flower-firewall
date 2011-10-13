@@ -33,8 +33,7 @@
 #include <arpa/inet.h>
 
 //should be available globally to call nfq_close from sigterm handler
-struct nfq_handle* globalh;
-struct nfq_handle* globalh_input;
+struct nfq_handle *globalh, *globalh_input, *globalh_repeat;
 
 //command line arguments avail
 char ownpath[PATHSIZE]; //full path of lpfw executableable globally
@@ -82,10 +81,12 @@ pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t nfmark_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to avoid fe_ask_* to send data simultaneously
 pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t nfqrepeat_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, rulesdump_thread, nfqinput_thread;
+pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, nfqrepeat_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
@@ -108,16 +109,19 @@ struct nf_conntrack *ct_out, *ct_in;
 struct nfct_handle *deletemark_handle, *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
-int nfqfd_input;
+int nfqfd_input, nfqfd_repeat;
 
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
   if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
 
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
+#ifdef DEBUG2
+	  m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+#endif
 	      m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	      return NFCT_CB_CONTINUE;
       }
-      printf("deleted an entry\n");
+      //printf("deleted an entry\n");
       return NFCT_CB_CONTINUE;
   }
 }
@@ -204,6 +208,12 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         vprintf ( format, args );
         //fsync(filelogfd);
         return 0;
+    case MLOG_DEBUG2:
+	// check if  logging enabled
+	va_start ( args, format );
+	vprintf ( format, args );
+	//fsync(filelogfd);
+	return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
         va_start ( args, format );
         printf ( "ALERT: " );
@@ -1012,6 +1022,10 @@ int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
 //scan /proc to find which PID the socket belongs to
 int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
+//    strcpy ( m_path, "/usr/bin/transmission" );
+//    strcpy ( m_pid, "9725");
+//    return GOTO_NEXT_STEP;
+
     //vars for scanning through /proc dir
     struct dirent *proc_dirent, *fd_dirent;
     DIR *proc_DIR, *fd_DIR;
@@ -1402,6 +1416,34 @@ out:
     return retval;
 }
 
+
+int queueHandle_repeat ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
+//    static int i = 0;
+//    static int j = 0;
+//    i ++;
+//    if (i == 10){
+//	j++;
+//	i = 0;
+//	printf ("Reinjected %d packets\n", j*10 );
+//    }
+
+    //printf ("hit nfqrepeat\n");
+    //pthread_mutex_lock ( &nfqrepeat_mutex );
+    struct timespec time, time_dummy;
+    time.tv_sec=0;
+    time.tv_nsec = 1000000000/10;
+    nanosleep(&time, &time_dummy);
+    int id;
+    struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
+    if ( ph ) id = ntohl ( ph->packet_id );
+    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_REPEAT, 0, NULL );
+    //printf("sent stuff\n");
+    //pthread_mutex_unlock ( &nfqrepeat_mutex );
+    return 0;
+}
+
+
+
 int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
     static int is_strange_daddr = 0;
     static char strange_daddr[INET_ADDRSTRLEN];
@@ -1645,8 +1687,11 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
      nfct_set_attr_u16(ct_out, ATTR_PORT_SRC, sport_netbyteorder);
      nfct_set_attr_u16(ct_out, ATTR_PORT_DST, dport_netbyteorder) ;
 
-        //EBUSY returned, when there's too much activity in conntrack. Requery the packet
+	//EBUSY returned, when there's too much activity in conntrack. Requery the packet
         while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out) == -1){
+#ifdef DEBUG2
+	    m_printf ( MLOG_DEBUG2, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+#endif
             if (errno == EBUSY){
                 m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 continue;
@@ -1902,8 +1947,21 @@ void SIGTERM_handler ( int signal )
     {
         m_printf ( MLOG_INFO,"error in nfq_close\n" );
     }
-    return;
+    exit(0);
 }
+
+void* nfqrepeatthread ( void *ptr )
+{
+    ptr = 0;
+	//endless loop of receiving packets and calling a handler on each packet
+    int rv;
+    char buf[4096] __attribute__ ( ( aligned ) );
+    while ( ( rv = recv ( nfqfd_repeat, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
+    {
+	nfq_handle_packet ( globalh_repeat, buf, rv );
+    }
+}
+
 
 void* nfqinputthread ( void *ptr )
 {
@@ -2009,6 +2067,12 @@ int main ( int argc, char *argv[] )
     * ( log_debug->ival ) = 0;
 #endif
 
+#ifdef DEBUG2
+    * ( log_info->ival ) = 0;
+    * ( log_traffic->ival ) = 0;
+    * ( log_debug->ival ) = 0;
+#endif
+
     if ( arg_nullcheck ( argtable ) != 0 )
     {
         printf ( "Error: insufficient memory\n" );
@@ -2105,6 +2169,27 @@ int main ( int argc, char *argv[] )
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
+
+    //-----------------Register queue handler for REPEAT chain-----
+    globalh_repeat = nfq_open();
+    if ( !globalh_repeat ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
+    if ( nfq_unbind_pf ( globalh_repeat, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
+    if ( nfq_bind_pf ( globalh_repeat, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    struct nfq_q_handle * globalqh_repeat = nfq_create_queue ( globalh_repeat, NFQNUM_REPEAT, &queueHandle_repeat, NULL );
+    if ( !globalqh_repeat ){
+	m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	return 0;
+    }
+    //copy only 40 bytes IP header length of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_repeat, NFQNL_COPY_META, 0 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
+    if ( nfq_set_queue_maxlen ( globalqh_repeat, 200 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    nfqfd_repeat = nfq_fd ( globalh_repeat);
+    m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
+
+
+
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
     {
@@ -2129,6 +2214,8 @@ int main ( int argc, char *argv[] )
     pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
 #endif
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
+    pthread_create ( &nfqrepeat_thread, NULL, nfqrepeatthread, NULL);
+
     
     
     //endless loop of receiving packets and calling a handler on each packet
