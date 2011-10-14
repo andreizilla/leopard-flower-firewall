@@ -224,11 +224,11 @@ void add_in(msg_struct add_struct) {
     waddstr(uw, ":");
     //stime contains remote's port
     char string[16];
-    sprintf ( string, "%d", add_struct.item.stime );
+    sprintf ( string, "%d", (int)add_struct.item.stime );
     waddstr(uw, string);
     waddstr(uw, " => port ");
     //inode contains local port
-    sprintf ( string, "%d", add_struct.item.inode );
+    sprintf ( string, "%d", (int)add_struct.item.inode );
     waddstr(uw, string);
     waddstr(uw, " ");
     waddstr(uw, add_struct.item.path);

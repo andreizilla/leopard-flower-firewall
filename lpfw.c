@@ -1615,6 +1615,7 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
 #ifdef DEBUG
     m_printf ( MLOG_TRAFFIC, "%d %d ",ip->version, ip->ihl);
 #endif
+    printf ( "%d\n", ntohl(ip->tos));
     char daddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     int verdict;
@@ -2146,7 +2147,7 @@ int main ( int argc, char *argv[] )
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_queue_maxlen ( globalqh, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
     nfqfd = nfq_fd ( globalh );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
@@ -2164,7 +2165,7 @@ int main ( int argc, char *argv[] )
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_queue_maxlen ( globalqh_input, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
     nfqfd_input = nfq_fd ( globalh_input );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
@@ -2182,7 +2183,7 @@ int main ( int argc, char *argv[] )
     }
     //copy only 40 bytes IP header length of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh_repeat, NFQNL_COPY_META, 0 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh_repeat, 200 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_queue_maxlen ( globalqh_repeat, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
     nfqfd_repeat = nfq_fd ( globalh_repeat);
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------

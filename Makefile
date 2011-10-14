@@ -2,7 +2,7 @@ GCCFLAGS = -fno-stack-protector
 
 LPFWSOURCES 	=	lpfw.c \
 			msgq.c \
-			sha.c \
+			sha512/sha.c \
 			argtable/arg_end.c \
 			argtable/arg_file.c \
 			argtable/arg_int.c \
@@ -14,13 +14,12 @@ LPFWSOURCES 	=	lpfw.c \
 all: lpfw lpfwcli
 
 lpfw: $(LPFWSOURCES)
-	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lnetfilter_conntrack -lpthread -o lpfw
+#we link against our own -lnetfiler_conntrack library v. 0.9.1 (0.0.101 is broken)
+#during runtime we search our own directory first for .so files, hence -Wl,-rpath,./
+	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -L./libnetfilter_conntrack-0.9.1/src/.libs -lnetfilter_conntrack -lpthread -o lpfw -Wl,-rpath,./
 
 lpfwcli: lpfwcli.c ipc.c
 	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli
-
-#gcc lpfwcli.c ipc.c $(GCCFLAGS) -static -lncurses -Bdynamic -lpthread -o lpfwcli
-
 
 ipcwrapper: gui/IPC_wrapper.so
 gui/IPC_wrapper.so: ipc_wrapper.c
@@ -29,8 +28,5 @@ gui/IPC_wrapper.so: ipc_wrapper.c
 ipcwrapper_debug: GCCFLAGS += -g -DDEBUG 
 ipcwrapper_debug: ipcwrapper
 	
-debug: GCCFLAGS += -g -DDEBUG2
+debug: GCCFLAGS += -g -DDEBUG
 debug: lpfw lpfwcli
-
-newct:
-	gcc $(LPFWSOURCES) -g -DDEBUG2 -L/home/wwwwww/Desktop/src/libnetfilter_conntrack-0.9.1/src/.libs -lnetfilter_queue -lnewnetfilter_conntrack -lpthread -o lpfw
