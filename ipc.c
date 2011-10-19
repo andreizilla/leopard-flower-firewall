@@ -16,6 +16,9 @@ msg_struct msg_f2d = {1, 0};
 void msgq_initialize();
 
 extern void list();
+extern void add_out(msg_struct add_struct);
+extern void add_in(msg_struct add_struct);
+
 
 void msgq_list() {
     msg_f2d.item.command = F2DCOMM_LIST;
@@ -43,8 +46,12 @@ void* listenthread(void * ptr) {
             m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
         switch (msg_d2f.item.command) {
-            case D2FCOMM_ASK:
-                add(msg_d2f);
+            case D2FCOMM_ASK_OUT:
+                add_out(msg_d2f);
+                break;
+
+            case D2FCOMM_ASK_IN:
+                add_in(msg_d2f);
                 break;
 
                 //refresh list because some app is no longer running

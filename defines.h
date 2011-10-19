@@ -12,7 +12,9 @@
 #define PIDLENGTH 16
 #define PERMSLENGTH 16
 #define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567] - max length 16 chars
-#define NFQUEUE_NUMBER 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUTPUT 11220 //arbitrary number used for iptables rule
+#define NFQNUM_INPUT 11221
+#define NFQNUM_REPEAT 11222
 #define MAX_LINE_LENGTH 1024 //max length of a line in configfile/rulesfile
 #define DIGEST_SIZE 64
 #define TTYNAME 16
@@ -39,8 +41,9 @@
 #define MLOG_INFO 1
 #define MLOG_TRAFFIC 2
 #define MLOG_DEBUG 3
-#define MLOG_ALERT 4
-#define MLOG_ERROR 5
+#define MLOG_DEBUG2 4
+#define MLOG_ALERT 5
+#define MLOG_ERROR 6
 
 // max height to which windows can be stretched
 #define UWMAX 1

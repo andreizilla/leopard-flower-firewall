@@ -66,6 +66,7 @@ enum
 
 enum
 {
+    GOTO_NEXT_STEP,
     ACCEPT,
     DROP,
     PORT_NOT_FOUND,
@@ -96,7 +97,8 @@ enum
 //commands passed through msgq
 enum
 {
-    D2FCOMM_ASK,
+    D2FCOMM_ASK_OUT,
+    D2FCOMM_ASK_IN,
     D2FCOMM_LIST,
     F2DCOMM_LIST,
     F2DCOMM_ADD,
