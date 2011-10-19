@@ -30,7 +30,7 @@ extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct_creds msg_creds;
 extern int (*m_printf)(int loglevel, char *format, ...);
-extern void dlist_add(char*, char*, char*, char, char*, unsigned long long, off_t, unsigned char);
+extern void dlist_add(char*, char*, char*, char, char*, unsigned long long, off_t, unsigned char, int);
 extern unsigned long long starttimeGet(int mypid);
 extern void fe_active_flag_set (int boolean);
 extern void child_close_nfqueue();
@@ -289,7 +289,7 @@ void* commandthread(void* ptr){
 
 //TODO SECURITY. We should check now that /proc/PID inode wasn't changed while we were shasumming and exesizing
 
-                dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, '1', sha, sent_to_fe_struct.stime, exestat.st_size, TRUE);
+                dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, '1', sha, sent_to_fe_struct.stime, exestat.st_size, TRUE, 0);
 #ifdef DEBUG
        gettimeofday(&time_struct, NULL);
 	m_printf(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);

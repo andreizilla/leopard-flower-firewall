@@ -5,12 +5,6 @@
 #ifndef INCLUDES_H_
 #define INCLUDES_H_
 
-typedef struct
-{
-    char * name;
-    char * value;
-} para;
-
 typedef struct m_dlist
 {
     int command;
@@ -24,6 +18,7 @@ typedef struct m_dlist
     unsigned long long stime; //obsolete: start time of the process
     ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
     off_t exesize; //executable's size
+    char cpuhog; //flag to show that ann app generates too many new connections and thus lpfw uses certain workarounds to decrease CPU consumption
     u_int32_t nfmark; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
     struct m_dlist *prev; //previous element in dlist
     struct m_dlist *next; // next element in dlist
@@ -94,7 +89,8 @@ enum
     EXE_HAS_BEEN_CHANGED,
     FORKED_CHILD_ALLOW,
     FORKED_CHILD_DENY,
-    PROCFS_ERROR
+    PROCFS_ERROR,
+    CPUHOG_CACHE
 };
 
 //commands passed through msgq
