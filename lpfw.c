@@ -1,4 +1,3 @@
-#include <fcntl.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -7,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
+#include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
 #include <ctype.h> // for toupper
@@ -19,6 +19,7 @@
 #include <syslog.h>
 #include <libnfnetlink/libnfnetlink.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
+#include <libnetfilter_conntrack/libnetfilter_conntrack.h>
 #include <arpa/inet.h> //for ntohl()
 #include <linux/netfilter.h> //for NF_ACCEPT, NF_DROP etc
 #include <assert.h>
@@ -26,14 +27,9 @@
 #include "defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
-#include <libnetfilter_conntrack/libnetfilter_conntrack.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 //should be available globally to call nfq_close from sigterm handler
-struct nfq_handle *globalh, *globalh_input, *globalh_repeat;
+struct nfq_handle *globalh_out, *globalh_in;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
@@ -43,15 +39,7 @@ struct arg_int *log_info, *log_traffic, *log_debug;
 char ownpath[PATHSIZE]; //full path of lpfw executable
 char owndir[PATHSIZE]; //full path to the dir lpfw executable is in (with trailing /)
 
-//file descriptors for /proc/net/tcd & udp
-int procnettcpfd, procnetudpfd, procnetrawfd;
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
-
-////cryptic stuff that is required by netfilter_queue
-//struct nfq_q_handle *qh;
-//struct nfgenmsg *nfmsg;
-//struct nfq_data *nfad;
-//void *mdata;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
 dlist *first, *copy_first;
@@ -62,7 +50,6 @@ msg_struct msg_f2d = {1, 0};
 msg_struct msg_d2fdel = {1, 0};
 msg_struct msg_d2flist = {1, 0};
 msg_struct_creds msg_creds = {1, 0};
-int ( *m_printf ) ( int loglevel, char *format, ... );
 
 extern int fe_ask_out ( char*, char*, unsigned long long* );
 extern int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
@@ -72,20 +59,21 @@ extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 
 //Forward declarations to make code parser happy
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog );
+int ( *m_printf ) ( int loglevel, char *format, ... );
 
-//mutex to lock threads
+//mutex to access dlist
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to access nfmark_count from main thread and commandthread
 pthread_mutex_t nfmark_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to avoid fe_ask_* to send data simultaneously
 pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t nfqrepeat_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-
+//mutex to lock fe_active_flag
+pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cpuhog_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, nfqrepeat_thread, procfdscan_thread;
+pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, cpuhogscan_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
@@ -95,10 +83,6 @@ int fe_active_flag = 0;
 //This prevents possible duplicate entries in dlist
 int fe_was_busy_in, fe_was_busy_out;
 
-//mutex to lock fe_active_flag
-pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-pthread_mutex_t cpuhog_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 //netfilter mark number for the packet (to be added to NF_MARK_BASE)
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
@@ -107,6 +91,7 @@ u_int8_t family = AF_INET; //used by conntrack
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
+int procnetrawfd;
 char cpuhog_cache [CPUHOG_MAX_CACHE][32];
 struct nf_conntrack *ct_out, *ct_in;
 struct nfct_handle *deletemark_handle, *dummy_handle;
@@ -115,35 +100,30 @@ struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 char cpuhogscan_on = 0; // flag to show is procfdscan_thread has been started and running
 char cpuhogscan_cancelled = 0; //flag which if set stops procfdscan_thread
 char cpuhog_active = 0; //flag that prevents more than one CPU hog applications to run
-
 char cpuhog_perms[PERMSLENGTH];
 
-int nfqfd_input, nfqfd_repeat;
+int nfqfd_input;
 
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
   if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
-
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
-#ifdef DEBUG2
-	  m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-#endif
-	      m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	      return NFCT_CB_CONTINUE;
+        //m_printf ( MLOG_DEBUG2, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        return NFCT_CB_CONTINUE;
       }
-      //printf("deleted an entry\n");
+     // m_printf ( MLOG_DEBUG2, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
   }
 }
 
 int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
-    m_printf ( MLOG_DEBUG, " setmark_out ");
+  //m_printf ( MLOG_DEBUG2, " setmark_out ");
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
   nfct_query(setmark_handle_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
 int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
-    m_printf ( MLOG_DEBUG, " setmar_in ");
+  //m_printf ( MLOG_DEBUG2, " setmark_in ");
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_in);
   nfct_query(setmark_handle_in, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
@@ -164,7 +144,7 @@ void  initialize_conntrack(){
 
 void child_close_nfqueue()
 {
-    nfq_close( globalh )?
+    nfq_close( globalh_out )?
     m_printf ( MLOG_INFO,"error in nfq_close\n" ):
     m_printf ( MLOG_DEBUG, "Done closing nfqueue\n" );
     return;
@@ -380,7 +360,7 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist
-_void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog )
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog )
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
@@ -426,7 +406,7 @@ void dlist_del ( char *path, char *pid )
     {
         if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, pid ) )
         {
-            //if CPU HOG is being removed, stop the procfdscan thread
+            //if CPU HOG is being removed, stop the cpuhogscan thread
             if (temp->cpuhog) cpuhogscan_cancelled=1;
             //remove the item
             temp->prev->next = temp->next;
@@ -437,7 +417,7 @@ void dlist_del ( char *path, char *pid )
             //remove tracking for this app's active connection
 	    if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
             pthread_mutex_unlock ( &dlist_mutex );
-            return;
+	    return;
         }
         temp = temp->next;
     }
@@ -463,25 +443,20 @@ int parsecache(int socket){
     return 0;
 }
 
-
-void* cpuhogthread ( void *arg )
+void*cpuhogthread ( void *pid )
 {
-    char pidstring[8];
-    int pid = *((int*)arg);
-    sprintf(pidstring, "%d", pid);
-
     DIR *mdir;
     struct dirent *mdirent;
-    int stringlen;
+    int pathlen;
 
     char mpath[32] = "/proc/";
-    strcat(mpath, pidstring);
+    sprintf(&mpath[6], "%d", *((int*)pid));
     strcat(mpath,"/fd/");
-    stringlen = strlen(mpath);
+    pathlen = strlen(mpath);
 
-    struct timespec timer,dummy;
-    timer.tv_sec=0;
-    timer.tv_nsec=1000000000/4;
+    struct timespec cpuhogthread_refresh_timer,dummy;
+    cpuhogthread_refresh_timer.tv_sec=0;
+    cpuhogthread_refresh_timer.tv_nsec=1000000000/4;
     int i;
 
     if ((mdir = opendir ( mpath )) == NULL){
@@ -490,13 +465,13 @@ void* cpuhogthread ( void *arg )
     }
 
     while(!cpuhogscan_cancelled){
-        nanosleep(&timer, &dummy);
+        nanosleep(&cpuhogthread_refresh_timer, &dummy);
         rewinddir(mdir);
         i = 0;
         errno=0;
         pthread_mutex_lock(&cpuhog_cache_mutex);
         while (mdirent = readdir ( mdir )){
-            mpath[stringlen]=0;
+            mpath[pathlen]=0;
             strcat(mpath, mdirent->d_name);
             memset (cpuhog_cache[i], 0 , 32);
             if (readlink ( mpath, cpuhog_cache[i], SOCKETBUFSIZE ) == -1){ //not a symlink but . or ..
@@ -510,13 +485,21 @@ void* cpuhogthread ( void *arg )
     if (errno==0) continue; //readdir reached EOF
     perror("procdirent");
 }
+    //cpuhoscan_cancelled has been set
     cpuhogscan_on =0;
 }
 
-
-
-
-
+void* nfqinputthread ( void *ptr )
+{
+    ptr = 0;
+//endless loop of receiving packets and calling a handler on each packet
+int rv;
+char buf[4096] __attribute__ ( ( aligned ) );
+while ( ( rv = recv ( nfqfd_input, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
+{
+    nfq_handle_packet ( globalh_in, buf, rv );
+}
+}
 
 void* rulesdumpthread ( void *ptr )
 {
@@ -567,19 +550,17 @@ void* rulesdumpthread ( void *ptr )
     }
 }
 
-
-
 //periodically scan running apps and remove from dlist those that are not running(if they are set to ALLOW/DENY ONCE)
 void* refreshthread ( void* ptr )
 {
     dlist *temp, *prev, *temp2;
     ptr = 0;     //to prevent gcc warnings of unused variable
-    char mypath[32];
+    char mypath[32] = "/proc/";
     char buf[PATHSIZE];
 
     while ( 1 )
     {
-        sleep ( 5 );
+        sleep ( 3 );
         pthread_mutex_lock ( &dlist_mutex );
         temp = first->next;
         while ( temp != NULL )
@@ -591,7 +572,7 @@ void* refreshthread ( void* ptr )
                 continue;
             }
 
-            strcpy ( mypath, "/proc/" );
+            mypath[6]=0;
             strcat ( mypath, temp->pid );
             strcat ( mypath, "/exe" );
 
@@ -603,7 +584,7 @@ void* refreshthread ( void* ptr )
             if ( strcmp ( buf, temp->path ) )
             {
             delete:
-                //if it's an ALLOW/DENY ALWAYS rule, we don't delete it, see if it is the only rule for this PATH, if yes then just toggle the current_pid flag, otherwise if there are already entries for this path, then remove our rule
+                //don't delete *ALWAYS rule. If it's the only rule for this PATH - just toggle the current_pid flag, otherwise if there are other entries for this PATH, then remove our rule
                 if ( !strcmp ( temp->perms, ALLOW_ALWAYS ) || !strcmp ( temp->perms, DENY_ALWAYS ) )
                 {
                     temp2 = first->next;
@@ -702,7 +683,7 @@ void rules_load()
         else {
             is_cpuhog = 0;
         }
-        dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, TRUE, is_cpuhog);
+        dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, 0, TRUE, is_cpuhog);
     }
     if ( fclose ( stream ) == EOF )
         m_printf ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -856,7 +837,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                     *arg = atoi(temp->pid);
                     cpuhogscan_cancelled = 0;
                     cpuhogscan_on = 1;
-                    pthread_create ( &procfdscan_thread, NULL, cpuhogthread, arg );
+                    pthread_create ( &cpuhogscan_thread, NULL, cpuhogthread, arg );
                 }
                 pthread_mutex_unlock ( &dlist_mutex );
                 //notify fe that the rule has an active PID now
@@ -1138,10 +1119,6 @@ int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
 //scan /proc to find which PID the socket belongs to
 int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
-//    strcpy ( m_path, "/usr/bin/transmission" );
-//    strcpy ( m_pid, "9725");
-//    return GOTO_NEXT_STEP;
-
     //vars for scanning through /proc dir
     struct dirent *proc_dirent, *fd_dirent;
     DIR *proc_DIR, *fd_DIR;
@@ -1151,7 +1128,6 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
     // buffers to hold readlink()ed values of /proc/<pid>/exe and /proc/<pid>/fd/<inode>
     char exepathbuf[PATHSIZE];
     char socketbuf[SOCKETBUFSIZE];
-
 
     //convert inode from int to string
     char socketstr[16];
@@ -1277,110 +1253,77 @@ int icmp_check_only_one_inode ( int *m_inodeint )
 //find in procfs which socket corresponds to source port
 int port2socket_udp ( int *portint, int *socketint )
 {
-    //convert portint to a hex string of 4 chars with leading zeroes if necessary
-    char porthex[5];
-    sprintf ( porthex, "%x", *portint );
-    //if hex string < 4 chars, we need to add leading zeroes, so e.g. AF looks 00AF
-    int porthexsize;
-    if ( ( porthexsize = strlen ( porthex ) ) < 4 )
-    {
-        char tempstring[5];
-        strcpy ( tempstring,porthex );
-        //empty the string
-        porthex[0] = 0;
-        int i;
-        for ( i = 0; i < ( 4-porthexsize ); i++ )
-        {
-            strcat ( porthex, "0" );
-        }
-        //restore porthhex (now with leading zeroes)
-        strcat ( porthex, tempstring );
-    }
-    //change all abcdef to ABCDEF
-    int size;
-    for ( size = 0; size < 4; ++size )
-    {
-        porthex[size] = toupper ( porthex[size] );
-    }   
-
-    FILE *udpinfo, *udp6info;
-    char buffer[PATHSIZE];
+    char buffer[4];
     char procport[12];
-    char socketstr[16];
+    char socketstr[12];
+    int not_found_once=0;
+    int bytesread_udp = 0;
+    int bytesread_udp6 = 0;
+    int i = 0;
 
-    //read /proc/net/tcp line by line finding a line with porthex and extracting inode string
-    if ( ( udpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
-    {
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-        return PROCFS_ERROR;
-    }
-    do
-    {
-        errno = 0;//because fgets returns NULL both on error and EOF
-        if ( fgets ( buffer, sizeof ( buffer ), udpinfo ) == NULL )
-        {
-            if ( errno == 0 ) //NULL returned but errno not set => EOF reached
-            {
-                fclose ( udpinfo );
-                //Let's see if we are dealing with an IPv4 packets over IPv6 socket
-                if ( ( udp6info = fopen ( UDP6INFO, "r" ) ) == NULL )
-                {
-                    m_printf ( MLOG_INFO, "udpinfo: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-                    return PROCFS_ERROR;
-                }
-                do
-                {
-                    errno = 0;//because fgets returns NULL both on error and EOF
-                    if ( !fgets ( buffer, sizeof ( buffer ), udp6info ) )
-                    {
-                        if ( errno == 0 ) //NULL returned but errno not set => EOF reached
-                        {
-                            fclose ( udp6info );
-                            return PORT_NOT_FOUND;
-                        } //else
-                        m_printf ( MLOG_INFO, "fgets: %s, errno:%d %s,%d\n", strerror ( errno ), errno, __FILE__, __LINE__ );
-                    }
-                    //else fgets returned no error
-                    strncpy ( procport, &buffer[40],4 );
-                    procport[4] = 0;
-                    if ( strcmp ( porthex, procport ) ) continue;
-                    fclose ( udp6info );
-                    strncpy ( socketstr, &buffer[140], 8 );
-                    m_printf ( MLOG_DEBUG, " IPv6 ");
-                    goto socket_match;
-                }
-                while ( !feof ( udp6info ) );
-                fclose ( udp6info );
-                return PORT_NOT_FOUND;
-            }
-            //else there was an error int fgets for tcpinfo
-            m_printf ( MLOG_INFO, "fgets: %s, errno:%d %s,%d\n", strerror ( errno ), errno, __FILE__, __LINE__ );
-        }
-        //else no error for fgets for tcpinfo
-        strncpy ( procport, &buffer[16], 4 );
-        procport[4] = 0;
-        if ( strcmp ( porthex, procport ) ) continue;
-        //else
-        fclose ( udpinfo );
-        strncpy ( socketstr, &buffer[92], 8 );
+    struct timespec timer,dummy;
+    timer.tv_sec=0;
+    timer.tv_nsec=1000000000/4;
+    //convert portint to a hex string of 4 all-caps chars with leading zeroes if necessary
+    char porthex[5];
+    sprintf (porthex, "%04X", *portint );
 
-    socket_match:
-        ;
-        int i;
-        for ( i = 0; i < 8; ++i )
-        {
-            if ( socketstr[i] == 32 )
-            {
-                socketstr[i] = 0; // 0x20 space, see /proc/net/tcp
-                break;
-            }
-        }
-        *socketint = atoi ( socketstr );
-        return 0;
+    goto dont_fread;
+
+    do_fread:
+    memset(udp_membuf,0, MEMBUF_SIZE);
+    fseek(udpinfo,0,SEEK_SET);
+    errno = 0;
+    if (bytesread_udp = fread(udp_membuf, sizeof(char), MEMBUF_SIZE , udpinfo)){
+            if (errno != 0) perror("READERORRRRRRR");
     }
-    while ( !feof ( udpinfo ) );
-    fclose ( udpinfo );
-    return PORT_NOT_FOUND;
+    printf ("tcp bytes read: %d\n", bytesread_udp);
+
+    memset(udp6_membuf, 0, MEMBUF_SIZE);
+    fseek(udp6info,0,SEEK_SET);
+    errno = 0;
+    if (bytesread_udp6 = fread(udp6_membuf, sizeof(char), MEMBUF_SIZE , udp6info)){
+            if (errno != 0) perror("6READERORRRRRRR");
+    }
+    printf ("tcp6 bytes read: %d\n", bytesread_udp6);
+
+    dont_fread:
+    while(1){
+        memcpy(buffer, &udp_membuf[144+128*i], 4);
+        if (!memcmp ( porthex, buffer, 4 ) ){//match!
+            memcpy(socketstr, &udp_membuf[144+128*i+76], 12);
+            goto endloop;
+        }
+        if (buffer[0] != 0){ //EOF not reached, reiterate
+            i++;
+            continue;
+        }
+        // else EOF reached with no match, check if it was IPv6 socket
+        i = 0;
+        while(1){
+            memcpy(buffer,&udp6_membuf[184+171*i],4);
+            if ( !memcmp ( porthex, buffer, 4 ) ){ //match!
+                memcpy(socketstr, &udp6_membuf[184+171*i+100],12);
+                goto endloop;
+            }
+            if (buffer[0] != 0){ //EOF not reached, reiterate
+                i++;
+                continue;
+            }
+            //else EOF reached with no match, if it was 1st iteration then reread proc file
+            if (not_found_once) return INODE_NOT_FOUND_IN_PROC;
+            //else
+            nanosleep(&timer, &dummy);
+            not_found_once=1;
+            goto do_fread;
+            }
+    }
+    endloop:
+    i=1;
+    while (socketstr[i] != 32){i++;}
+    socketstr[i] = 0; // 0x20 == space, see /proc/net/tcp
+    *socketint = atoi ( socketstr );
+        return GOTO_NEXT_STEP;
 }
 
 
@@ -1462,8 +1405,7 @@ int port2socket_tcp ( int *portint, int *socketint )
 }
 
 //Handler for TCP packets
-int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
-{
+int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
     int retval, socketint;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;  
@@ -1477,75 +1419,46 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
     if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
+    }
 }
-
-\
-}
-
 
 //Handler for UDP packets
-int packet_handle_udp ( int *srcudp )
+int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval;
-    int socketint;
-
-    //each function returns 0 when it is OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( retval = port2socket_udp ( srcudp, &socketint ) ) goto out;
+    int retval, socketint;
+    //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
+    if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
     if(cpuhogscan_on){
         if (parsecache(socketint)) {
             printf ("CACHE TRIGGERED\n");
             return CPUHOG_CACHE;
         }
     }
-    if ( retval = socket_find_in_dlist ( &socketint ) ) goto out;
-    char path[PATHSIZE];
-    char pid[PIDLENGTH];
-    unsigned long long stime;
-    if ( retval = socket_find_in_proc ( &socketint, path, pid, &stime ) ) goto out;
-    if ( retval = path_find_in_dlist ( path, pid, &stime ) ) goto out;
-
-    if ( !fe_active_flag_get() )
-    {
-        retval = FRONTEND_NOT_ACTIVE;
-        goto out;
-    }
-    if ( retval = fe_ask ( path, pid, &stime ) ) goto out;
-
+    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
-
 }
 
-int packet_handle_icmp()
+int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval;
-    int inodeint;
+    int retval, socketint;
 
-    if ( retval = icmp_check_only_one_inode ( &inodeint ) ) goto out;
-    if ( retval = socket_find_in_dlist ( &inodeint ) ) goto out;
-    char path[PATHSIZE];
-    char pid[PIDLENGTH];
-    unsigned long long stime;
-
-    if ( retval = socket_find_in_proc ( &inodeint, path, pid, &stime ) ) goto out;
-    if ( retval = path_find_in_dlist ( path, pid, &stime ) ) goto out;
+    if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
+    if (( retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
+    if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
+    if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
     if ( !fe_active_flag_get() )
-    {
-        retval = FRONTEND_NOT_ACTIVE;
-        goto out;
-    }
-    if ( retval = fe_ask ( path, pid, &stime ) ) goto out;
-
 out:
     return retval;
 }
 
-
-
-
-int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
+int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
+#ifdef DEBUG
     static int is_strange_daddr = 0;
     static char strange_daddr[INET_ADDRSTRLEN];
+#endif
     struct iphdr *ip;
     int id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
@@ -1562,8 +1475,8 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
         is_strange_daddr = 1;
         strcpy(strange_daddr, daddr);
     }
-#endif
     m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
+# endif
     int verdict;
     u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
     char path[PATHSIZE], pid[PIDLENGTH];
@@ -1626,6 +1539,12 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
+    case CPUHOG_CACHE:
+         if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
+          goto DROPverdict;
+        }
+        //else CPUHOG_CACHE with *ALWAYS verdict
+
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
         
@@ -1698,7 +1617,7 @@ int queueHandle_input ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct 
 
 
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
-int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
+int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
 #ifdef DEBUG2
     struct timeval time_struct;
@@ -1711,9 +1630,6 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     if ( !ph ) {printf ("ph == NULL, should ever happen, please report"); return 0;}
     id = ntohl ( ph->packet_id );
     nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
-#ifdef DEBUG
-    m_printf ( MLOG_TRAFFIC, "%d %d ",ip->version, ip->ihl);
-#endif
     printf ( "%d\n", ntohl(ip->tos));
     char daddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
@@ -1777,8 +1693,14 @@ int queueHandle ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_da
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
-        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
+    case CPUHOG_CACHE:
+        if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
+            goto DROPverdict;
+        }
+        //else CPUHOG_CACHE with *ALWAYS verdict
+
+     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
+     m_printf ( MLOG_TRAFFIC, "allow\n" );
         
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -1850,20 +1772,6 @@ return 0;
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
         return 0;
-
-    case CPUHOG_CACHE:
-        if (!strcmp(cpuhog_perms, ALLOW_ONCE) || !strcmp(cpuhog_perms, ALLOW_ALWAYS)){
-            nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-            m_printf ( MLOG_TRAFFIC, "allow cached\n" );
-            return 0;
-        }
-        else{
-            nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-            m_printf ( MLOG_TRAFFIC, "deny cached\n" );
-            return 0;
-        }
-
-    }
 }
 
 void loggingInit()
@@ -1900,8 +1808,7 @@ void loggingInit()
     }
 }
 
-void pidFileCheck()
-{
+void pidFileCheck() {
     // use stat() to check if PIDFILE exists.
     //TODO The check is quick'n'dirty. Consider making more elaborate check later
     struct stat m_stat;
@@ -2057,7 +1964,7 @@ void SIGTERM_handler ( int signal )
     rulesfileWrite();
     //release netfilter_queue resources
     m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
-    if ( nfq_close ( globalh ) == -1 )
+    if ( nfq_close ( globalh_out ) == -1 )
     {
         m_printf ( MLOG_INFO,"error in nfq_close\n" );
     }
@@ -2218,17 +2125,13 @@ int main ( int argc, char *argv[] )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
 
-    procnettcpfd = open ( "/proc/net/tcp", O_RDONLY );
-    procnetudpfd = open ( "/proc/net/udp", O_RDONLY );
-    procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
-
     //-----------------Register queue handler-------------
     int nfqfd;
-    globalh = nfq_open();
-    if ( !globalh ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if ( nfq_unbind_pf ( globalh, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
-    if ( nfq_bind_pf ( globalh, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    struct nfq_q_handle * globalqh = nfq_create_queue ( globalh, NFQNUM_OUTPUT, &queueHandle, NULL );
+    globalh_out = nfq_open();
+    if ( !globalh_out ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
+    if ( nfq_unbind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
+    if ( nfq_bind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    struct nfq_q_handle * globalqh = nfq_create_queue ( globalh_out, NFQNUM_OUTPUT, &nfq_handle_out, NULL );
     if ( !globalqh ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
         return 0;
@@ -2236,17 +2139,17 @@ int main ( int argc, char *argv[] )
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
     if ( nfq_set_queue_maxlen ( globalqh, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
-    nfqfd = nfq_fd ( globalh );
+    nfqfd = nfq_fd ( globalh_out );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
     
     
     //-----------------Register queue handler for INPUT chain-----
-    globalh_input = nfq_open();
-    if ( !globalh_input ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if ( nfq_unbind_pf ( globalh_input, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
-    if ( nfq_bind_pf ( globalh_input, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_input, NFQNUM_INPUT, &queueHandle_input, NULL );
+    globalh_in = nfq_open();
+    if ( !globalh_in ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
+    if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
+    if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
     if ( !globalqh_input ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
         return 0;
@@ -2254,30 +2157,9 @@ int main ( int argc, char *argv[] )
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
     if ( nfq_set_queue_maxlen ( globalqh_input, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
-    nfqfd_input = nfq_fd ( globalh_input );
+    nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
-
-
-    //-----------------Register queue handler for REPEAT chain-----
-    globalh_repeat = nfq_open();
-    if ( !globalh_repeat ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if ( nfq_unbind_pf ( globalh_repeat, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
-    if ( nfq_bind_pf ( globalh_repeat, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    struct nfq_q_handle * globalqh_repeat = nfq_create_queue ( globalh_repeat, NFQNUM_REPEAT, &queueHandle_repeat, NULL );
-    if ( !globalqh_repeat ){
-	m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	return 0;
-    }
-    //copy only 40 bytes IP header length of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_repeat, NFQNL_COPY_META, 0 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh_repeat, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
-    nfqfd_repeat = nfq_fd ( globalh_repeat);
-    m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
-    //--------Done registering------------------
-
-
-
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
@@ -2322,6 +2204,8 @@ int main ( int argc, char *argv[] )
         m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return PROCFS_ERROR;
     }
+    procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
+
 
     if ((tcp_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(tcp_membuf,0, MEMBUF_SIZE);
@@ -2342,7 +2226,7 @@ int main ( int argc, char *argv[] )
     char buf[4096] __attribute__ ( ( aligned ) );
     while ( ( rv = recv ( nfqfd, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
     {
-        nfq_handle_packet ( globalh, buf, rv );
+        nfq_handle_packet ( globalh_out, buf, rv );
     }
 }
 // kate: indent-mode cstyle; space-indent on; indent-width 4; 

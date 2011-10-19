@@ -573,9 +573,7 @@ void  fe_cleanup_and_quit(){
 }
 
 int main(int argc, char *argv[]) {
- 
-  
-  
+   
 #ifndef DEBUG 
 if (argc == 1 || strcmp(argv[1],"magic_number")){
   printf("This program is part of LeopardFlower suite and should not be executed directly by user. \n");
