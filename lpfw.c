@@ -74,6 +74,7 @@ pthread_mutex_t cpuhog_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, cpuhogscan_thread;
+pthread_t ct_del_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
@@ -94,7 +95,7 @@ FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int procnetrawfd;
 char cpuhog_cache [CPUHOG_MAX_CACHE][32];
 struct nf_conntrack *ct_out, *ct_in;
-struct nfct_handle *deletemark_handle, *dummy_handle;
+struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
 char cpuhogscan_on = 0; // flag to show is procfdscan_thread has been started and running
@@ -104,16 +105,39 @@ char cpuhog_perms[PERMSLENGTH];
 
 int nfqfd_input;
 
+pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
+char predicate = FALSE;
+
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
   if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
-        //m_printf ( MLOG_DEBUG2, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return NFCT_CB_CONTINUE;
       }
-     // m_printf ( MLOG_DEBUG2, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      m_printf ( MLOG_DEBUG, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
   }
 }
+
+void* ct_delthread ( void* ptr )
+{
+    struct nfct_handle *deletemark_handle;
+    if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
+    if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, delete_mark, NULL) == -1)) {perror("cb_reg");}
+
+    while(1){
+	pthread_mutex_lock(&condvar_mutex);
+	while(predicate == FALSE){
+	    pthread_cond_wait(&condvar, &condvar_mutex);
+	}
+	predicate = FALSE;
+	pthread_mutex_unlock(&condvar_mutex);
+	if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
+    }
+}
+
+
 
 int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
   //m_printf ( MLOG_DEBUG2, " setmark_out ");
@@ -133,11 +157,9 @@ void  initialize_conntrack(){
    if ((ct_out = nfct_new()) == NULL){perror("new");}
    if ((ct_in = nfct_new()) == NULL){perror("new");}
    if ((dummy_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
-   if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
    if ((setmark_handle_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
    if ((setmark_handle_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){ perror("nfct_open");}
    if ((nfct_callback_register(setmark_handle_out, NFCT_T_ALL, setmark_out, NULL) == -1)) {perror("cb_reg");}
-   if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, delete_mark, NULL) == -1)) {perror("cb_reg");}
    if ((nfct_callback_register(setmark_handle_in, NFCT_T_ALL, setmark_in, NULL) == -1)) {perror("cb_reg");}
    return;
 }
@@ -414,9 +436,14 @@ void dlist_del ( char *path, char *pid )
                 temp->next->prev = temp->prev;
             nfmark_to_delete = temp->nfmark;
             free ( temp );
-            //remove tracking for this app's active connection
-	    if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
-            pthread_mutex_unlock ( &dlist_mutex );
+
+	    //remove tracking for this app's active connection
+	    pthread_mutex_lock(&condvar_mutex);
+	    predicate = TRUE;
+	    pthread_mutex_unlock(&condvar_mutex);
+	    pthread_cond_signal(&condvar);
+
+	    pthread_mutex_unlock ( &dlist_mutex );
 	    return;
         }
         temp = temp->next;
@@ -2185,6 +2212,7 @@ int main ( int argc, char *argv[] )
     pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
 #endif
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
+    pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
 
     
 
