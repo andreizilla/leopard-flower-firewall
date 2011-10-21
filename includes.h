@@ -91,7 +91,7 @@ enum
     FORKED_CHILD_ALLOW,
     FORKED_CHILD_DENY,
     PROCFS_ERROR,
-    CPUHOG_CACHE
+    CPUHOG_CACHE_TRIGGERED
 };
 
 //commands passed through msgq

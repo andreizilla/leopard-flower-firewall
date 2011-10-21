@@ -110,6 +110,7 @@ pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
 char predicate = FALSE;
 
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
+    //while(1){printf("DELMARK");}
   if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
 	m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -118,6 +119,7 @@ int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
       m_printf ( MLOG_DEBUG, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
   }
+  return NFCT_CB_CONTINUE;
 }
 
 void* ct_delthread ( void* ptr )
@@ -1439,14 +1441,14 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
       if(cpuhogscan_on){
         if (parsecache(socketint)) {
             printf ("CACHE TRIGGERED\n");
-            return CPUHOG_CACHE;
-        } 
+	    return CPUHOG_CACHE_TRIGGERED;
+	}
+      }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
     if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
-    }
 }
 
 //Handler for UDP packets
@@ -1458,7 +1460,7 @@ int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, u
     if(cpuhogscan_on){
         if (parsecache(socketint)) {
             printf ("CACHE TRIGGERED\n");
-            return CPUHOG_CACHE;
+	    return CPUHOG_CACHE_TRIGGERED;
         }
     }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
@@ -1566,7 +1568,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
-    case CPUHOG_CACHE:
+    case CPUHOG_CACHE_TRIGGERED:
          if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
           goto DROPverdict;
         }
@@ -1646,11 +1648,6 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
 int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
-#ifdef DEBUG2
-    struct timeval time_struct;
-    gettimeofday ( &time_struct, NULL );
-    m_printf ( MLOG_DEBUG, "%s.%d\n", ctime ( &time_struct.tv_sec ), ( int ) time_struct.tv_usec );
-#endif
     struct iphdr *ip;
     u_int32_t id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
@@ -1677,9 +1674,11 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         int srctcp = ntohs ( tcp->source );     
         m_printf ( MLOG_TRAFFIC, "TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
 
+	//remember fe's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
-            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+	    //drop if fe was busy before we started processing
+	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
             else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
         }
         break;
@@ -1720,7 +1719,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
-    case CPUHOG_CACHE:
+    case CPUHOG_CACHE_TRIGGERED:
         if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
             goto DROPverdict;
         }
