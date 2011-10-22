@@ -65,7 +65,13 @@ extern  void frontend_unregister();
 extern  void msgq_initialize();
 
 int m_printf_file(int loglevel, char *format, ...) {
+    char logstring[PATHSIZE*2]; //shaould be enough for the longest line in log
+    va_list args;
+    va_start ( args, format );
+    vsprintf ( logstring, format, args );
+    write ( fileno ( logfilefd ), logstring, strlen ( logstring ) );
 
+     return 0;
 }
 
 void die() {
@@ -437,7 +443,7 @@ void refresh_upperwin() {
 //these flags are used to signal that an argument has been entered twice
 
 void badArgs() {
-    printf("Duplicate,unknown or conflicting argument specified. Exitting...\n");
+    m_printf(MLOG_ERROR, "Duplicate,unknown or conflicting argument specified. Exitting...\n");
     exit(0);
 }
 

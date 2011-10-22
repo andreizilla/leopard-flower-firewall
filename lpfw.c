@@ -1614,7 +1614,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
     case INODE_NOT_FOUND_IN_PROC:
-        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" ); goto DROPverdict;
+	m_printf ( MLOG_TRAFFIC, "port has no socket. Remote host has probed this machine's port\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
@@ -1771,7 +1771,7 @@ return 0;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
     case INODE_NOT_FOUND_IN_PROC:
-        m_printf ( MLOG_TRAFFIC, "inode associates with packet was not found in /proc. Very unusual, please report\n" ); goto DROPverdict;
+	m_printf ( MLOG_TRAFFIC, "port has no socket, dropping\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:

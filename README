@@ -1,11 +1,12 @@
 <<<----Leopard Flower 0.4 (released Oct 2011)---->>>
 
-  Leopard Flower (aka LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon called "lpfw" and frontend(built with ncurses) called "lpfwcli".
+  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon called "lpfw" and frontend(built with ncurses) called "lpfwcli". There is also a graphical Qt-based frontend (see lpfw_frontend_* packages).
 
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
   The following packaged must be installed for lpfw to work:
   libnetfilter-queue
+  libnetfilter-conntrack
   libnfnetlink
 
 SIMPLE CONFIGURATION:
@@ -21,28 +22,6 @@ ADVANCED CONFIGURATION:
   2. If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
   3. 30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
   4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "lpfw --cli" as a regular user (not root). You will see an ncurses-based frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
-
-
-
-
-HEADLESS MODE - WITHOUT FRONTEND:
-  If you want to run lpfw without the frontend, you may want to edit the rulesfile manually
-  By default rules are written to /etc/lpfw.rules in the following  format:
-
-  full path to the executable file <new line character>
-  ALLOW ALWAYS or DENY ALWAYS <new line character>
-  executable file's size in bytes <new line character>
-  executable file's sha512 sum in hexadecimal representation <new line character>
-
-  Example:
-  /usr/bin/wget
-  ALLOW ALWAYS
-  333356
-  083c1c88f8ded3cc1d6f83687e3092efab938d6a18ad5f95728189861e9d7bb145651a3a0b7846df69f02f10c50e45361880d4ea2549615a655643ed0bd20fa9
-  /home/wwwwww/apps/browsers/opera-11.10-2048.i386.linux/lib/opera/opera
-  ALLOW ALWAYS
-  16634040
-  7c4f6bd7c742c4bb8096e18fea5f92c6eade14152cf0ccdd36934b61ce1f578553e65be377408d34727c9aabed4ab3842f8cbbe776cd156d75f160925bea8c9f
 
 
 
@@ -85,15 +64,61 @@ COMMANDLINE ARGUMENTS:
 
 
 KNOWN ISSUES:
-  1. lpfwcli can be invoked only from within X session, it doesn't work under pure terminal(for security reasons).
-  2. LPFW only filters OUTGOING connections.
-  3. Only one program can send ICMP packets simultaneously, if more than one does, LeopardFlower blocks both.
-  4. Only IPv4 is supported, since developers have no access to IPv6 network (although there is support for IPv4 packets over IPv6 sockets)
-  5. When a torrent is starting to download, a lot of new connections get established, thus lpfw may cause CPU usage to spike during that time.
-  6. A combination of exceptionally large executables(20Mb+) + slow CPU may result in a 2+ seconds delay when an application connects to the web for the first time, due to heavy calculations performed by sha512 checksumming function.
-  7. Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule. 
-  8. On some systems after typing "make", you may get a warning similar to the one below:
-  lpfw.c:1230:32: warning: passing argument 2 of ‘nfq_get_payload’ from
-  incompatible pointer type
-  /usr/local/include/libnetfilter_queue/libnetfilter_queue.h:107:12: note: expected ‘unsigned char **’ but argument is of type ‘char **’
-  This warning can be safely ignored.
+    1. lpfwcli can be invoked only from within X session, it can't work under pure tty(for security reasons).
+    2. Only one program can send ICMP packets simultaneously, if more than one does, LPFW blocks both.
+    3. Only IPv4 is supported, IPv6 support is underway.
+    4. A combination of exceptionally large executables(20Mb+) + slow CPU may result in a 2+ seconds delay when an application connects to the web for the first time, due to heavy calculations performed by sha512 checksumming function.
+    5. Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
+    6. Access to network filesystems like NFS, CIFS, SMB an others or to in-kernel servers like khttpd will not be detected by LPFW since such access doesn't create user-space sockets. You will have to manually add iptables rules for such services.
+    7. If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
+    8. After going to sleep and waking up the PC, LPFW doesn't work properly, it has to be restarted.
+
+
+
+THE REST OF THIS FILE'S CONTENTS IS TECHNICAL INFORMATION FOR SYSTEM ADMINISTRATORS AND ADVANCED USERS:
+
+
+HEADLESS MODE - WITHOUT FRONTEND:
+  If you want to run lpfw without the frontend, you may want to edit the rulesfile manually
+  By default rules are written to /etc/lpfw.rules in the following  blocks of text:
+
+  full path to the executable file <new line character>
+  ALLOW ALWAYS or DENY ALWAYS <new line character>
+  executable file's size in bytes <new line character>
+  executable file's sha512 sum in hexadecimal representation <new line character>
+  (optional line) additional options like [CPUHOG] <new line character>
+  the block ends with a <new line character>
+
+  Example:
+ --------------------------------------------------
+  /usr/bin/wget
+  ALLOW ALWAYS
+  333356
+  083c1c88f8ded3cc1d6f83687e3092efab938d6a18ad5f95728189861e9d7bb145651a3a0b7846df69f02f10c50e45361880d4ea2549615a655643ed0bd20fa9
+  [CPUHOG]
+
+  /home/wwwwww/apps/browsers/opera-11.10-2048.i386.linux/lib/opera/opera
+  ALLOW ALWAYS
+  16634040
+  7c4f6bd7c742c4bb8096e18fea5f92c6eade14152cf0ccdd36934b61ce1f578553e65be377408d34727c9aabed4ab3842f8cbbe776cd156d75f160925bea8c9f
+
+---------------------------------------------------------
+
+
+
+
+
+ARCHITECTURE
+
+LeopardFlower (LPFW) utilizes a facility provided by netfilter whereby all outgoing and incoming packets which initiate a new connection are delivered to LPFW for decision on whether to drop them or accept them. LPFW sets up a rule with iptables similar to
+iptables -A OUTPUT -j NFQUEUE --queue-num 11220
+and installs a callback (using libnetfilter_queue) which is notified whenever a packet hits the NFQUEUE (NFQ). The fact that LPFW doesn't need to process every single packet but only those which initiate new connections, significantly decreases LPFW's CPU consumption.
+
+Upon start up, LPFW read a rules file (if any was created in the previous session) which contains  internet access permissions per application. Based upon these rules, whenever a new packet hits NFQ, LPFW decides whether to allow or deny internet access or whether to ask the user what to do if no rule for the application in question has yet been defined.
+
+In order to establish a correlation between a packet which hit nfq and the application which sent it, LPFW does the following:
+1. for an outgoing packet - extract source port  (for an incoming packet - extract destination port) and look up in /proc/net/tcp to see which socket corresponds to the port.
+2. Having found the socket, scan /proc/<PID>/fd to see which process owns the socket
+3 Finally extract the application name from /proc/<PID>/exe
+
+LPFW sets a unique netfilter mark on all connections of a specific app. This enables LPFW to instantly halt all app's internet activity if user chooses so. In order to set such a netfilter mark, LPFW uses libnetfilter_conntrack library.

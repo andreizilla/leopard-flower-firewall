@@ -1,6 +1,8 @@
 Version 0.4 (released ca. Oct 2011)
 Graphical frontend introduced both as a standalone executable or as a python application.
-
+Significantly decreased CPU usage on torrent upload.
+LPFW now filters incoming connections.
+If an app terminates or it's rule gets deleted, LPFW terminates all active connections for that app.
 
 Version 0.3 (released ca. Sep 2011)
 Executables are checked for their sha512 sums
