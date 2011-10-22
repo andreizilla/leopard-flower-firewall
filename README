@@ -75,11 +75,14 @@ KNOWN ISSUES:
 
 
 
+
+
+
 THE REST OF THIS FILE'S CONTENTS IS TECHNICAL INFORMATION FOR SYSTEM ADMINISTRATORS AND ADVANCED USERS:
 
 
 HEADLESS MODE - WITHOUT FRONTEND:
-  If you want to run lpfw without the frontend, you may want to edit the rulesfile manually
+  If you want to run LPFW without the frontend, you may want to edit the rulesfile manually
   By default rules are written to /etc/lpfw.rules in the following  blocks of text:
 
   full path to the executable file <new line character>

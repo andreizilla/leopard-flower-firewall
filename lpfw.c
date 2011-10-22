@@ -92,11 +92,11 @@ int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int procnetrawfd;
-char cpuhog_cache [CPUHOG_MAX_CACHE][32];
 struct nf_conntrack *ct_out, *ct_in;
 struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
+char cpuhog_cache [CPUHOG_MAX_CACHE][32];
 char cpuhogscan_on = 0; // flag to show is procfdscan_thread has been started and running
 char cpuhogscan_cancelled = 0; //flag which if set stops procfdscan_thread
 char cpuhog_active = 0; //flag that prevents more than one CPU hog applications to run
@@ -144,14 +144,12 @@ void* ct_delthread ( void* ptr )
 
 
 int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
-  //m_printf ( MLOG_DEBUG2, " setmark_out ");
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
   nfct_query(setmark_handle_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
 int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
-  //m_printf ( MLOG_DEBUG2, " setmark_in ");
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_in);
   nfct_query(setmark_handle_in, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
