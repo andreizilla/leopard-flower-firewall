@@ -88,7 +88,6 @@ int fe_was_busy_in, fe_was_busy_out;
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
 int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
-u_int8_t family = AF_INET; //used by conntrack
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
@@ -102,6 +101,8 @@ char cpuhogscan_on = 0; // flag to show is procfdscan_thread has been started an
 char cpuhogscan_cancelled = 0; //flag which if set stops procfdscan_thread
 char cpuhog_active = 0; //flag that prevents more than one CPU hog applications to run
 char cpuhog_perms[PERMSLENGTH];
+char cpuhog_path[PATHSIZE];
+char cpuhog_pid[PIDLENGTH];
 
 int nfqfd_input;
 
@@ -124,6 +125,7 @@ int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
 
 void* ct_delthread ( void* ptr )
 {
+    u_int8_t family = AF_INET; //used by conntrack
     struct nfct_handle *deletemark_handle;
     if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
     if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, delete_mark, NULL) == -1)) {perror("cb_reg");}
@@ -417,6 +419,7 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
     temp->cpuhog = is_cpuhog;
     if (is_cpuhog){
         strcpy(cpuhog_perms, temp->perms);
+	strcpy(cpuhog_path, temp->path);
     }
     pthread_mutex_unlock ( &dlist_mutex );
 }
@@ -840,6 +843,9 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 strcpy ( temp->pid, pid ); //update entry's PID and inode
                 temp->current_pid = '1';
                 temp->stime = *stime;
+		if (temp->cpuhog){
+		    strcpy(cpuhog_pid, temp->pid);
+		}
 
                 int retval;
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
@@ -1440,7 +1446,7 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
     if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;  
       if(cpuhogscan_on){
         if (parsecache(socketint)) {
-            printf ("CACHE TRIGGERED\n");
+	    m_printf ( MLOG_TRAFFIC, "(cache) %s %s ", cpuhog_path, cpuhog_pid );
 	    return CPUHOG_CACHE_TRIGGERED;
 	}
       }
@@ -1459,7 +1465,7 @@ int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, u
     if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
     if(cpuhogscan_on){
         if (parsecache(socketint)) {
-            printf ("CACHE TRIGGERED\n");
+	    m_printf ( MLOG_TRAFFIC, "(cache) %s %s ", cpuhog_path, cpuhog_pid );
 	    return CPUHOG_CACHE_TRIGGERED;
         }
     }
