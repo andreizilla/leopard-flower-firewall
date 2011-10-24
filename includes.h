@@ -22,6 +22,7 @@ typedef struct m_dlist
     u_int32_t nfmark; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
     struct m_dlist *prev; //previous element in dlist
     struct m_dlist *next; // next element in dlist
+    char *sockets_cache;//pointer to 2D array of cache
 } dlist;
 
 //structures used in msgq for communication daemon<>frontend
@@ -48,6 +49,17 @@ typedef struct
     long type;
     credentials creds;
 } msg_struct_creds;
+
+//not in use ATM, cache is part of dlist, until there arises a need to separate cache from dlist due to excessive mutex locking/unlocking
+typedef struct m_cache_item{
+    struct m_cache_item *prev;
+    struct m_cache_item *next;
+    char path[PATHSIZE];
+    char pid[PIDLENGTH];
+    char perms[PERMSLENGTH];
+    char sockets[MAX_CACHE][32];
+} cache_item_old;
+
 
 
 
@@ -91,7 +103,8 @@ enum
     FORKED_CHILD_ALLOW,
     FORKED_CHILD_DENY,
     PROCFS_ERROR,
-    CPUHOG_CACHE_TRIGGERED
+    CACHE_TRIGGERED_ALLOW,
+    CACHE_TRIGGERED_DENY
 };
 
 //commands passed through msgq

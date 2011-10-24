@@ -44,6 +44,9 @@ FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
 dlist *first, *copy_first;
 
+//first item of sockets cache list
+char *first_cache;
+
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 msg_struct msg_d2f = {1, 0};
 msg_struct msg_f2d = {1, 0};   
@@ -59,7 +62,7 @@ extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 
 //Forward declarations to make code parser happy
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog );
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 int ( *m_printf ) ( int loglevel, char *format, ... );
 
 //mutex to access dlist
@@ -70,10 +73,10 @@ pthread_mutex_t nfmark_count_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to lock fe_active_flag
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t cpuhog_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, cpuhogscan_thread;
+pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, cachebuild_thread;
 pthread_t ct_del_thread;
 
 //flag which shows whether frontend is running
@@ -95,14 +98,6 @@ int procnetrawfd;
 struct nf_conntrack *ct_out, *ct_in;
 struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
-
-char cpuhog_cache [CPUHOG_MAX_CACHE][32];
-char cpuhogscan_on = 0; // flag to show is procfdscan_thread has been started and running
-char cpuhogscan_cancelled = 0; //flag which if set stops procfdscan_thread
-char cpuhog_active = 0; //flag that prevents more than one CPU hog applications to run
-char cpuhog_perms[PERMSLENGTH];
-char cpuhog_path[PATHSIZE];
-char cpuhog_pid[PIDLENGTH];
 
 int nfqfd_input;
 
@@ -222,10 +217,12 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         //fsync(filelogfd);
         return 0;
     case MLOG_DEBUG2:
+#ifdef DEBUG2
 	// check if  logging enabled
 	va_start ( args, format );
 	vprintf ( format, args );
 	//fsync(filelogfd);
+#endif
 	return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
         va_start ( args, format );
@@ -384,7 +381,7 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog )
+void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
@@ -414,11 +411,26 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
     temp->exesize = size;
     temp->nfmark = nfmark;
     temp->first_instance = first_instance; //obsolete member,can be purged
-    temp->cpuhog = is_cpuhog;
-    if (is_cpuhog){
-        strcpy(cpuhog_perms, temp->perms);
-	strcpy(cpuhog_path, temp->path);
-    }
+
+    //add to cache regardless if pid is active
+    //TODO we only need cache for active rules - should socket_cache be allocated/removed dynamically?
+//    if (current){
+//	pthread_mutex_lock(&cache_mutex);
+//	cache_item *cache_temp = first_cache;
+//	while (cache_temp->next != NULL){
+//	    cache_temp =cache_temp->next;
+//	}
+//	if ((cache_temp->next = malloc (sizeof (cache_item))) == NULL){perror("malloc");}
+//	cache_temp->next->prev = cache_temp;
+//	//make cache temp point to the newly created baby
+//	cache_temp = cache_temp->next;
+//	strcpy(cache_temp->path, temp->path);
+//	strcpy(cache_temp->pid, temp->pid);
+//	cache_temp->sockets[0][0] = CACHE_EOL_MAGIC;
+//	pthread_mutex_unlock(&cache_mutex);
+//    }
+    if ((temp->sockets_cache = malloc(sizeof(char)*MAX_CACHE*32)) == NULL){perror("malloc");}
+     temp->sockets_cache[0] = (char)CACHE_EOL_MAGIC;
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
@@ -431,8 +443,25 @@ void dlist_del ( char *path, char *pid )
     {
         if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, pid ) )
         {
-            //if CPU HOG is being removed, stop the cpuhogscan thread
-            if (temp->cpuhog) cpuhogscan_cancelled=1;
+//	    //remove cache entry first
+//	    pthread_mutex_lock(&cache_mutex);
+//	    cache_item *temp_cache;
+//	    temp_cache = first_cache;
+//	    while (temp_cache->next != NULL){
+//		temp_cache = temp_cache->next;
+//		if ( !(!strcmp ( temp_cache->path, path ) && !strcmp ( temp_cache->pid, pid )) ) continue;
+//		//else found entry, remove it
+//		temp_cache->prev->next = temp_cache->next;
+//		if (temp_cache->next != NULL)
+//		    temp_cache->next->prev = temp_cache->prev;
+//		free(temp_cache);
+//		goto cache_removed;
+//	    }
+//	    m_printf ( MLOG_INFO, "cache entry for %s with PID %s was not found. Needs investigation\n", path, pid );
+
+//	    cache_removed:
+//	    pthread_mutex_unlock(&cache_mutex);
+
             //remove the item
             temp->prev->next = temp->next;
             if ( temp->next != NULL )
@@ -455,69 +484,88 @@ void dlist_del ( char *path, char *pid )
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int parsecache(int socket){
+int parsecache(int socket, char *path, char *pid){
     char socketstr[32] = "socket:[";
     sprintf(&socketstr[8],"%d", socket);
     strcat(socketstr,"]");
-    int i = 0;
-    pthread_mutex_lock(&cpuhog_cache_mutex);
-    while (cpuhog_cache[i][0] != 38){
-        if (i >= CPUHOG_MAX_CACHE-1) break;
-        if (!strcmp(cpuhog_cache[i], socketstr)){ //found match
-            pthread_mutex_unlock(&cpuhog_cache_mutex);
-            return 1;
-        }
-        i++;
+    int i;
+    int retval;
+    dlist *temp;
+    pthread_mutex_lock(&dlist_mutex);
+    temp = first;
+    while (temp->next != NULL && temp->next->current_pid){
+	temp = temp->next;
+	i = 0;
+	while (temp->sockets_cache[i*32] != CACHE_EOL_MAGIC){
+	    if (i >= MAX_CACHE-1) break;
+	    if (!strcmp(&temp->sockets_cache[i*32], socketstr)){ //found match
+		if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
+		else retval = CACHE_TRIGGERED_DENY;
+		strcpy(path, temp->path);
+		strcpy(pid, temp->pid);
+		pthread_mutex_unlock(&dlist_mutex);
+		return retval;
+	    }
+	    i++;
+	}
     }
-    pthread_mutex_unlock(&cpuhog_cache_mutex);
-    return 0;
+    pthread_mutex_unlock(&dlist_mutex);
+    return GOTO_NEXT_STEP;
 }
 
-void*cpuhogthread ( void *pid )
-{
+void* cachebuildthread ( void *pid ){
     DIR *mdir;
     struct dirent *mdirent;
     int pathlen;
-
-    char mpath[32] = "/proc/";
-    sprintf(&mpath[6], "%d", *((int*)pid));
-    strcat(mpath,"/fd/");
-    pathlen = strlen(mpath);
-
-    struct timespec cpuhogthread_refresh_timer,dummy;
-    cpuhogthread_refresh_timer.tv_sec=0;
-    cpuhogthread_refresh_timer.tv_nsec=1000000000/4;
+    char mpath[32];
+    struct timespec refresh_timer,dummy;
+    refresh_timer.tv_sec=0;
+    refresh_timer.tv_nsec=1000000000/4;
     int i;
+    dlist *temp;
 
-    if ((mdir = opendir ( mpath )) == NULL){
-        perror("opendir");
-        return;
+    while(1){
+	nanosleep(&refresh_timer, &dummy);
+	pthread_mutex_lock(&dlist_mutex);
+	temp = first;
+	//cache only running PIDs
+	while (temp->next != NULL && temp->next->current_pid){
+	    temp = temp->next;
+	    strcpy(mpath, "/proc/");
+	    strcat(mpath, temp->pid);
+	    strcat(mpath,"/fd/");
+	    pathlen = strlen(mpath);
+	    if ((mdir = opendir ( mpath )) == NULL){
+		m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		continue;
+	    }
+	    i = 0;
+	    errno=0;
+	    while (mdirent = readdir ( mdir )){
+		mpath[pathlen]=0;
+		strcat(mpath, mdirent->d_name);
+		memset (&temp->sockets_cache[i*32], 0 , 32);
+		if (readlink ( mpath, &temp->sockets_cache[i*32], SOCKETBUFSIZE ) == -1){ //not a symlink but . or ..
+		    errno=0;
+		    continue; //no trailing 0
+		}
+		i++;
+	    }
+	    temp->sockets_cache[i*32] = CACHE_EOL_MAGIC;
+	    if (errno==0) {
+		closedir(mdir);
+		continue; //readdir reached EOF, thus errno hasn't changed from 0
+	    }
+		//else
+	    perror("procdirent");
+	}
+	pthread_mutex_unlock(&dlist_mutex);
     }
+}
 
-    while(!cpuhogscan_cancelled){
-        nanosleep(&cpuhogthread_refresh_timer, &dummy);
-        rewinddir(mdir);
-        i = 0;
-        errno=0;
-        pthread_mutex_lock(&cpuhog_cache_mutex);
-        while (mdirent = readdir ( mdir )){
-            mpath[pathlen]=0;
-            strcat(mpath, mdirent->d_name);
-            memset (cpuhog_cache[i], 0 , 32);
-            if (readlink ( mpath, cpuhog_cache[i], SOCKETBUFSIZE ) == -1){ //not a symlink but . or ..
-                errno=0;
-                continue; //no trailing 0
-            }
-            i++;
-        }
-        pthread_mutex_unlock(&cpuhog_cache_mutex);
-    cpuhog_cache[i][0] = 38; //magic number
-    if (errno==0) continue; //readdir reached EOF
-    perror("procdirent");
-}
-    //cpuhoscan_cancelled has been set
-    cpuhogscan_on =0;
-}
+
+
+
 
 void* nfqinputthread ( void *ptr )
 {
@@ -656,8 +704,6 @@ void rules_load()
     char path[PATHSIZE];
     char laststring[PATHSIZE];
     char line[PATHSIZE];
-    char cpuhogstr[10] = "[CPUHOG]";
-    int is_cpuhog = 0;
     char *result;
     char perms[PERMSLENGTH];
     unsigned long sizeint;
@@ -703,17 +749,9 @@ void rules_load()
             hexchar[1] = shastring[i * 2 + 1];
             sscanf ( hexchar, "%x", ( unsigned int * ) &digest[i] );
         }
-        if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break;
-        laststring[strlen ( laststring ) - 1] = 0; //remove newline
-        if (!strcmp(laststring, cpuhogstr)){
-            is_cpuhog = 1;
-            cpuhog_active = 1;
-        if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break;
-        }
-        else {
-            is_cpuhog = 0;
-        }
-        dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, 0, TRUE, is_cpuhog);
+	if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break; //read last newline
+
+	dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
     if ( fclose ( stream ) == EOF )
         m_printf ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -728,7 +766,6 @@ void rulesfileWrite()
     int i;
     unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
     unsigned char shachar[3] = "";
-    char cpuhogstr[9] = "[CPUHOG]";
     char sizestring[16];
 
     //rewrite/create the file regardless of whether it already exists
@@ -783,11 +820,6 @@ loop:
 
             fputs ( shastring, fd );
             fputc ( '\n', fd );
-            if (temp->cpuhog){
-                fputs (cpuhogstr, fd );
-                fputc ( '\n', fd );
-            }
-            fputc ( '\n', fd );
 
             //don't proceed until data is written to disk
             fsync ( fileno ( fd ) );
@@ -841,9 +873,6 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 strcpy ( temp->pid, pid ); //update entry's PID and inode
                 temp->current_pid = '1';
                 temp->stime = *stime;
-		if (temp->cpuhog){
-		    strcpy(cpuhog_pid, temp->pid);
-		}
 
                 int retval;
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
@@ -864,20 +893,9 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 {
                     m_printf ( MLOG_INFO, "should never get here. Please report %s,%d\n", __FILE__, __LINE__ );
                 }
-                if (temp->cpuhog && !cpuhogscan_on){
-                    int *arg;
-                    arg = malloc(sizeof(int));
-                    *arg = atoi(temp->pid);
-                    cpuhogscan_cancelled = 0;
-                    cpuhogscan_on = 1;
-                    pthread_create ( &cpuhogscan_thread, NULL, cpuhogthread, arg );
-                }
                 pthread_mutex_unlock ( &dlist_mutex );
                 //notify fe that the rule has an active PID now
                 fe_list();
-
-
-
                 return retval;
             }
             else if ( temp->current_pid == '1' )
@@ -963,7 +981,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         unsigned long long stime;
                         stime = starttimeGet ( atoi ( pid ) );
 
-                        dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, *nfmark_to_set, FALSE,0 );
+			dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, *nfmark_to_set, FALSE );
                         fe_list();
                         return retval;
                     }
@@ -1031,7 +1049,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         if ( !strcmp ( temp2->perms, ALLOW_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark ,FALSE ,0);
+			    dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark ,FALSE);
                             fe_list();
                             
                             *nfmark_to_set = tempnfmark;
@@ -1040,7 +1058,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-                            dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark, FALSE,0 );
+			    dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark, FALSE );
                             fe_list();
                             return NEW_INSTANCE_DENY;
                         }
@@ -1310,7 +1328,7 @@ int port2socket_udp ( int *portint, int *socketint )
     if (bytesread_udp = fread(udp_membuf, sizeof(char), MEMBUF_SIZE , udpinfo)){
             if (errno != 0) perror("READERORRRRRRR");
     }
-    printf ("tcp bytes read: %d\n", bytesread_udp);
+    m_printf (MLOG_DEBUG2, "udp bytes read: %d\n", bytesread_udp);
 
     memset(udp6_membuf, 0, MEMBUF_SIZE);
     fseek(udp6info,0,SEEK_SET);
@@ -1318,7 +1336,7 @@ int port2socket_udp ( int *portint, int *socketint )
     if (bytesread_udp6 = fread(udp6_membuf, sizeof(char), MEMBUF_SIZE , udp6info)){
             if (errno != 0) perror("6READERORRRRRRR");
     }
-    printf ("tcp6 bytes read: %d\n", bytesread_udp6);
+    m_printf (MLOG_DEBUG2, "udp6 bytes read: %d\n", bytesread_udp6);
 
     dont_fread:
     while(1){
@@ -1386,17 +1404,17 @@ int port2socket_tcp ( int *portint, int *socketint )
     fseek(tcpinfo,0,SEEK_SET);
     errno = 0;
     if (bytesread_tcp = fread(tcp_membuf, sizeof(char), MEMBUF_SIZE , tcpinfo)){
-            if (errno != 0) perror("READERORRRRRRR");
+	    if (errno != 0) perror("fread tcpinfo");
     }
-    printf ("tcp bytes read: %d\n", bytesread_tcp);
+    m_printf (MLOG_DEBUG2, "tcp bytes read: %d\n", bytesread_tcp);
 
     memset(tcp6_membuf, 0, MEMBUF_SIZE);
     fseek(tcp6info,0,SEEK_SET);
     errno = 0;
     if (bytesread_tcp6 = fread(tcp6_membuf, sizeof(char), MEMBUF_SIZE , tcp6info)){
-            if (errno != 0) perror("6READERORRRRRRR");
+	    if (errno != 0) perror("fread tcp6info");
     }
-    printf ("tcp6 bytes read: %d\n", bytesread_tcp6);
+    m_printf (MLOG_DEBUG2, "tcp6 bytes read: %d\n", bytesread_tcp6);
 
     dont_fread:
     while(1){
@@ -1440,14 +1458,15 @@ int port2socket_tcp ( int *portint, int *socketint )
 //Handler for TCP packets
 int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
     int retval, socketint;
+    char cache_path[PATHSIZE];
+    char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;  
-      if(cpuhogscan_on){
-        if (parsecache(socketint)) {
-	    m_printf ( MLOG_TRAFFIC, "(cache) %s %s ", cpuhog_path, cpuhog_pid );
-	    return CPUHOG_CACHE_TRIGGERED;
-	}
-      }
+    if ((retval = parsecache(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+	m_printf (MLOG_DEBUG2, "(cache)");
+	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+	goto out;
+    }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     if ( ( retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
     if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
@@ -1459,13 +1478,14 @@ out:
 int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval, socketint;
+    char cache_path[PATHSIZE];
+    char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
-    if(cpuhogscan_on){
-        if (parsecache(socketint)) {
-	    m_printf ( MLOG_TRAFFIC, "(cache) %s %s ", cpuhog_path, cpuhog_pid );
-	    return CPUHOG_CACHE_TRIGGERED;
-        }
+    if ((retval = parsecache(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+	m_printf (MLOG_DEBUG2, "(cache)");
+	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+	goto out;
     }
     if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
     if ( (retval = socket_find_in_proc ( &socketint, path, pid, stime ) ) != GOTO_NEXT_STEP)  goto out;
@@ -1525,7 +1545,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         dport_netbo = tcp->dest;
         sport_hostbo = ntohs ( tcp->source );
         dport_hostbo = ntohs ( tcp->dest );
-        m_printf ( MLOG_TRAFFIC, "INTCP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
+	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
@@ -1542,7 +1562,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         dport_netbo = udp->dest;
         sport_hostbo = ntohs ( udp->source );
         dport_hostbo = ntohs ( udp->dest );     
-        m_printf ( MLOG_TRAFFIC, "INUDP src %s:%d dst %d ", saddr, sport_hostbo, dport_hostbo );
+	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
@@ -1552,7 +1572,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         break;
     case IPPROTO_ICMP:
         ;
-        m_printf ( MLOG_TRAFFIC, "INICMP src %s ", saddr);
+	m_printf ( MLOG_TRAFFIC, ">ICMP src %s ", saddr);
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
             if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
@@ -1572,11 +1592,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
-    case CPUHOG_CACHE_TRIGGERED:
-         if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
-          goto DROPverdict;
-        }
-        //else CPUHOG_CACHE with *ALWAYS verdict
+    case CACHE_TRIGGERED_ALLOW:
 
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
         m_printf ( MLOG_TRAFFIC, "allow\n" );
@@ -1641,6 +1657,8 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
     case FORKED_CHILD_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case CACHE_TRIGGERED_DENY:
+	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -1658,7 +1676,6 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     if ( !ph ) {printf ("ph == NULL, should ever happen, please report"); return 0;}
     id = ntohl ( ph->packet_id );
     nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
-    printf ( "%d\n", ntohl(ip->tos));
     char daddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     int verdict;
@@ -1676,7 +1693,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         sport_netbyteorder = tcp->source;
         dport_netbyteorder = tcp->dest;
         int srctcp = ntohs ( tcp->source );     
-        m_printf ( MLOG_TRAFFIC, "TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
+	m_printf ( MLOG_TRAFFIC, "<TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
 
 	//remember fe's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
@@ -1693,7 +1710,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         sport_netbyteorder = udp->source;
         dport_netbyteorder = udp->dest;
         int srcudp = ntohs ( udp->source );
-        m_printf ( MLOG_TRAFFIC, "UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
+	m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
         
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
@@ -1703,7 +1720,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         break;
     case IPPROTO_ICMP:
         ;
-        m_printf ( MLOG_TRAFFIC, "ICMP dst %d", daddr);
+	m_printf ( MLOG_TRAFFIC, "<ICMP dst %d ", daddr);
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
             if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
@@ -1723,11 +1740,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
-    case CPUHOG_CACHE_TRIGGERED:
-        if (!strcmp(cpuhog_perms, DENY_ONCE) || !strcmp(cpuhog_perms, DENY_ALWAYS)){
-            goto DROPverdict;
-        }
-        //else CPUHOG_CACHE with *ALWAYS verdict
+    case CACHE_TRIGGERED_ALLOW:
 
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
      m_printf ( MLOG_TRAFFIC, "allow\n" );
@@ -1798,6 +1811,8 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
     case FORKED_CHILD_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case CACHE_TRIGGERED_DENY:
+	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -2209,6 +2224,12 @@ int main ( int argc, char *argv[] )
     copy_first->prev = NULL;
     copy_first->next = NULL;
 
+    //initialize first item in cache
+    if ( ( first_cache = malloc ( MAX_CACHE*32 )) == NULL ){perror("malloc");}
+    memset(first_cache,0,MAX_CACHE*32);
+
+
+
     rules_load();
     pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
 #ifdef DEBUG
@@ -2216,6 +2237,8 @@ int main ( int argc, char *argv[] )
 #endif
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
+    pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
+
 
     
 
@@ -2249,8 +2272,6 @@ int main ( int argc, char *argv[] )
 
     if ((udp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(udp6_membuf,0, MEMBUF_SIZE);
-
-    cpuhog_cache[0][0] = 38;
     
     //endless loop of receiving packets and calling a handler on each packet
     int rv;

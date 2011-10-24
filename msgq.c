@@ -32,7 +32,7 @@ extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct_creds msg_creds;
 extern int (*m_printf)(int loglevel, char *format, ...);
-extern void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance, int is_cpuhog );
+extern void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 extern unsigned long long starttimeGet(int mypid);
 extern void fe_active_flag_set (int boolean);
 extern void child_close_nfqueue();
@@ -312,7 +312,7 @@ void* commandthread(void* ptr){
                     nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 		
-                dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, '1', sha, sent_to_fe_struct.stime, exestat.st_size, nfmark ,TRUE,0);
+		dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, '1', sha, sent_to_fe_struct.stime, exestat.st_size, nfmark ,TRUE);
 #ifdef DEBUG
        gettimeofday(&time_struct, NULL);
 	m_printf(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);

@@ -9,7 +9,10 @@ LPFWSOURCES 	=	lpfw.c \
 			argtable/arg_lit.c \
 			argtable/arg_rem.c \
 			argtable/arg_str.c \
-			argtable/argtable2.c
+			argtable/argtable2.c \
+			includes.h \
+			defines.h \
+
 
 all: lpfw lpfwcli
 

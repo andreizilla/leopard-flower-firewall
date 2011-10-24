@@ -701,17 +701,17 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 wprintw(sw, "rules saved to file");
                 wrefresh(sw);
                 continue;
-            case 'x':
-                wclear(sw);
-                wprintw(sw, "%d", getmaxx(lw));
-                wrefresh(sw);
-                copywin(memlw, sw, 2, 16, 0, 24, 0, 100, TRUE);
-                wrefresh(sw);
-                wclear(lw);
-                copywin(memlw, lw, 0, 0, 0, 0, 9, term_width - 1, TRUE);
-                wrefresh(lw);
-                wrefresh(memlw);
-                continue;
+//            case 'x':
+//                wclear(sw);
+//                wprintw(sw, "%d", getmaxx(lw));
+//                wrefresh(sw);
+//                copywin(memlw, sw, 2, 16, 0, 24, 0, 100, TRUE);
+//                wrefresh(sw);
+//                wclear(lw);
+//                copywin(memlw, lw, 0, 0, 0, 0, 9, term_width - 1, TRUE);
+//                wrefresh(lw);
+//                wrefresh(memlw);
+//                continue;
             case KEY_LEFT:
                 if (shiftx == 0) continue;
                 wclear(lw);
