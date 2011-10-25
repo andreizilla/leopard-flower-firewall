@@ -2168,6 +2168,10 @@ int main ( int argc, char *argv[] )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
     if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
+	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
+	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
 
     //-----------------Register queue handler-------------

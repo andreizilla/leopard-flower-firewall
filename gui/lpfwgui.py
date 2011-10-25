@@ -1,26 +1,29 @@
 import sys, os, thread, time, string, threading
-sys.path.append('/sda/workspace/gui/')
+sys.path.append('/sda/newrepo/gui/')
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow
 import resource
 from PyQt4.QtCore import pyqtSignal
 from frontend import Ui_MainWindow
-from popupdialog import Ui_Dialog
+from popup_out import Ui_DialogOut
+from popup_in import Ui_DialogIn
 import IPC_wrapper
 from multiprocessing import Pipe, Process
 
-D2FCOMM_ASK = 0
-D2FCOMM_LIST = 1
-F2DCOMM_LIST = 2
-F2DCOMM_ADD = 3
-F2DCOMM_DEL = 4
-F2DCOMM_DELANDACK = 5
-F2DCOMM_WRT = 6
-F2DCOMM_REG = 7
-F2DCOMM_UNREG = 8
+D2FCOMM_ASK_OUT = 0
+D2FCOMM_ASK_IN = 1
+D2FCOMM_LIST = 2
+F2DCOMM_LIST = 3
+F2DCOMM_ADD = 4
+F2DCOMM_DEL = 5
+F2DCOMM_DELANDACK = 6
+F2DCOMM_WRT = 7
+F2DCOMM_REG = 8
+F2DCOMM_UNREG = 9
 
+#global vars
 mq_d2fdel=mq_f2d=mq_d2flist=mq_d2f=11
 s=p=4
-path=pid=0
+path=pid=perms=0
 process_finished = 0
 
 def quitApp():
@@ -82,14 +85,27 @@ def getFromProcess_thread():
         print "r.recv finished"
         #check if this is an ASK request
         print len(flist)
-        if (flist[0] == D2FCOMM_ASK):
+        if (flist[0] == D2FCOMM_ASK_OUT):
             global path
             global pid
             path = flist[1]
             pid = flist[2]
             
-            print "calling emitaskuser"
-            window.emitAskUser()
+            print "calling emitaskuserOUT"
+            window.emitAskUserOUT()
+            continue
+        if (flist[0] == D2FCOMM_ASK_IN):
+            global path
+            global pid
+            global perms
+            
+            path = flist[1]
+            pid = flist[2]
+            #perms contains remote host's IP address
+            perms = flist[3]
+            
+            print "calling emitaskuserIN"
+            window.emitAskUserIN()
             continue
         
         #if it's not ask request then it is a list request
@@ -153,7 +169,7 @@ def msgq_init_process():
         print "mq_d2 msgrcv start"
         item= IPC_wrapper.msgrcv(mq_d2f)
         print "mq_d2 msgrcv finish"
-        if (item[0] == D2FCOMM_ASK):
+        if (item[0] == D2FCOMM_ASK_OUT or item[0] == D2FCOMM_ASK_IN):
             print "BE ASKED"
             s.send(item)
             continue
@@ -167,13 +183,19 @@ def msgq_init_process():
             
 
 
-class myDialog(QDialog, Ui_Dialog):
+class myDialogOut(QDialog, Ui_DialogOut):
     def __init__(self):
         QDialog.__init__(self)
         self.setupUi(self)
         self.pushButton_allow.clicked.connect(self.allowClicked)
         self.pushButton_deny.clicked.connect(self.denyClicked)
-    
+        self.rejected.connect(self.escapePressed)
+        
+    def escapePressed(self):
+        "in case when user pressed Escape"
+        print "in escapePressed"
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+     
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
@@ -193,8 +215,50 @@ class myDialog(QDialog, Ui_Dialog):
         IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
         listRules()
 
+        
+        
+        
+        
+class myDialogIn(QDialog, Ui_DialogIn):
+    def __init__(self):
+        QDialog.__init__(self)
+        self.setupUi(self)
+        self.pushButton_allow.clicked.connect(self.allowClicked)
+        self.pushButton_deny.clicked.connect(self.denyClicked)
+        self.rejected.connect(self.escapePressed) #when Esc is pressed
+        
+    def escapePressed(self):
+        "in case when user pressed Escape"
+        print "in escapePressed"
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+
+    
+    def closeEvent(self, event):
+        "in case when user closed the dialog without pressing allow or deny"
+        print "in closeEvent"
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+            
+    def allowClicked(self):
+        print "allow clicked"
+        if (self.checkBox.isChecked()): verdict = "ALLOW ALWAYS"
+        else: verdict = "ALLOW ONCE"
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
+        listRules()
+        
+    def denyClicked(self):
+        print "deny clicked"
+        if (self.checkBox.isChecked()): verdict = "DENY ALWAYS"
+        else: verdict = "DENY ONCE"
+        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
+        listRules()        
+        
+   
+        
+        
+        
 class myMainWindow(QMainWindow, Ui_MainWindow):
-    askusersig = pyqtSignal()
+    askuserINsig = pyqtSignal()
+    askuserOUTsig = pyqtSignal()
     quitflag = 0
     
     def saveRules(self):
@@ -215,13 +279,23 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         
         
 
-    def askUser(self):
-        print "In askUser"
+    def askUserOUT(self):
+        print "In askUserOut"
         global path
         global pid
-        dialog.label_name.setText(path)
-        dialog.label_pid.setText(pid)
-        dialog.show()
+        dialogOut.label_name.setText(path)
+        dialogOut.label_pid.setText(pid)
+        dialogOut.show()
+        
+    def askUserIN(self):
+        print "In askUserIn"
+        global path
+        global pid
+        global perms
+        dialogIn.label_name.setText(path)
+        dialogIn.label_pid.setText(pid)
+        dialogIn.label_ip.setText(perms)
+        dialogIn.show()
         
     def rulesMenuTriggered(self):
         "If no rules are selected in the view, grey out the Delete... item"
@@ -269,10 +343,15 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         #now we need to update the list ourselves
         listRules()
     
-    def emitAskUser(self):
+    def emitAskUserOUT(self):
         "this is a workaround for not invoking qdialog from a different thread"
-        print "in emitAskUser"
-        self.askusersig.emit()
+        print "in emitAskUserOut"
+        self.askuserOUTsig.emit()
+        
+    def emitAskUserIN(self):
+        "this is a workaround for not invoking qdialog from a different thread"
+        print "in emitAskUserIn"
+        self.askuserINsig.emit()
          
     def closeEvent(self, event):
         print "in CloseEvent"
@@ -293,13 +372,14 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.tableView.setShowGrid(False)
         self.menuRules.aboutToShow.connect(self.rulesMenuTriggered)
         self.menuRules.actions()[0].triggered.connect(self.deleteMenuTriggered)
-        self.askusersig.connect(self.askUser)
+        self.askuserOUTsig.connect(self.askUserOUT)
+        self.askuserINsig.connect(self.askUserIN)
         self.actionShow_active_only.triggered.connect(self.showActiveOnly)
         self.actionShow_all.triggered.connect(self.showAll)
         self.actionExit.triggered.connect(self.realQuit)
         self.actionSave.triggered.connect(self.saveRules)
         
-        #don't clutter console with debuginfo
+    #don't clutter console with debuginfo
 if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     #I don't know how to redirect output to /dev/null so just make a tmp file until I figure out
     logfile = open("/tmp/lpfwguipy.log", "w")
@@ -330,8 +410,10 @@ modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path
 modelActive = QStandardItemModel()
 modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path"))
 window.tableView.setModel(modelAll)
-dialog = myDialog()
-dialog.setWindowTitle("Leopard Flower firewall")
+dialogOut = myDialogOut()
+dialogOut.setWindowTitle("Leopard Flower firewall")
+dialogIn = myDialogIn()
+dialogIn.setWindowTitle("Leopard Flower firewall")
 
 #start the thread which initializes msgq and listens for be requests
 #thread.start_new_thread(getFromProcess_thread, ())

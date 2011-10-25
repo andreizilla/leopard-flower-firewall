@@ -36,7 +36,7 @@ debug: lpfw lpfwcli
 
 
 lpfw2: $(LPFWSOURCES)
-#we link against our own -lnetfiler_conntrack library v. 0.9.1 (0.0.101 is broken)
+#we link against our own -lnetfiler_conntrack library v. 0.9.1
 #during runtime we search our own directory first for .so files, hence -Wl,-rpath,./
 #UPDATE: no it's not fully broken, sometimes it works, sometimes it doesnt
 	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -L/sda/newrepo/libnetfilter_conntrack-0.9.1/src/.libs -lnetfilter_conntrack -lpthread -o lpfw -Wl,-rpath,./
