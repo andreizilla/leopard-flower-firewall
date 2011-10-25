@@ -1,6 +1,6 @@
 <<<----Leopard Flower 0.4 (released Oct 2011)---->>>
 
-  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon called "lpfw" and frontend(built with ncurses) called "lpfwcli". There is also a graphical Qt-based frontend (see lpfw_frontend_* packages).
+  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a graphical frontend called.
 
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
@@ -10,18 +10,19 @@ These instructions apply specifically to Ubuntu 10.10 but are very likely to wor
   libnfnetlink
 
 SIMPLE CONFIGURATION:
-  1. Make sure files lpfw and lpfwcli are in the same folder
+  1. Make sure files lpfw and lpfwgui are in the same folder
   2. In a terminal window launch "lpfw" as root
-  3. In a terminal window of an X session launch "lpfw --cli" as a regular user (not root). You will see an ncurses-based frontend.
+  3. In a terminal window of an X session launch "lpfw --gui" as a regular user (not root). You will see the graphical frontend.
+  4. Is you prefer to use a command line frontend instead of the graphical one, issue "lpfw --cli" in a terminal window of an X session.
 
 
 
 
 ADVANCED CONFIGURATION:
-  1. If you don't want lpfw to look for lpfwcli in the same folder, you can pass to lpfw a command line option --cli-path= followed by a path to lpfwcli
+  1. If you don't want lpfw to look for lpfwcli/lpfwgui in the same folder, you can pass to lpfw a command line option --cli-path=/--gui-path= followed by a path to lpfwcli/lpfwgui
   2. If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
   3. 30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
-  4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "lpfw --cli" as a regular user (not root). You will see an ncurses-based frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
+  4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "lpfw --cli"/"lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
 
 
 
@@ -72,7 +73,7 @@ KNOWN ISSUES:
     6. Access to network filesystems like NFS, CIFS, SMB an others or to in-kernel servers like khttpd will not be detected by LPFW since such access doesn't create user-space sockets. You will have to manually add iptables rules for such services.
     7. If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
     8. After going to sleep and waking up the PC, LPFW doesn't work properly, it has to be restarted.
-
+	9. Albeit lpfwgui is a simple frontend, it consumes 30+ Mb of memory. An attempt to reduce memory consumption is underway.
 
 
 

@@ -84,7 +84,7 @@ cd newrepo
 echo "#define VERSION \"$1\"" > version.h
 
 if [ $s -eq 1 ]; then
-	LPFWSRC=lpfw_backend_$1_source
+	LPFWSRC=lpfw_$1_source
 	mkdir $LPFWSRC
 	cp -R argtable $LPFWSRC
 	cp -R gui $LPFWSRC
@@ -108,7 +108,7 @@ fi
 
 
 if [ $r -eq 1 ]; then
-	LPFWBIN=lpfw_backend_$1
+	LPFWBIN=lpfw_$1
 	mkdir $LPFWBIN
 	make
 	cp lpfw $LPFWBIN
