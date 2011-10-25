@@ -121,7 +121,6 @@ if [ $r -eq 1 ]; then
 	make ipcwrapper
 	$PYINSTALLER -F gui/lpfwgui.py
 	cp dist/lpfwgui $LPFWBIN
-	cp gui/README.gui $LPFWBIN
 	
 	tar cjf $LPFWBIN.tar.bz $LPFWBIN
 	cp $LPFWBIN.tar.bz ../$RELEASE_FOLDER
