@@ -107,7 +107,7 @@ if [ $s -eq 1 ]; then
 fi
 
 
-if [ $b -eq 1 ]; then
+if [ $r -eq 1 ]; then
 	LPFWBIN=lpfw_backend_$1
 	mkdir $LPFWBIN
 	make
@@ -120,8 +120,8 @@ if [ $b -eq 1 ]; then
 	
 	make ipcwrapper
 	$PYINSTALLER -F gui/lpfwgui.py
-	cp dist/lpfwgui $LPFWGUI
-	cp gui/README.gui $LPFWGUI
+	cp dist/lpfwgui $LPFWBIN
+	cp gui/README.gui $LPFWBIN
 	
 	tar cjf $LPFWBIN.tar.bz $LPFWBIN
 	cp $LPFWBIN.tar.bz ../$RELEASE_FOLDER
