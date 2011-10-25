@@ -11,12 +11,28 @@ libnetfilter-conntrack-dev
 libnfnetlink-dev
 libncurses5-dev (to use ncurses frontend)
 optional: zenity(for popup notifications)
+libpython2.6
+python2.6-dev
+
+These packages are needed for lpfwgui to run
+
+libnetfilter_queue
+libnetfilter_conntrack
+libqtcore4
+libqtgui 4
+python (v2.6)
+python-qt4
 
 Navigate into the source code folder and run "make"
 
-Additionally you may want to compile a module IPC_wrapper.so which is used by python-based graphical frontend. This module is shipped in lpfw_frontend_python_*.tar.bz pre-compiled, so usually there is no need to compile it. But in case you want to:
-It requires: libpython2.6 and python2.6-dev
+Additionally you need to compile IPC_wrapper.so which is used by python-based graphical frontend. 
 Simply issue make ipcwrapper
+
+lpfw should be placed into the same folder as all the *.py files from gui folder.
+Run lpfw as root.
+Run lpfw --guipy as regular user. 
+
+
 
 
 

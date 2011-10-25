@@ -98,6 +98,7 @@ if [ $s -eq 1 ]; then
 	cp ipc.c $LPFWSRC
 	cp includes.h $LPFWSRC
 	cp defines.h $LPFWSRC
+	cp version.h $LPFWSRC
 	cp CHANGELOG $LPFWSRC
 	cp INSTALL $LPFWSRC
 	cp 30-lpfw.conf $LPFWSRC
