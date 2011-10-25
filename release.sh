@@ -3,40 +3,33 @@
 #This script takes as an argument a git TAG and creates tar.bz release packages of that TAG in "releases" folder
 #If no arguments other than TAG given, it creates all packages
 #It is possible to create only certain packages by giving the following argument
-# b - binary package
+# r - release package 
 # s - source package
-# g - standlone GUI package
-# p - Python-based GUI package
-# Example ./release.sh 0.7.1 s g
-# checks-out git's TAG 0.7.1 and creates source and standalone GUI package under
+
+# Example ./release.sh 0.7.1 s r
+# checks-out git's TAG 0.7.1 and creates source and release GUI package under
 # /releases/0.7.1 directory
-# If you want to compile standalone GUI, you need to set PYINSTALLER variable, see below
+# If you want to compile GUI, you need to set PYINSTALLER variable, see below
 
 if [ $# -eq 0 ]; then
 	echo "Please specify a git TAG to checkout"
 	exit 1
 fi
 
-b=0
+r=0
 s=0
-g=0
-p=0
 
 if [ $# -gt 1 ]; then
 	for opt in "$@"
 	do
 		case $opt in
-			b) b=1 ;;
+			b) r=1 ;;
 			s) s=1 ;;
-			g) g=1 ;;
-			p) p=1 ;;
 		esac
 	done
 else
-	b=1
+	r=1
 	s=1
-	g=1
-	p=1
 fi
 	
 RELEASE_FOLDER=$1
@@ -95,9 +88,7 @@ if [ $s -eq 1 ]; then
 	mkdir $LPFWSRC
 	cp -R argtable $LPFWSRC
 	cp -R gui $LPFWSRC
-	cp u64.h $LPFWSRC
-	cp sha.h $LPFWSRC
-	cp sha.c $LPFWSRC
+	cp -R sha512 $LPFWSRC
 	cp README $LPFWSRC
 	cp msgq.c $LPFWSRC
 	cp Makefile $LPFWSRC
@@ -110,10 +101,11 @@ if [ $s -eq 1 ]; then
 	cp CHANGELOG $LPFWSRC
 	cp INSTALL $LPFWSRC
 	cp 30-lpfw.conf $LPFWSRC
+	cp ipc_wrapper.c $LPFWSRC
 	tar cjf $LPFWSRC.tar.bz $LPFWSRC
 	cp $LPFWSRC.tar.bz ../$RELEASE_FOLDER
-
 fi
+
 
 if [ $b -eq 1 ]; then
 	LPFWBIN=lpfw_backend_$1
@@ -125,34 +117,14 @@ if [ $b -eq 1 ]; then
 	cp CHANGELOG $LPFWBIN
 	cp lpfw.conf $LPFWBIN
 	cp 30-lpfw.conf $LPFWBIN
-	tar cjf $LPFWBIN.tar.bz $LPFWBIN
-	cp $LPFWBIN.tar.bz ../$RELEASE_FOLDER
-
-fi
-
-if [ $p -eq 1 ]; then
-	LPFWGUIPY=lpfw_frontend_python_$1
-	mkdir $LPFWGUIPY
-	make ipcwrapper
-	cp gui/resource.py $LPFWGUIPY
-	cp gui/README.guipy $LPFWGUIPY
-	cp gui/popupdialog.py $LPFWGUIPY
-	cp gui/lpfwgui.py $LPFWGUIPY
-	cp gui/frontend.py $LPFWGUIPY
-	tar cjf $LPFWGUIPY.tar.bz $LPFWGUIPY
-	cp $LPFWGUIPY.tar.bz ../$RELEASE_FOLDER
-
-fi
-
-if [ $g -eq 1 ]; then
-	LPFWGUI=lpfw_frontend_standalone_$1
-	mkdir $LPFWGUI
+	
 	make ipcwrapper
 	$PYINSTALLER -F gui/lpfwgui.py
 	cp dist/lpfwgui $LPFWGUI
-	cp gui/README.standalone $LPFWGUI
-	tar cjf $LPFWGUI.tar.bz $LPFWGUI
-	cp $LPFWGUI.tar.bz ../$RELEASE_FOLDER
+	cp gui/README.gui $LPFWGUI
+	
+	tar cjf $LPFWBIN.tar.bz $LPFWBIN
+	cp $LPFWBIN.tar.bz ../$RELEASE_FOLDER
 fi
 
 cd ..

@@ -85,20 +85,18 @@ def getFromProcess_thread():
         print "r.recv finished"
         #check if this is an ASK request
         print len(flist)
+        global path
+        global pid
+        global perms
+        
         if (flist[0] == D2FCOMM_ASK_OUT):
-            global path
-            global pid
             path = flist[1]
             pid = flist[2]
             
             print "calling emitaskuserOUT"
             window.emitAskUserOUT()
             continue
-        if (flist[0] == D2FCOMM_ASK_IN):
-            global path
-            global pid
-            global perms
-            
+        if (flist[0] == D2FCOMM_ASK_IN):         
             path = flist[1]
             pid = flist[2]
             #perms contains remote host's IP address
