@@ -19,7 +19,7 @@ extern void list();
 extern void add_out(msg_struct add_struct);
 extern void add_in(msg_struct add_struct);
 extern int (*m_printf)(int loglevel, char *format, ...);
-
+extern void farray_add(dlist rule);
 
 void msgq_list() {
     msg_f2d.item.command = F2DCOMM_LIST;

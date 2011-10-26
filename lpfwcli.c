@@ -63,6 +63,8 @@ int zenity_answer;
 
 extern  void frontend_unregister();
 extern  void msgq_initialize();
+extern void msgq_add(msg_struct add_struct);
+extern void msgq_list();
 
 int m_printf_file(int loglevel, char *format, ...) {
     char logstring[PATHSIZE*2]; //shaould be enough for the longest line in log
@@ -284,7 +286,7 @@ void farray_add(dlist rule) //split string to path/pid/permissions/flags and add
     strcpy(temp->path, rule.path);
     strcpy(temp->pid, rule.pid);
     strcpy(temp->perms, rule.perms);
-    temp->current_pid =rule.current_pid;
+    temp->is_active =rule.is_active;
     temp->next = NULL;
 }
 
@@ -322,15 +324,25 @@ void list() {
     while (temp->next != NULL) {
         temp = temp->next;
         ++i;
-        //right justify PID's with "%5s"
-        mvwprintw(memlw, 0 + i, 0, "%5s", temp->pid);
+	if (!strcmp(temp->path, KERNEL_PROCESS)){
+	    mvwprintw(memlw, 0 + i, 0, "KERN");
+	}
+	else{
+	    //right justify PID's with "%5s"
+	    mvwprintw(memlw, 0 + i, 0, "%5s", temp->pid);
+	}
         if (!strcmp(temp->perms, ALLOW_ONCE)) strcpy(perms, "ALLOW ONCE");
         if (!strcmp(temp->perms, ALLOW_ALWAYS)) strcpy(perms, "ALLOW ALWAYS");
         if (!strcmp(temp->perms, DENY_ONCE)) strcpy(perms, "DENY ONCE");
         if (!strcmp(temp->perms, DENY_ALWAYS)) strcpy(perms, "DENY ALWAYS");
 
         mvwprintw(memlw, 0 + i, 6, perms);
-        mvwprintw(memlw, 0 + i, 20, temp->path);
+	if (!strcmp(temp->path, KERNEL_PROCESS)){
+	    mvwprintw(memlw, 0 + i, 20, temp->pid);
+	}
+	else{
+	    mvwprintw(memlw, 0 + i, 20, temp->path);
+	}
         ++listsize;
     }
 

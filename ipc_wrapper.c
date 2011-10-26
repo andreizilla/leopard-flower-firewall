@@ -72,7 +72,7 @@ static PyObject * IPC_wrapper_msgrcv(PyObject *self, PyObject *args){
 #endif
  if (retval == -1){return (PyObject*)Py_BuildValue("s",strerror(errno));}
  // return (PyObject*)Py_BuildValue("i", retval );
- return (PyObject*)Py_BuildValue("issscc", msg.item.command, msg.item.path, msg.item.pid, msg.item.perms, msg.item.current_pid, msg.item.first_instance);
+ return (PyObject*)Py_BuildValue("issscc", msg.item.command, msg.item.path, msg.item.pid, msg.item.perms, msg.item.is_active, msg.item.first_instance);
 }
 
 static PyMethodDef

@@ -5,13 +5,15 @@
 #ifndef INCLUDES_H_
 #define INCLUDES_H_
 
+typedef char mbool;
+
 typedef struct m_dlist
 {
     int command;
     char path[PATHSIZE]; //path to executable
     char pid[PIDLENGTH]; //its pid
     char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
-    char current_pid; //TRUE if app has already been seen sending packets
+    mbool is_active; //TRUE if app has already been seen sending packets
     unsigned char first_instance; //TRUE for a first instance of an app or a parent process
     //sha must be a uchar, otherwise if it's just char, printf "%x" will promote it to int and cause a lot of pain, SIGV
     unsigned char sha[65]; //sha512sum digest
@@ -82,7 +84,7 @@ enum
     ACCEPT,
     DROP,
     PORT_NOT_FOUND,
-    INODE_NOT_FOUND_IN_PROC,
+    SOCKET_NONE_PIDFD,
     INODE_FOUND_IN_DLIST_ALLOW,
     INODE_FOUND_IN_DLIST_DENY,
     PATH_FOUND_IN_DLIST_ALLOW,
@@ -90,7 +92,7 @@ enum
     NEW_INSTANCE_ALLOW,
     NEW_INSTANCE_DENY,
     SENT_TO_FRONTEND,
-    FRONTEND_NOT_ACTIVE,
+    FRONTEND_NOT_LAUNCHED,
     FRONTEND_BUSY,
     ICMP_MORE_THAN_ONE_ENTRY,
     ICMP_NO_ENTRY,
@@ -104,7 +106,10 @@ enum
     FORKED_CHILD_DENY,
     PROCFS_ERROR,
     CACHE_TRIGGERED_ALLOW,
-    CACHE_TRIGGERED_DENY
+    CACHE_TRIGGERED_DENY,
+    SRCPORT_NOT_FOUND_IN_PROC,
+    INKERNEL_RULE_ALLOW,
+    INKERNEL_RULE_DENY
 };
 
 //commands passed through msgq

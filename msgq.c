@@ -32,7 +32,7 @@ extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct_creds msg_creds;
 extern int (*m_printf)(int loglevel, char *format, ...);
-extern void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
+extern void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 extern unsigned long long starttimeGet(int mypid);
 extern void fe_active_flag_set (int boolean);
 extern void child_close_nfqueue();
@@ -219,7 +219,7 @@ void* commandthread(void* ptr){
                     strcpy(msg_d2flist.item.path, temp->path);
                     strcpy(msg_d2flist.item.pid, temp->pid);
                     strcpy(msg_d2flist.item.perms, temp->perms);
-                    msg_d2flist.item.current_pid = temp->current_pid;
+		    msg_d2flist.item.is_active = temp->is_active;
                     if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
                         m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                     }
@@ -266,6 +266,8 @@ void* commandthread(void* ptr){
 
                 //TODO come up with a way to calculate sha without having user to wait when the rule appears
                //chaeck if the app is still running
+	      if (!strcmp(sent_to_fe_struct.path, KERNEL_PROCESS)) goto inkernel;
+
               char exepath[32] = "/proc/";
               strcat(exepath, sent_to_fe_struct.pid);
               strcat(exepath, "/exe");
@@ -305,14 +307,16 @@ void* commandthread(void* ptr){
                 }
 
 //TODO SECURITY. We should check now that /proc/PID inode wasn't changed while we were shasumming and exesizing
-		
+		inkernel:
+	       ;
+
 		  int nfmark;
 		   pthread_mutex_lock ( &nfmark_count_mutex );
                     nfmark = NFMARK_BASE + nfmark_count;
                     nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 		
-		dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, '1', sha, sent_to_fe_struct.stime, exestat.st_size, nfmark ,TRUE);
+		dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, TRUE, sha, sent_to_fe_struct.stime, exestat.st_size, nfmark ,TRUE);
 #ifdef DEBUG
        gettimeofday(&time_struct, NULL);
 	m_printf(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);

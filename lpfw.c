@@ -62,7 +62,7 @@ extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 
 //Forward declarations to make code parser happy
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
+void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 int ( *m_printf ) ( int loglevel, char *format, ... );
 
 //mutex to access dlist
@@ -224,6 +224,14 @@ int m_printf_stdout ( int loglevel, char * format, ... )
 	//fsync(filelogfd);
 #endif
 	return 0;
+    case MLOG_DEBUG3:
+#ifdef DEBUG3
+	// check if  logging enabled
+	va_start ( args, format );
+	vprintf ( format, args );
+	//fsync(filelogfd);
+#endif
+	return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
         va_start ( args, format );
         printf ( "ALERT: " );
@@ -362,7 +370,7 @@ dlist * dlist_copy()
         strcpy ( copy_temp->path, temp->path );
         strcpy ( copy_temp->perms, temp->perms );
         strcpy ( copy_temp->pid, temp->pid );
-        copy_temp->current_pid = temp->current_pid;
+	copy_temp->is_active = temp->is_active;
 
         temp = temp->next;
     }
@@ -381,7 +389,7 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist
-void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
+void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
@@ -405,8 +413,9 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
     strcpy ( temp->path, path );
     strcpy ( temp->pid, pid );
     strcpy ( temp->perms, perms );
-    temp->current_pid = current;
+    temp->is_active = current;
     temp->stime = stime;
+    assert(sha != NULL);
     memcpy ( temp->sha, sha, DIGEST_SIZE );
     temp->exesize = size;
     temp->nfmark = nfmark;
@@ -437,6 +446,7 @@ void dlist_add ( char *path, char *pid, char *perms, char current, char *sha, un
 //Remove element from dlist...
 void dlist_del ( char *path, char *pid )
 {
+    mbool was_active;
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first->next;
     while ( temp != NULL )
@@ -467,14 +477,16 @@ void dlist_del ( char *path, char *pid )
             if ( temp->next != NULL )
                 temp->next->prev = temp->prev;
             nfmark_to_delete = temp->nfmark;
+	    was_active = temp->is_active;
             free ( temp );
 
-	    //remove tracking for this app's active connection
-	    pthread_mutex_lock(&condvar_mutex);
-	    predicate = TRUE;
-	    pthread_mutex_unlock(&condvar_mutex);
-	    pthread_cond_signal(&condvar);
-
+	    //remove tracking for this app's active connection only if this app was active
+	    if (was_active){
+		pthread_mutex_lock(&condvar_mutex);
+		predicate = TRUE;
+		pthread_mutex_unlock(&condvar_mutex);
+		pthread_cond_signal(&condvar);
+	    }
 	    pthread_mutex_unlock ( &dlist_mutex );
 	    return;
         }
@@ -493,7 +505,7 @@ int parsecache(int socket, char *path, char *pid){
     dlist *temp;
     pthread_mutex_lock(&dlist_mutex);
     temp = first;
-    while (temp->next != NULL && temp->next->current_pid){
+    while (temp->next != NULL && temp->next->is_active){
 	temp = temp->next;
 	i = 0;
 	while (temp->sockets_cache[i*32] != CACHE_EOL_MAGIC){
@@ -528,8 +540,8 @@ void* cachebuildthread ( void *pid ){
 	nanosleep(&refresh_timer, &dummy);
 	pthread_mutex_lock(&dlist_mutex);
 	temp = first;
-	//cache only running PIDs
-	while (temp->next != NULL && temp->next->current_pid){
+	//cache only running PIDs && not kernel processes
+	while (temp->next->is_active && temp->next != NULL && strcmp(temp->path, KERNEL_PROCESS)){
 	    temp = temp->next;
 	    strcpy(mpath, "/proc/");
 	    strcat(mpath, temp->pid);
@@ -617,7 +629,7 @@ void* rulesdumpthread ( void *ptr )
             fputc ( '\n', fd );
             fputs ( temp->perms, fd );
             fputc ( '\n', fd );
-            fputc ( temp->current_pid, fd );
+	    fputc ( temp->is_active, fd );
             fputc ( '\n', fd );
             fputc ( '\n', fd );
 
@@ -643,8 +655,8 @@ void* refreshthread ( void* ptr )
         temp = first->next;
         while ( temp != NULL )
         {
-            //check if we have the processes actual PID
-            if ( temp->current_pid == '0' )
+	    //check if we have the processes actual PID and it is not a kernel process(it doesnt have a procfs entry)
+	    if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS))
             {
                 temp = temp->next;
                 continue;
@@ -677,7 +689,7 @@ void* refreshthread ( void* ptr )
                     }
                     //we get here only if there was no PATH match
                     strcpy ( temp->pid, "0" );
-                    temp->current_pid = '0';
+		    temp->is_active = FALSE;
                     fe_list();
                     break;
                 }
@@ -706,6 +718,7 @@ void rules_load()
     char line[PATHSIZE];
     char *result;
     char perms[PERMSLENGTH];
+    char ip[INET_ADDRSTRLEN+1];//plus trailing /n and 0
     unsigned long sizeint;
     char sizestring[16];
     char shastring[DIGEST_SIZE * 2 + 2];
@@ -734,6 +747,15 @@ void rules_load()
         //fgets reads <newline> into the string and terminates with /0
         if ( fgets ( path, PATHSIZE, stream ) == 0 ) break;
         path[strlen ( path ) - 1] = 0; //remove newline
+	if (!strcmp(path, KERNEL_PROCESS)){//separate treatment for kernel process
+	    if ( fgets ( ip, INET_ADDRSTRLEN+1, stream ) == 0 ) break; //read IP address
+	    ip[strlen ( ip ) - 1] = 0;
+	    if ( fgets ( perms, PERMSLENGTH, stream ) == 0 ) break;
+	    perms[strlen ( perms ) - 1] = 0;
+	    if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break; //read last newline
+	    dlist_add( path, ip , perms, FALSE, digest, 0, 0, 0, TRUE);
+	    continue;
+	}
         if ( fgets ( perms, PERMSLENGTH, stream ) == 0 ) break;
         perms[strlen ( perms ) - 1] = 0;
         if ( fgets ( sizestring, 16, stream ) == 0 ) break;
@@ -751,7 +773,7 @@ void rules_load()
         }
 	if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break; //read last newline
 
-	dlist_add ( path, "0", perms, '0', digest, 2, ( off_t ) sizeint, 0, TRUE);
+	dlist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
     if ( fclose ( stream ) == EOF )
         m_printf ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -785,7 +807,9 @@ loop:
         if ( ( !strcmp ( temp->perms, ALLOW_ALWAYS ) ) || ( !strcmp ( temp->perms, DENY_ALWAYS ) ) )
         {
             //now check if same path with perms ALWAYS wasn't present in previous rules and if not then add  this rules index to dlist
-            temp2 = temp->prev;
+	    //ignore inkernel rules, though
+	    if (!strcmp(temp->path, KERNEL_PROCESS)) goto inkernel;
+	    temp2 = temp->prev;
             while ( temp2 != NULL )
             {
                 if ( !strcmp ( temp2->path, temp->path ) )
@@ -798,6 +822,22 @@ loop:
                 }
                 temp2 = temp2->prev;
             }
+	    inkernel:
+	    if (!strcmp(temp->path, KERNEL_PROCESS)){
+		if ( fputs ( temp->path, fd ) == EOF )
+		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		fputc ( '\n', fd );
+		if ( fputs ( temp->pid, fd ) == EOF )
+		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		fputc ( '\n', fd );
+		if ( fputs ( temp->perms, fd ) == EOF )
+		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		fputc ( '\n', fd );
+		fputc ( '\n', fd );
+		fsync ( fileno ( fd ) );
+		temp = temp->next;
+		continue;
+	    }
 
             if ( fputs ( temp->path, fd ) == EOF )
                 m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -820,6 +860,8 @@ loop:
 
             fputs ( shastring, fd );
             fputc ( '\n', fd );
+	    fputc ( '\n', fd );
+
 
             //don't proceed until data is written to disk
             fsync ( fileno ( fd ) );
@@ -841,7 +883,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
     {
         if ( !strcmp ( temp->path, path ) )
         {
-            if ( temp->current_pid == '0' ) //path is in dlist and has not a current PID. It was added to dlist from rulesfile. Exesize and shasum this app just once
+	    if (!temp->is_active) //path is in dlist and has not a current PID. It was added to dlist from rulesfile. Exesize and shasum this app just once
             {
                 struct stat exestat;
                 if ( stat ( temp->path, &exestat ) == -1 )
@@ -871,7 +913,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 }
 
                 strcpy ( temp->pid, pid ); //update entry's PID and inode
-                temp->current_pid = '1';
+		temp->is_active = TRUE;
                 temp->stime = *stime;
 
                 int retval;
@@ -880,7 +922,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                     pthread_mutex_lock ( &nfmark_count_mutex );
                     temp->nfmark = NFMARK_BASE + nfmark_count;
                     *nfmark_to_set = NFMARK_BASE + nfmark_count;
-                    nfmark_count++;
+		    nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 
                     retval = PATH_FOUND_IN_DLIST_ALLOW;
@@ -898,7 +940,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 fe_list();
                 return retval;
             }
-            else if ( temp->current_pid == '1' )
+	    else if ( temp->is_active )
             {
 
 //determine if this is new instance or fork()d child
@@ -981,7 +1023,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         unsigned long long stime;
                         stime = starttimeGet ( atoi ( pid ) );
 
-			dlist_add ( path, pid, tempperms2, '1', tempsha2, stime, parent_size2, *nfmark_to_set, FALSE );
+			dlist_add ( path, pid, tempperms2, TRUE, tempsha2, stime, parent_size2, *nfmark_to_set, FALSE );
                         fe_list();
                         return retval;
                     }
@@ -1049,7 +1091,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         if ( !strcmp ( temp2->perms, ALLOW_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-			    dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark ,FALSE);
+			    dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark ,FALSE);
                             fe_list();
                             
                             *nfmark_to_set = tempnfmark;
@@ -1058,7 +1100,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
                         {
                             pthread_mutex_unlock ( &dlist_mutex );
-			    dlist_add ( path, pid, tempperms, '1', tempsha, *stime, parent_size, tempnfmark, FALSE );
+			    dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark, FALSE );
                             fe_list();
                             return NEW_INSTANCE_DENY;
                         }
@@ -1104,7 +1146,8 @@ int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
     while ( temp != NULL )
     {
         //find entry with a known PID, i.e. this entry has already seen active packets in this session
-        if ( temp->current_pid == '0' )
+	//and also ignore kernel processes
+	if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS))
         {
             temp = temp->next;
             continue;
@@ -1255,8 +1298,7 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
     }
     while ( proc_dirent );
     closedir ( proc_DIR );
-    m_printf ( MLOG_TRAFFIC, "path not found in procfs " );
-    return INODE_NOT_FOUND_IN_PROC;
+    return SOCKET_NONE_PIDFD;
 }
 
 //if there are more than one entry in /proc/net/raw for icmp then it's impossible to tell which app is sending the packet
@@ -1362,7 +1404,7 @@ int port2socket_udp ( int *portint, int *socketint )
                 continue;
             }
             //else EOF reached with no match, if it was 1st iteration then reread proc file
-            if (not_found_once) return INODE_NOT_FOUND_IN_PROC;
+	    if (not_found_once) return SRCPORT_NOT_FOUND_IN_PROC;
             //else
             nanosleep(&timer, &dummy);
             not_found_once=1;
@@ -1440,7 +1482,9 @@ int port2socket_tcp ( int *portint, int *socketint )
                 continue;
             }
             //else EOF reached with no match, if it was 1st iteration then reread proc file
-            if (not_found_once) return INODE_NOT_FOUND_IN_PROC;
+	    if (not_found_once){
+		return SRCPORT_NOT_FOUND_IN_PROC;
+	    }
             //else
             nanosleep(&timer, &dummy);
             not_found_once=1;
@@ -1507,7 +1551,7 @@ out:
     return retval;
 }
 
-int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
+int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
 #ifdef DEBUG
     static int is_strange_daddr = 0;
     static char strange_daddr[INET_ADDRSTRLEN];
@@ -1548,9 +1592,42 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
 	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-        if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
-            if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_ACTIVE;
+	    if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
+		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+		    pthread_mutex_lock(&dlist_mutex);
+		    dlist *temp = first;
+		    while(temp->next != NULL){
+			temp = temp->next;
+			if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+			//else
+			if (!strcmp(temp->pid, saddr)){
+			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
+				if (temp->is_active) nfmark_to_set_in = temp->nfmark;
+				else { //the first time this rule triggered after being added from rulesfile
+				    temp->nfmark = NFMARK_BASE + nfmark_count;
+				    nfmark_to_set_in = NFMARK_BASE + nfmark_count;
+				    nfmark_count++;
+				    temp->is_active = TRUE;
+				}
+				verdict = INKERNEL_RULE_ALLOW;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			    else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
+				verdict = INKERNEL_RULE_DENY;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			}
+		    }
+		    pthread_mutex_unlock(&dlist_mutex);
+		    //not found in in-kernel list, ask user reuse struct's fields
+		    strcpy(path, KERNEL_PROCESS);
+		    strcpy(pid, saddr);
+		    stime = sport_hostbo;
+		}
+	    if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
+	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
         }
         break;
         
@@ -1564,10 +1641,43 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         dport_hostbo = ntohs ( udp->dest );     
 	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
-        fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-        if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
-            if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_ACTIVE;
+        fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;            
+	    if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
+		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+		    pthread_mutex_lock(&dlist_mutex);
+		    dlist *temp = first;
+		    while(temp->next != NULL){
+			temp = temp->next;
+			if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+			//else
+			if (!strcmp(temp->pid, saddr)){
+			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
+				if (temp->is_active) nfmark_to_set_in = temp->nfmark;
+				else { //the first time this rule triggered after being added from rulesfile
+				    temp->nfmark = NFMARK_BASE + nfmark_count;
+				    nfmark_to_set_in = NFMARK_BASE + nfmark_count;
+				    nfmark_count++;
+				    temp->is_active = TRUE;
+				}
+				verdict = INKERNEL_RULE_ALLOW;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			    else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
+				verdict = INKERNEL_RULE_DENY;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			}
+		    }
+		    pthread_mutex_unlock(&dlist_mutex);
+		    //not found in in-kernel list, ask user reuse struct's fields
+		    strcpy(path, KERNEL_PROCESS);
+		    strcpy(pid, saddr);
+		    stime = sport_hostbo;
+		}
+	    if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
+	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
         break;
     case IPPROTO_ICMP:
@@ -1576,7 +1686,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
             if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_ACTIVE;
+	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
         break;
     default:
@@ -1584,7 +1694,8 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
         verdict = UNSUPPORTED_PROTOCOL;
     }
-    
+
+    kernel_verdict:
  switch ( verdict )
     {
     case ACCEPT:
@@ -1627,7 +1738,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case INODE_NOT_FOUND_IN_PROC:
+    case SOCKET_NONE_PIDFD:
 	m_printf ( MLOG_TRAFFIC, "port has no socket. Remote host has probed this machine's port\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
@@ -1635,7 +1746,7 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case NEW_INSTANCE_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_ACTIVE:
+    case FRONTEND_NOT_LAUNCHED:
         m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
     case FRONTEND_BUSY:
         m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
@@ -1659,6 +1770,8 @@ int nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case CACHE_TRIGGERED_DENY:
 	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case SRCPORT_NOT_FOUND_IN_PROC:
+	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -1697,10 +1810,43 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
 	//remember fe's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-        if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
+	if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
+	    if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+		pthread_mutex_lock(&dlist_mutex);
+		dlist *temp = first;
+		while(temp->next != NULL){
+		    temp = temp->next;
+		    if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+		    //else
+		    if (!strcmp(temp->pid, daddr)){
+			if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
+			    if (temp->is_active) nfmark_to_set_out = temp->nfmark;
+			    else { //the first time this rule triggered after being added from rulesfile
+				temp->nfmark = NFMARK_BASE + nfmark_count;
+				nfmark_to_set_out = NFMARK_BASE + nfmark_count;
+				nfmark_count++;
+				temp->is_active = TRUE;
+			    }
+			    verdict = INKERNEL_RULE_ALLOW;
+			    pthread_mutex_unlock(&dlist_mutex);
+			    goto kernel_verdict;
+			}
+			else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
+			    verdict = INKERNEL_RULE_DENY;
+			    pthread_mutex_unlock(&dlist_mutex);
+			    goto kernel_verdict;
+			}
+		    }
+		}
+		pthread_mutex_unlock(&dlist_mutex);
+		//not found in in-kernel list, ask user reuse struct's fields
+		strcpy(path, KERNEL_PROCESS);
+		strcpy(pid, daddr);
+		stime = ntohs (tcp->dest);
+	    }
 	    //drop if fe was busy before we started processing
 	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
         break;
     case IPPROTO_UDP:
@@ -1712,10 +1858,43 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         int srcudp = ntohs ( udp->source );
 	m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
         
-        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-        if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
-            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+	fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+	    if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == SOCKET_NONE_PIDFD){
+		if (verdict == SOCKET_NONE_PIDFD){ //see if this is an inkernel rule
+		    pthread_mutex_lock(&dlist_mutex);
+		    dlist *temp = first;
+		    while(temp->next != NULL){
+			temp = temp->next;
+			if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+			//else
+			if (!strcmp(temp->pid, daddr)){
+			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
+				if (temp->is_active) nfmark_to_set_out = temp->nfmark;
+				else {
+				    temp->nfmark = NFMARK_BASE + nfmark_count;
+				    nfmark_to_set_out = NFMARK_BASE + nfmark_count;
+				    nfmark_count++;
+				    temp->is_active = TRUE;
+				}
+				verdict = INKERNEL_RULE_ALLOW;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			    else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
+				verdict = INKERNEL_RULE_DENY;
+				pthread_mutex_unlock(&dlist_mutex);
+				goto kernel_verdict;
+			    }
+			}
+		    }
+		    pthread_mutex_unlock(&dlist_mutex);
+		    //not found in in-kernel list, ask user
+		    strcpy(path, KERNEL_PROCESS);
+		    strcpy(pid, daddr);
+		    stime = ntohs (udp->dest);
+		}
+	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
         break;
     case IPPROTO_ICMP:
@@ -1724,7 +1903,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
             if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
-            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_ACTIVE;
+	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
         break;
     default:
@@ -1733,6 +1912,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         verdict = UNSUPPORTED_PROTOCOL;
     }
 
+    kernel_verdict:
     switch ( verdict )
     {
     case ACCEPT:
@@ -1741,6 +1921,7 @@ int nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
     case CACHE_TRIGGERED_ALLOW:
+    case INKERNEL_RULE_ALLOW:
 
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
      m_printf ( MLOG_TRAFFIC, "allow\n" );
@@ -1781,7 +1962,7 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case INODE_NOT_FOUND_IN_PROC:
+    case SOCKET_NONE_PIDFD:
 	m_printf ( MLOG_TRAFFIC, "port has no socket, dropping\n" ); goto DROPverdict;
     case INODE_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
@@ -1789,7 +1970,7 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case NEW_INSTANCE_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_ACTIVE:
+    case FRONTEND_NOT_LAUNCHED:
         m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
     case FRONTEND_BUSY:
         m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
@@ -1813,6 +1994,10 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case CACHE_TRIGGERED_DENY:
 	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
+    case SRCPORT_NOT_FOUND_IN_PROC:
+	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
+    case INKERNEL_RULE_DENY:
+	m_printf ( MLOG_TRAFFIC, "in-kernel rule, deny\n" ); goto DROPverdict;
     }
     DROPverdict:
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );

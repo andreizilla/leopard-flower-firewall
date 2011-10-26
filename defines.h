@@ -36,6 +36,7 @@
 #define ALLOW_ALWAYS "ALLOW ALWAYS"
 #define DENY_ONCE "DENY ONCE"
 #define DENY_ALWAYS "DENY ALWAYS"
+#define KERNEL_PROCESS "KERNEL PROCESS"
 
 #define MLOG_INFO 1
 #define MLOG_TRAFFIC 2
@@ -43,6 +44,7 @@
 #define MLOG_DEBUG2 4
 #define MLOG_ALERT 5
 #define MLOG_ERROR 6
+#define MLOG_DEBUG3 7
 
 // max height to which windows can be stretched
 #define UWMAX 1
