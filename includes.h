@@ -1,6 +1,8 @@
 #include "defines.h"
 #include <unistd.h>
 #include <sys/types.h> //for ino_t
+#include <dirent.h> //for DIR*
+
 
 #ifndef INCLUDES_H_
 #define INCLUDES_H_
@@ -24,7 +26,9 @@ typedef struct m_dlist
     u_int32_t nfmark; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
     struct m_dlist *prev; //previous element in dlist
     struct m_dlist *next; // next element in dlist
-    char *sockets_cache;//pointer to 2D array of cache
+    int *sockets_cache;//pointer to 2D array of cache
+    DIR *dirstream;
+    char pidfdpath[32];
 } dlist;
 
 //structures used in msgq for communication daemon<>frontend

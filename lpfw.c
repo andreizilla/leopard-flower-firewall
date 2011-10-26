@@ -389,7 +389,7 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist
-void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
+void dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
@@ -413,13 +413,22 @@ void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, u
     strcpy ( temp->path, path );
     strcpy ( temp->pid, pid );
     strcpy ( temp->perms, perms );
-    temp->is_active = current;
+    temp->is_active = active;
     temp->stime = stime;
     assert(sha != NULL);
     memcpy ( temp->sha, sha, DIGEST_SIZE );
     temp->exesize = size;
     temp->nfmark = nfmark;
     temp->first_instance = first_instance; //obsolete member,can be purged
+    if (temp->is_active && strcmp(temp->path, KERNEL_PROCESS)){
+	strcpy(temp->pidfdpath,"/proc/");
+	strcat(temp->pidfdpath, temp->pid);
+	strcat(temp->pidfdpath, "/fd/");
+	if ((temp->dirstream = opendir ( temp->pidfdpath )) == NULL){
+	    m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	    exit(0);
+	}
+    }
 
     //add to cache regardless if pid is active
     //TODO we only need cache for active rules - should socket_cache be allocated/removed dynamically?
@@ -438,8 +447,8 @@ void dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, u
 //	cache_temp->sockets[0][0] = CACHE_EOL_MAGIC;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
-    if ((temp->sockets_cache = malloc(sizeof(char)*MAX_CACHE*32)) == NULL){perror("malloc");}
-     temp->sockets_cache[0] = (char)CACHE_EOL_MAGIC;
+    if ((temp->sockets_cache = (int*)malloc(sizeof(int)*MAX_CACHE)) == NULL){perror("malloc");}
+     *temp->sockets_cache = CACHE_EOL_MAGIC;
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
@@ -497,9 +506,6 @@ void dlist_del ( char *path, char *pid )
 }
 
 int parsecache(int socket, char *path, char *pid){
-    char socketstr[32] = "socket:[";
-    sprintf(&socketstr[8],"%d", socket);
-    strcat(socketstr,"]");
     int i;
     int retval;
     dlist *temp;
@@ -508,9 +514,9 @@ int parsecache(int socket, char *path, char *pid){
     while (temp->next != NULL && temp->next->is_active){
 	temp = temp->next;
 	i = 0;
-	while (temp->sockets_cache[i*32] != CACHE_EOL_MAGIC){
+	while (temp->sockets_cache[i] != CACHE_EOL_MAGIC){
 	    if (i >= MAX_CACHE-1) break;
-	    if (!strcmp(&temp->sockets_cache[i*32], socketstr)){ //found match
+	    if (temp->sockets_cache[i] == socket){ //found match
 		if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
 		else retval = CACHE_TRIGGERED_DENY;
 		strcpy(path, temp->path);
@@ -530,6 +536,7 @@ void* cachebuildthread ( void *pid ){
     struct dirent *mdirent;
     int pathlen;
     char mpath[32];
+    char buf[32];
     struct timespec refresh_timer,dummy;
     refresh_timer.tv_sec=0;
     refresh_timer.tv_nsec=1000000000/4;
@@ -543,29 +550,27 @@ void* cachebuildthread ( void *pid ){
 	//cache only running PIDs && not kernel processes
 	while (temp->next->is_active && temp->next != NULL && strcmp(temp->path, KERNEL_PROCESS)){
 	    temp = temp->next;
-	    strcpy(mpath, "/proc/");
-	    strcat(mpath, temp->pid);
-	    strcat(mpath,"/fd/");
-	    pathlen = strlen(mpath);
-	    if ((mdir = opendir ( mpath )) == NULL){
-		m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-		continue;
-	    }
+	    pathlen = strlen(temp->pidfdpath);
+	    strcpy(mpath, temp->pidfdpath);
+	    rewinddir(temp->dirstream);
 	    i = 0;
 	    errno=0;
-	    while (mdirent = readdir ( mdir )){
+	    while (mdirent = readdir ( temp->dirstream )){
 		mpath[pathlen]=0;
 		strcat(mpath, mdirent->d_name);
-		memset (&temp->sockets_cache[i*32], 0 , 32);
-		if (readlink ( mpath, &temp->sockets_cache[i*32], SOCKETBUFSIZE ) == -1){ //not a symlink but . or ..
+		memset (buf, 0 , sizeof(buf));
+		if (readlink ( mpath, buf, SOCKETBUFSIZE ) == -1){ //not a symlink but . or ..
 		    errno=0;
 		    continue; //no trailing 0
 		}
+		char *end;
+		end = strrchr(&buf[8],']'); //put 0 instead of ]
+		*end = 0;
+		temp->sockets_cache[i] = atoi(&buf[8]);
 		i++;
 	    }
-	    temp->sockets_cache[i*32] = CACHE_EOL_MAGIC;
+	    temp->sockets_cache[i] = CACHE_EOL_MAGIC;
 	    if (errno==0) {
-		closedir(mdir);
 		continue; //readdir reached EOF, thus errno hasn't changed from 0
 	    }
 		//else
@@ -915,6 +920,13 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 strcpy ( temp->pid, pid ); //update entry's PID and inode
 		temp->is_active = TRUE;
                 temp->stime = *stime;
+		strcpy(temp->pidfdpath,"/proc/");
+		strcat(temp->pidfdpath, temp->pid);
+		strcat(temp->pidfdpath, "/fd/");
+		if ((temp->dirstream = opendir ( temp->pidfdpath )) == NULL){
+		    m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		    exit(0);
+		}
 
                 int retval;
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
