@@ -44,7 +44,7 @@ FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
 dlist *first;
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
 dlist*copy_first;
 #endif
 
@@ -286,6 +286,7 @@ int m_printf_file ( int loglevel, char * format, ... )
     }
 }
 
+#ifndef WITHOUT_SYSLOG
 int m_printf_syslog ( int loglevel, char *format, ... )
 {
     va_list args;
@@ -317,6 +318,7 @@ int m_printf_syslog ( int loglevel, char *format, ... )
         return 0;
     }
 }
+#endif
 
 unsigned long long starttimeGet ( int mypid )
 {
@@ -2269,11 +2271,13 @@ void loggingInit()
         m_printf = &m_printf_stdout;
         return;
     }
+#ifndef WITHOUT_SYSLOG
     else if ( !strcmp ( logging_facility->sval[0], "syslog" ) )
     {
         openlog ( "lpfw", 0, 0 );
         m_printf = &m_printf_syslog;
     }
+#endif
 }
 
 void pidFileCheck() {
@@ -2441,7 +2445,7 @@ void SIGTERM_handler ( int signal )
 
 int main ( int argc, char *argv[] )
 {
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     //argv[0] is the  path of the executable
     if ( argc >= 2 )
     {
@@ -2463,7 +2467,7 @@ int main ( int argc, char *argv[] )
         perror ( "sigaction" );
     }
 
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     //save own path
    int ownpid;
    char ownpidstr[16];
@@ -2487,12 +2491,16 @@ int main ( int argc, char *argv[] )
     int nerrors;
 
     // Define argument table structs
-    logging_facility = arg_str0 ( NULL, "logging-facility", "<file>,<stdout>,<syslog>", "Divert loggin to..." );
+    logging_facility = arg_str0 ( NULL, "logging-facility", "<file>,<stdout>
+			      #ifndef WITHOUT_SYSLOG
+				  ,<syslog>
+			      #endif
+				  ", "Divert loggin to..." );
     rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
     pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
     log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
 
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
     gui_path = arg_file0 ( NULL, "gui-path", "<path to file>", "Path to GUI frontend" );
     guipy_path = arg_file0 ( NULL, "guipy-path", "<path to file>", "Path to Python-based GUI frontend" );
@@ -2506,7 +2514,7 @@ int main ( int argc, char *argv[] )
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
     struct arg_end *end = arg_end ( 20 );
     void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
-		    #ifdef WITH_FRONTEND
+		    #ifndef WITHOUT_SYSVIPC
 			cli_path, gui_path, guipy_path,
 		    #endif
 			log_info, log_traffic, log_debug, help, version, end};
@@ -2517,7 +2525,7 @@ int main ( int argc, char *argv[] )
     pid_file->filename[0] = "/var/log/lpfw.pid";
     log_file->filename[0] = "/tmp/lpfw.log";
 
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     char clipath[PATHSIZE-16];
     strcpy (clipath, owndir);
     strcat(clipath, "lpfwcli");
@@ -2589,7 +2597,7 @@ int main ( int argc, char *argv[] )
 
     loggingInit();
     pidFileCheck();
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     msgq_init();
 #endif
     initialize_conntrack();
@@ -2649,7 +2657,7 @@ int main ( int argc, char *argv[] )
     first->prev = NULL;
     first->next = NULL;
 
-#ifdef WITH_FRONTEND
+#ifndef WITHOUT_SYSVIPC
     //initialze dlist copy's first(reference) element
     if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
     {

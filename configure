@@ -1,0 +1,31 @@
+#! /bin/bash
+
+#This script produces header.h with #defines depending on the passed in
+#argument
+
+#empty the file
+> header.h
+
+for i in $*
+do
+	case $i in
+	--version=*)
+		VERSION=${i#*=}
+		echo "/* Version string to be shown in --version */" >> header.h
+		echo "#define VERSION \"${VERSION}\"" >> header.h
+		;;
+	--without-sysvipc)
+		echo "/* Disable IPC between backend and frontend */" >> header.h
+		echo "#define WITHOUT_SYSVIPC" >> header.h
+		;;
+	--without-syslog)
+		echo "/* Disable logging to syslog */" >> header.h
+		echo "#define WITHOUT_SYSLOG" >> header.h
+		;;
+	--help)
+		echo "Accepted options:"
+		echo "--version=<version string>"
+		echo "--without-sysvipc"
+		echo "--without-syslog"
+	esac
+done
