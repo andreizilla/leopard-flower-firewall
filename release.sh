@@ -84,27 +84,44 @@ cd newrepo
 echo "#define VERSION \"$1\"" > version.h
 
 if [ $s -eq 1 ]; then
-	LPFWSRC=lpfw_$1_source
-	mkdir $LPFWSRC
-	cp -R argtable $LPFWSRC
-	cp -R gui $LPFWSRC
-	cp -R sha512 $LPFWSRC
-	cp README $LPFWSRC
-	cp msgq.c $LPFWSRC
-	cp Makefile $LPFWSRC
-	cp lpfwcli.c $LPFWSRC
-	cp lpfw.conf $LPFWSRC
-	cp lpfw.c $LPFWSRC
-	cp ipc.c $LPFWSRC
-	cp includes.h $LPFWSRC
-	cp defines.h $LPFWSRC
-	cp version.h $LPFWSRC
-	cp CHANGELOG $LPFWSRC
-	cp INSTALL $LPFWSRC
-	cp 30-lpfw.conf $LPFWSRC
-	cp ipc_wrapper.c $LPFWSRC
-	tar cjf $LPFWSRC.tar.bz $LPFWSRC
-	cp $LPFWSRC.tar.bz ../$RELEASE_FOLDER
+	LPFW=lpfw_$1
+	LPFWCLI=lpfw-cli_$1
+	LPFWPYGUI=lpfw-pygui_$1
+
+	mkdir $LPFW
+	cp -R argtable $LPFW
+	cp -R sha512 $LPFW
+	cp -R common $LPFW
+	cp lpfw.c $LPFW
+	cp msgq.c $LPFW
+	cp Makefile $LPFW
+	cp version.h $LPFW
+	cp README $LPFW
+	cp CHANGELOG $LPFW
+	cp INSTALL $LPFW
+	tar cjf $LPFW.tar.bz $LPFW
+
+	mkdir $LPFWCLI
+	cp -R common $LPFWCLI
+	cp lpfw-cli/lpfwcli.c $LPFWCLI
+	cp lpfw-cli/ipc.c $LPFWCLI
+	cp lpfw-cli/Makefile $LPFWCLI
+	tar cjf $LPFWCLI.tar.bz $LPFWCLI
+
+	mkdir $LPFWPYGUI
+	cp lpfw-pygui/frontend.py $LPFWPYGUI
+	cp lpfw-pygui/lpfwgui.py $LPFWPYGUI
+	cp lpfw-pygui/popup_in.py $LPFWPYGUI
+	cp lpfw-pygui/popup_out.py $LPFWPYGUI
+	cp lpfw-pygui/resource.py $LPFWPYGUI
+	cp lpfw-pygui/ipc_wrapper.c $LPFWPYGUI
+	cp lpfw-pygui/Makefile $LPFWPYGUI
+	tar cjf $LPFWPYGUI.tar.bz $LPFWPYGUI
+
+	#cp lpfw.conf $LPFWSRC
+	#cp 30-lpfw.conf $LPFWSRC
+
+	cp $LPFW.tar.bz $LPFWCLI.tar.bz $LPFWPYGUI.tar.bz ../$RELEASE_FOLDER
 fi
 
 

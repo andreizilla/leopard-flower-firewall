@@ -6,8 +6,8 @@
 #include <sys/msg.h>
 #include <sys/wait.h>
 #include <errno.h>
-#include "defines.h"
-#include "includes.h"
+#include "common/defines.h"
+#include "common/includes.h"
 #include <malloc.h>
 #include <dirent.h> //for ino_t
 #include <sys/time.h>

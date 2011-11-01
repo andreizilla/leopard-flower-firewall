@@ -7,7 +7,7 @@ from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
 from prefs import Ui_Form
-import IPC_wrapper
+import ipc_wrapper
 from multiprocessing import Pipe, Process
 
 D2FCOMM_ASK_OUT = 0

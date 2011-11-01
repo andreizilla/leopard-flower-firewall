@@ -10,7 +10,7 @@ ssize_t msgrcv(int msqid, void* msgp, size_t msgsz, long msgtyp, int msgflg)
 #include <sys/msg.h> 
 #include <string.h> //strerror, strcpy
 #include <errno.h> 
-#include "includes.h" //for msg_struct
+#include "common/includes.h" //for msg_struct
 #include "/usr/include/python2.6/Python.h"
 
 static PyObject * IPC_wrapper_ftok(PyObject *self, PyObject *args){
@@ -79,7 +79,7 @@ static PyMethodDef
 IPC_wrapperMethods[] = {
      { "ftok", IPC_wrapper_ftok, METH_VARARGS },
      { "msgget", IPC_wrapper_msgget, METH_VARARGS },
-     { "msgsnd", IPC_wrapper_msgsnd, METH_VARARGS | METH_KEYcde .WORDS },
+     { "msgsnd", IPC_wrapper_msgsnd, METH_VARARGS | METH_KEYWORDS },
      { "msgrcv", IPC_wrapper_msgrcv, METH_VARARGS },
      { NULL, NULL },
 };

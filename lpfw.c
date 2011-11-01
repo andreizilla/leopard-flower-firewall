@@ -24,8 +24,8 @@
 #include <arpa/inet.h> //for ntohl()
 #include <linux/netfilter.h> //for NF_ACCEPT, NF_DROP etc
 #include <assert.h>
-#include "includes.h"
-#include "defines.h"
+#include "common/includes.h"
+#include "common/defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
 
@@ -2454,7 +2454,7 @@ int main ( int argc, char *argv[] )
             return frontend_mode ( argc, argv );
         }
     }
-#endif WITH_FRONTEND
+#endif
 
     checkRoot();
 
@@ -2491,11 +2491,13 @@ int main ( int argc, char *argv[] )
     int nerrors;
 
     // Define argument table structs
-    logging_facility = arg_str0 ( NULL, "logging-facility", "<file>,<stdout>
+    logging_facility = arg_str0 ( NULL, "logging-facility",
 			      #ifndef WITHOUT_SYSLOG
-				  ,<syslog>
+				  "<file>,<stdout>,<syslog>"
+			      #else
+				  "<file>,<stdout>"
 			      #endif
-				  ", "Divert loggin to..." );
+				  , "Divert loggin to..." );
     rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
     pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
     log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
