@@ -5,7 +5,6 @@ SOURCES 	=	ipc.c \
 			common/includes.h \
 			common/defines.h \
 
-
 all: lpfwcli
 
 lpfwcli: $(SOURCES)
