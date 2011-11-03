@@ -638,31 +638,34 @@ while ( ( rv = recv ( nfqfd_input, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
 void* unittestthread ( void *ptr )
 {
     ptr = 0;
-
     //	Test if refresh_thread is working:
     //1. create a new process
     //2. add it to dlist
     //3. check that it has been added to dlist successfully
     //4. terminate the process
     //5. make sure its entry in procfs doesnt exist anymore
-    //6. wait REFRESH_INTERVAL+1 sec
+    //6. sleep REFRESH_INTERVAL+1 sec
     //7. make sure the rule is not in dlist anymore(it should have been deleted by refresh_thread)
 
     pid_t childpid;
+    pid_t parentpid;
+    parentpid = getpid();
+    char exepath[PATH_MAX];
+    char pidstr[16];
+
     if ((childpid = fork()) == -1)
     {
 	m_printf ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	return;
+	kill (parentpid, TEST_FAILED);
     }
     if (childpid == 0) //child
     {
 	pid_t ownpid;
 	ownpid = getpid();
-	char pidstr[16];
 	sprintf(pidstr, "%d", (int)ownpid);
+	printf ("Forked a child with PID: %s\n", pidstr);
 	//lookup own name
 	char exelink[32] = "/proc/";
-	char exepath[PATH_MAX];
 	strcat(exelink, pidstr);
 	strcat(exelink, "/exe");
 	memset ( exepath , 0, PATH_MAX);
@@ -670,19 +673,32 @@ void* unittestthread ( void *ptr )
 	if ( readlink ( exelink, exepath, PATH_MAX ) == -1 )
 	{
 	    m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	    return;
+	    kill (parentpid, TEST_FAILED);
 	}
-
-
-
-
+	printf ("Own path is %s\n", exepath);
+	dlist_add(exepath, pidstr, DENY_ALWAYS, TRUE, "0", 0 , 0, 0, 0 );
+	return;
     }
     if (childpid > 0) //parent
     {
-
-
-
-
+	int stat_loc;
+	wait(childpid, &stat_loc, 0); //wait for child to return
+	sleep(REFRESH_INTERVAL+1);
+	dlist *temp;
+	pthread_mutex_lock(&dlist_mutex);
+	temp = first;
+	while (temp->next != NULL)
+	{
+	    temp = temp->next;
+	    if (!strcmp(temp->pid, pidstr))
+	    {
+		printf("PID is still in dlist\n");
+		pthread_mutex_unlock(&dlist_mutex);
+		kill (parentpid, TEST_FAILED);
+	    }
+	}
+	pthread_mutex_unlock(&dlist_mutex);
+	kill (parentpid, TEST_SUCCEEDED);
 
     }
 }
@@ -2487,6 +2503,37 @@ int frontend_mode ( int argc, char *argv[] )
     return 0;
 }
 
+void TEST_FAILED_handler (int signal)
+{
+
+    if ( remove ( pid_file->filename[0] ) != 0 )
+	m_printf ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    //release netfilter_queue resources
+    m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
+    if ( nfq_close ( globalh_out ) == -1 )
+    {
+	m_printf ( MLOG_INFO,"error in nfq_close\n" );
+    }
+    printf("TEST FAILED");
+    return;
+}
+
+void TEST_SUCCEEDED_handler (int signal)
+{
+
+    if ( remove ( pid_file->filename[0] ) != 0 )
+	m_printf ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    //release netfilter_queue resources
+    m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
+    if ( nfq_close ( globalh_out ) == -1 )
+    {
+	m_printf ( MLOG_INFO,"error in nfq_close\n" );
+    }
+    printf("test finished successfully\n");
+    return;
+}
+
+
 void SIGTERM_handler ( int signal )
 {
 
@@ -2571,7 +2618,9 @@ int main ( int argc, char *argv[] )
     log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
     log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
     log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
-    
+#ifdef DEBUG
+    struct arg_lit *test = arg_lit0 ( NULL, "test", "Run unit test" );
+#endif
     struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
     struct arg_end *end = arg_end ( 20 );
@@ -2579,7 +2628,11 @@ int main ( int argc, char *argv[] )
 		    #ifndef WITHOUT_SYSVIPC
 			cli_path, gui_path, guipy_path,
 		    #endif
-			log_info, log_traffic, log_debug, help, version, end};
+			log_info, log_traffic, log_debug, help, version,
+		    #ifdef DEBUG
+			test,
+		    #endif
+			end};
 
     // Set default value to structs.
     logging_facility->sval[0] = "stdout";
@@ -2744,7 +2797,22 @@ int main ( int argc, char *argv[] )
     {
 	if (!strcmp (argv[1], "--test"))
 	{
-	    pthread_create ( &unittest, NULL, unittestthread, NULL );
+	    //install handlers for unittestthread's verdict signals
+	    struct sigaction sa1;
+	    sa1.sa_handler = TEST_FAILED_handler;
+	    sigemptyset ( &sa1.sa_mask );
+	    if ( sigaction ( TEST_FAILED, &sa1, NULL ) == -1 )
+	    {
+		perror ( "sigaction" );
+	    }
+	    struct sigaction sa2;
+	    sa2.sa_handler = TEST_SUCCEEDED_handler;
+	    sigemptyset ( &sa2.sa_mask );
+	    if ( sigaction ( TEST_SUCCEEDED, &sa2, NULL ) == -1 )
+	    {
+		perror ( "sigaction" );
+	    }
+	    pthread_create ( &unittest_thread, NULL, unittestthread, NULL );
 	}
     }
 #endif
