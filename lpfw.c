@@ -912,37 +912,41 @@ loop:
     fclose ( fd );
 }
 
-//if path is in dlist already, check if it is fork()ed or a new instance
+//if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
 int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
 {
     pthread_mutex_lock ( &dlist_mutex );
-    //first check if app is already in our dlist
     dlist* temp = first->next;
-
     while ( temp != NULL )
     {
         if ( !strcmp ( temp->path, path ) )
         {
-	    if (!temp->is_active) //path is in dlist and has not a current PID. It was added to dlist from rulesfile. Exesize and shasum this app just once
+	    if (!temp->is_active) //rule in dlist has been added from rulesfile and hasn't seen traffic yet.
+	    //Exesize and shasum our process once
             {
                 struct stat exestat;
-                if ( stat ( temp->path, &exestat ) == -1 )
+		if ( stat ( path, &exestat ) == -1 )
                 {
-                    //TODO fopen(path) for shasum below should be invoked right here to avoid the possibility of faking the executable
-                    m_printf ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		    m_printf ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		    pthread_mutex_unlock ( &dlist_mutex );
+		    return DROP;
                 }
                 if ( temp->exesize != exestat.st_size )
                 {
-                    m_printf ( MLOG_INFO, "Exe sizes dont match. Impersonation attempt detected by %s in %s, %d\n", temp->path, __FILE__, __LINE__ );
+		    m_printf ( MLOG_INFO, "Exe sizes dont match.  %s in %s, %d\n", path, __FILE__, __LINE__ );
                     pthread_mutex_unlock ( &dlist_mutex );
                     return EXESIZE_DONT_MATCH;
                 }
 
                 //TODO mutex will be held for way too long here, find a way to decrease time
-                char sha[DIGEST_SIZE];
+		char sha[DIGEST_SIZE];
                 FILE *stream;
-                memset ( sha, 0, DIGEST_SIZE );
-                stream = fopen ( path, "r" );
+		if ((stream = fopen ( path, "r" )) == NULL)
+		{
+		    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		    pthread_mutex_unlock ( &dlist_mutex );
+		    return DROP;
+		}
                 sha512_stream ( stream, ( void * ) sha );
                 fclose ( stream );
                 if ( memcmp ( temp->sha, sha, DIGEST_SIZE ) )
