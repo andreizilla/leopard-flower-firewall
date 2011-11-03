@@ -681,7 +681,7 @@ void* rulesdumpthread ( void *ptr )
     }
 }
 
-//periodically scan running apps and remove from dlist those that are not running(if they are set to ALLOW/DENY ONCE)
+//scan and remove from dlist apps that are not running(if perms == *ONCE)
 void* refreshthread ( void* ptr )
 {
     dlist *temp, *prev, *temp2;
@@ -691,31 +691,33 @@ void* refreshthread ( void* ptr )
 
     while ( 1 )
     {
-        sleep ( 3 );
+	sleep ( 2 );
         pthread_mutex_lock ( &dlist_mutex );
-        temp = first->next;
-        while ( temp != NULL )
+	temp = first;
+	while ( temp->next != NULL )
         {
+	    temp = temp->next;
 	    //check if we have the processes actual PID and it is not a kernel process(it doesnt have a procfs entry)
-	    if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS))
-            {
-                temp = temp->next;
-                continue;
-            }
-
+	    if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS)) continue;
             mypath[6]=0;
             strcat ( mypath, temp->pid );
             strcat ( mypath, "/exe" );
-
             memset ( buf, 0, PATHSIZE );
-            //readlink fails if PID doesnt exist
-            //TODO process readlink's return value gracefully
-            if ( readlink ( mypath, buf, PATHSIZE ) == -1 ) goto delete;
-            //else PID exists, check if it doesnt belong to our process, then delete rule
-            if ( strcmp ( buf, temp->path ) )
+	    //readlink fails if PID isn't running
+	    if ( readlink ( mypath, buf, PATHSIZE ) == -1 )
+	    {
+		m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		goto delete;
+	    }
+	    //else PID is running. Make sure the PID belongs to the same path.
+	    //If not to the same, then the old path has quit and a new process has been started
+	    //with the same PID - delete the old path
+	    if (! strcmp ( buf, temp->path ) ) continue;
+	    else
             {
             delete:
-                //don't delete *ALWAYS rule. If it's the only rule for this PATH - just toggle the current_pid flag, otherwise if there are other entries for this PATH, then remove our rule
+		//don't delete *ALWAYS rule if it's the only rule for this PATH - just toggle the is_active flag,
+		//otherwise if there are other rules for this PATH, then remove this rule
                 if ( !strcmp ( temp->perms, ALLOW_ALWAYS ) || !strcmp ( temp->perms, DENY_ALWAYS ) )
                 {
                     temp2 = first->next;
@@ -739,12 +741,9 @@ void* refreshthread ( void* ptr )
                 // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
                 pthread_mutex_unlock ( &dlist_mutex );
                 dlist_del ( temp->path, temp->pid );
-                //restore pointer to continue iteration
-                //temp = prev;
                 fe_list();
                 break;
             }
-            temp = temp->next;
         }
         pthread_mutex_unlock ( &dlist_mutex );
     }
