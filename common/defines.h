@@ -21,6 +21,7 @@
 #define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
 #define CACHE_EOL_MAGIC 38
+#define REFRESH_INTERVAL 2
 
 #define CONFIGFILE "/etc/lpfw.conf" //main config file
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
