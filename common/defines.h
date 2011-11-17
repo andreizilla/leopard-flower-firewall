@@ -25,9 +25,10 @@
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
 
-#define CONFIGFILE "/etc/lpfw.conf" //main config file
+#define RULESFILE "/etc/lpfw.rules"
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"
+#define PIDFILE "/tmp/lpfw.pid"
 
 #define TCPINFO "/proc/net/tcp"
 #define UDPINFO "/proc/net/udp"

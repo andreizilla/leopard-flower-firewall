@@ -16,7 +16,7 @@ SOURCES 	=	lpfw.c \
 all: lpfw
 
 lpfw: $(SOURCES)
-	gcc $(GCCFLAGS) $(SOURCES) -lnetfilter_queue -lnetfilter_conntrack -lpthread -o lpfw
+	gcc $(GCCFLAGS) $(SOURCES) -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfw

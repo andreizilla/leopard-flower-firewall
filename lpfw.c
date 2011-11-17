@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
 #include <sys/time.h>
+#include <sys/capability.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -47,9 +48,6 @@ dlist *first;
 #ifndef WITHOUT_SYSVIPC
 dlist*copy_first;
 #endif
-
-//first item of sockets cache list
-char *first_cache;
 
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 msg_struct msg_d2f = {1, 0};
@@ -98,6 +96,8 @@ int fe_was_busy_in, fe_was_busy_out;
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
 int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
+// holds currently-being-processed packet's size for in and out NFQUEUE
+int out_packet_size, in_packet_size;
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
@@ -2405,7 +2405,7 @@ void pidFileCheck() {
                         m_printf ( MLOG_INFO, "lpfw is already running\n" );
                         die();
                     }
-                }
+		}
             }
         }
     }
@@ -2414,7 +2414,10 @@ void pidFileCheck() {
 
 
     //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-    if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 ) perror ( "creat PIDFILE" );
+    if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 )
+    {
+	m_printf ( MLOG_INFO, "open: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    }
     sprintf ( pid2str, "%d", ( int ) getpid() );
     ssize_t size;
     if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
@@ -2550,61 +2553,20 @@ void SIGTERM_handler ( int signal )
     return;
 }
 
-int main ( int argc, char *argv[] )
+void parsecomlineargs(int argc, char* argv[])
 {
-#ifndef WITHOUT_SYSVIPC
-    //argv[0] is the  path of the executable
-    if ( argc >= 2 )
-    {
-        if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--guipy"))
-        {
-            return frontend_mode ( argc, argv );
-        }
-    }
-#endif
-
-    checkRoot();
-
-    //install SIGTERM handler
-    struct sigaction sa;
-    sa.sa_handler = SIGTERM_handler;
-    sigemptyset ( &sa.sa_mask );
-    if ( sigaction ( SIGTERM, &sa, NULL ) == -1 )
-    {
-        perror ( "sigaction" );
-    }
-
-#ifndef WITHOUT_SYSVIPC
-    //save own path
-   int ownpid;
-   char ownpidstr[16];
-   ownpid = getpid();
-   char exepath[PATHSIZE];
-   strcpy(exepath,"/proc/");
-   sprintf(ownpidstr, "%d", ownpid );
-   strcat(exepath, ownpidstr);
-   strcat(exepath, "/exe");
-   memset(ownpath,0,PATHSIZE);
-   readlink(exepath,ownpath,PATHSIZE-1);   
-      
-    int basenamelength;
-    basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
-    strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
-#endif
-
-
     //command line parsing contributed by Ramon Fried
     // if the parsing of the arguments was unsuccessful
     int nerrors;
 
     // Define argument table structs
     logging_facility = arg_str0 ( NULL, "logging-facility",
-			      #ifndef WITHOUT_SYSLOG
-				  "<file>,<stdout>,<syslog>"
-			      #else
-				  "<file>,<stdout>"
-			      #endif
-				  , "Divert loggin to..." );
+#ifndef WITHOUT_SYSLOG
+    "<file>,<stdout>,<syslog>"
+#else
+    "<file>,<stdout>"
+#endif
+    , "Divert loggin to..." );
     rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
     pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
     log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
@@ -2625,19 +2587,19 @@ int main ( int argc, char *argv[] )
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
     struct arg_end *end = arg_end ( 20 );
     void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
-		    #ifndef WITHOUT_SYSVIPC
-			cli_path, gui_path, guipy_path,
-		    #endif
-			log_info, log_traffic, log_debug, help, version,
-		    #ifdef DEBUG
-			test,
-		    #endif
-			end};
+    #ifndef WITHOUT_SYSVIPC
+	cli_path, gui_path, guipy_path,
+    #endif
+	log_info, log_traffic, log_debug, help, version,
+    #ifdef DEBUG
+	test,
+    #endif
+	end};
 
-    // Set default value to structs.
+    // Set default values
     logging_facility->sval[0] = "stdout";
-    rules_file->filename[0] = "/etc/lpfw.rules";
-    pid_file->filename[0] = "/var/log/lpfw.pid";
+    rules_file->filename[0] = RULESFILE;
+    pid_file->filename[0] = PIDFILE;
     log_file->filename[0] = "/tmp/lpfw.log";
 
 #ifndef WITHOUT_SYSVIPC
@@ -2645,12 +2607,12 @@ int main ( int argc, char *argv[] )
     strcpy (clipath, owndir);
     strcat(clipath, "lpfwcli");
     cli_path->filename[0] = clipath;
-    
+
     char guipath[PATHSIZE-16];
     strcpy (guipath, owndir);
     strcat(guipath, "lpfwgui");
     gui_path->filename[0] = guipath;
-    
+
     char guipypath[PATHSIZE -16];
     strcpy (guipypath, owndir);
     strcat(guipypath,"lpfwgui.py");
@@ -2660,56 +2622,123 @@ int main ( int argc, char *argv[] )
     * ( log_info->ival ) = 1;
     * ( log_traffic->ival ) = 1;
 #ifdef DEBUG
-	* ( log_debug->ival ) = 1;
+    * ( log_debug->ival ) = 1;
 #else
     * ( log_debug->ival ) = 0;
 #endif
 
     if ( arg_nullcheck ( argtable ) != 0 )
     {
-        printf ( "Error: insufficient memory\n" );
-        return 1;
+	printf ( "Error: insufficient memory\n" );
+	die(1);
     }
 
     nerrors = arg_parse ( argc, argv, argtable );
 
     if ( nerrors == 0 )
     {
-        if ( help->count == 1 )
-        {
-            printf ( "Leopard Flower:\n Syntax and help:\n" );
-            arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
-            return 0;
-        }
-        else if ( version->count == 1 )
-        {
-            printf ( "%s\n", VERSION );
-            return 0;
-        }
+	if ( help->count == 1 )
+	{
+	    printf ( "Leopard Flower:\n Syntax and help:\n" );
+	    arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+	    exit (0);
+	}
+	else if ( version->count == 1 )
+	{
+	    printf ( "%s\n", VERSION );
+	    exit (0);
+	}
     }/* --leave this for future debugging purposes
-        printf("\nArguments detected:\n");
-        printf("--ipc-method = %s \n", ipc_method->sval[0]);
-        printf("--login-facility = %s \n", logging_facility->sval[0]);
-        printf("--rules_file = %s \n", rules_file->filename[0]);
-        printf("--pid-file = %s \n", pid_file->filename[0]);
-        printf("--log-file = %s \n", log_file->filename[0]);
-        printf("--log-info = %d \n", log_info->count);
-        printf("--log-error = %d \n", log_error->count);
-        printf("--log-debug = %d \n", log_debug->count);
-        printf("--help = %d \n", help->count);
-        printf("--version = %d \n", version->count);
+	printf("\nArguments detected:\n");
+	printf("--ipc-method = %s \n", ipc_method->sval[0]);
+	printf("--login-facility = %s \n", logging_facility->sval[0]);
+	printf("--rules_file = %s \n", rules_file->filename[0]);
+	printf("--pid-file = %s \n", pid_file->filename[0]);
+	printf("--log-file = %s \n", log_file->filename[0]);
+	printf("--log-info = %d \n", log_info->count);
+	printf("--log-error = %d \n", log_error->count);
+	printf("--log-debug = %d \n", log_debug->count);
+	printf("--help = %d \n", help->count);
+	printf("--version = %d \n", version->count);
 */
     else if ( nerrors > 0 )
     {
-        arg_print_errors ( stdout, end, "Leopard Flower" );
-        printf ( "Leopard Flower:\n Syntax and help:\n" );
-        arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
-        return 1;
+	arg_print_errors ( stdout, end, "Leopard Flower" );
+	printf ( "Leopard Flower:\n Syntax and help:\n" );
+	arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+	exit (1);
     }
 
     // Free memory - don't do this cause args needed later on
     //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 
+}
+
+
+int main ( int argc, char *argv[] )
+{
+#ifndef WITHOUT_SYSVIPC
+    //argv[0] is the  path of the executable
+    if ( argc >= 2 )
+    {
+        if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--guipy"))
+        {
+            return frontend_mode ( argc, argv );
+        }
+    }
+#endif
+
+    checkRoot();
+
+    //hdr and data are pointers to structures!!! not structures
+    cap_user_header_t       hdr;
+    cap_user_data_t         data;
+
+    hdr = malloc(sizeof(*hdr));
+    data = malloc (sizeof(*data));
+
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->version = _LINUX_CAPABILITY_VERSION;
+
+    if (capget(hdr, data) < 0) perror("capget failed:");
+
+    data->effective = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_DAC_OVERRIDE));
+    data->permitted = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_DAC_OVERRIDE));
+    data->inheritable = 0;
+    if (capset(hdr, data) < 0) perror("capset failed: ");
+
+    cap_t cap = cap_get_proc();
+    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
+    cap_free(cap);
+
+
+
+    //install SIGTERM handler
+    struct sigaction sa;
+    sa.sa_handler = SIGTERM_handler;
+    sigemptyset ( &sa.sa_mask );
+    if ( sigaction ( SIGTERM, &sa, NULL ) == -1 )
+    {
+        perror ( "sigaction" );
+    }
+
+#ifndef WITHOUT_SYSVIPC
+   //save own path
+   int ownpid = getpid();
+   char ownpidstr[16];
+   sprintf(ownpidstr, "%d", ownpid );
+   char exepath[PATHSIZE] = "/proc/";
+   strcat(exepath, ownpidstr);
+   strcat(exepath, "/exe");
+   memset(ownpath,0,PATHSIZE);
+   readlink(exepath,ownpath,PATHSIZE-1);   
+      
+    int basenamelength;
+    basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
+    strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
+#endif
+
+    parsecomlineargs(argc, argv);
     loggingInit();
     pidFileCheck();
 #ifndef WITHOUT_SYSVIPC
@@ -2783,12 +2812,6 @@ int main ( int argc, char *argv[] )
     copy_first->next = NULL;
 #endif
 
-    //initialize first item in cache
-    if ( ( first_cache = malloc ( MAX_CACHE*32 )) == NULL ){perror("malloc");}
-    memset(first_cache,0,MAX_CACHE*32);
-
-
-
     rules_load();
     pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
 #ifdef DEBUG
@@ -2820,8 +2843,6 @@ int main ( int argc, char *argv[] )
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
 
-
-    
 
     if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
         m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
