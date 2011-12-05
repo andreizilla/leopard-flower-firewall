@@ -79,7 +79,7 @@ static PyMethodDef
 IPC_wrapperMethods[] = {
      { "ftok", IPC_wrapper_ftok, METH_VARARGS },
      { "msgget", IPC_wrapper_msgget, METH_VARARGS },
-     { "msgsnd", IPC_wrapper_msgsnd, METH_VARARGS | METH_KEYWORDS },
+     { "msgsnd", IPC_wrapper_msgsnd, METH_VARARGS | METH_KEYcde .WORDS },
      { "msgrcv", IPC_wrapper_msgrcv, METH_VARARGS },
      { NULL, NULL },
 };

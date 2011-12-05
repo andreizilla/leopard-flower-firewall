@@ -6,6 +6,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
+#include <sys/time.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -104,6 +105,9 @@ int nfqfd_input;
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
 char predicate = FALSE;
+
+struct timeval lastpacket = {0};
+pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
     //while(1){printf("DELMARK");}
@@ -556,9 +560,20 @@ void* cachebuildthread ( void *pid ){
     refresh_timer.tv_nsec=1000000000/4;
     int i;
     dlist *temp;
+    struct timeval time;
+    int delta;
 
     while(1){
 	nanosleep(&refresh_timer, &dummy);
+	//is there was more that a second since last packet was seen, no need to build cache
+	gettimeofday(&time, NULL);
+	pthread_mutex_lock(&lastpacket_mutex);
+	delta = time.tv_sec - lastpacket.tv_sec;
+	pthread_mutex_unlock(&lastpacket_mutex);
+	if (delta > 1) {
+	    //printf ("Sleeping a bit\n");
+	    continue;
+	}
 	pthread_mutex_lock(&dlist_mutex);
 	temp = first;
 	//cache only running PIDs && not kernel processes
@@ -1761,6 +1776,11 @@ out:
 }
 
 int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata ){
+    pthread_mutex_lock(&lastpacket_mutex);
+    gettimeofday(&lastpacket, NULL);
+    pthread_mutex_unlock(&lastpacket_mutex);
+
+
 #ifdef DEBUG
     static int is_strange_daddr = 0;
     static char strange_daddr[INET_ADDRSTRLEN];
@@ -1994,6 +2014,10 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
 int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
+    pthread_mutex_lock(&lastpacket_mutex);
+    gettimeofday(&lastpacket, NULL);
+    pthread_mutex_unlock(&lastpacket_mutex);
+
     struct iphdr *ip;
     u_int32_t id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
