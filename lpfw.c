@@ -774,7 +774,7 @@ void rules_load()
         m_printf ( MLOG_INFO, "CONFIG doesnt exist..creating" );
         if ( ( stream = fopen ( rules_file->filename[0], "w+" ) ) == NULL )
         {
-            m_printf ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
             return;
         }
     }

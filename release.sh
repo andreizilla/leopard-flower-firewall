@@ -95,6 +95,7 @@ if [ $s -eq 1 ]; then
 	cp lpfw.c $LPFW
 	cp msgq.c $LPFW
 	cp Makefile $LPFW
+	cp configure $LPFW
 	cp version.h $LPFW
 	cp README $LPFW
 	cp CHANGELOG $LPFW
@@ -109,6 +110,7 @@ if [ $s -eq 1 ]; then
 	tar cjf $LPFWCLI.tar.bz $LPFWCLI
 
 	mkdir $LPFWPYGUI
+	cp -R common $LPFWPYGUI
 	cp lpfw-pygui/frontend.py $LPFWPYGUI
 	cp lpfw-pygui/lpfwgui.py $LPFWPYGUI
 	cp lpfw-pygui/popup_in.py $LPFWPYGUI
