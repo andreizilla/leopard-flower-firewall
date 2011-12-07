@@ -81,7 +81,10 @@ pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, rulesdump_thread, nfqinput_thread, cachebuild_thread;
+pthread_t refresh_thread, nfqinput_thread, cachebuild_thread;
+#ifdef DEBUG
+pthread_t unittest_thread, rulesdump_thread;
+#endif
 pthread_t ct_del_thread;
 
 //flag which shows whether frontend is running
@@ -633,6 +636,60 @@ while ( ( rv = recv ( nfqfd_input, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
 }
 }
 
+void* unittestthread ( void *ptr )
+{
+    ptr = 0;
+
+    //	Test if refresh_thread is working:
+    //1. create a new process
+    //2. add it to dlist
+    //3. check that it has been added to dlist successfully
+    //4. terminate the process
+    //5. make sure its entry in procfs doesnt exist anymore
+    //6. wait REFRESH_INTERVAL+1 sec
+    //7. make sure the rule is not in dlist anymore(it should have been deleted by refresh_thread)
+
+    pid_t childpid;
+    if ((childpid = fork()) == -1)
+    {
+	m_printf ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return;
+    }
+    if (childpid == 0) //child
+    {
+	pid_t ownpid;
+	ownpid = getpid();
+	char pidstr[16];
+	sprintf(pidstr, "%d", (int)ownpid);
+	//lookup own name
+	char exelink[32] = "/proc/";
+	char exepath[PATH_MAX];
+	strcat(exelink, pidstr);
+	strcat(exelink, "/exe");
+	memset ( exepath , 0, PATH_MAX);
+	//readlink fails if PID isn't running
+	if ( readlink ( exelink, exepath, PATH_MAX ) == -1 )
+	{
+	    m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	    return;
+	}
+
+
+
+
+    }
+    if (childpid > 0) //parent
+    {
+
+
+
+
+
+    }
+}
+
+
+
 void* rulesdumpthread ( void *ptr )
 {
     ptr = 0;
@@ -692,7 +749,7 @@ void* refreshthread ( void* ptr )
 
     while ( 1 )
     {
-	sleep ( 2 );
+	sleep ( REFRESH_INTERVAL );
         pthread_mutex_lock ( &dlist_mutex );
 	temp = first;
 	while ( temp->next != NULL )
@@ -2710,6 +2767,13 @@ int main ( int argc, char *argv[] )
     pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
 #ifdef DEBUG
     pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
+    if (argc > 1)
+    {
+	if (!strcmp (argv[1], "--test"))
+	{
+	    pthread_create ( &unittest, NULL, unittestthread, NULL );
+	}
+    }
 #endif
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
