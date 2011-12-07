@@ -19,7 +19,7 @@ all: lpfw lpfwcli
 lpfw: $(LPFWSOURCES)
 #we link against our own -lnetfiler_conntrack library v. 0.9.1 (0.0.101 is broken)
 #during runtime we search our own directory first for .so files, hence -Wl,-rpath,./
-	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lnetfilter_conntrack -lpthread -o lpfw
+	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 lpfwcli: lpfwcli.c ipc.c
 	gcc lpfwcli.c ipc.c $(GCCFLAGS) -lncurses -lpthread -o lpfwcli

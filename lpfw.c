@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
 #include <sys/time.h>
+#include <sys/capability.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -2331,7 +2332,11 @@ void pidFileCheck() {
 
 
     //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-    if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 ) perror ( "creat PIDFILE" );
+    if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 )
+    {
+	m_printf ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    }
+
     sprintf ( pid2str, "%d", ( int ) getpid() );
     ssize_t size;
     if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
@@ -2449,6 +2454,28 @@ int main ( int argc, char *argv[] )
 
     checkRoot();
 
+    cap_user_header_t       hdr;
+    cap_user_data_t         data;
+
+    hdr = malloc(sizeof(*hdr));
+    data = malloc (sizeof(*data));
+
+    memset(hdr, 0, sizeof(*hdr));
+    hdr->version = _LINUX_CAPABILITY_VERSION;
+
+    if (capget(hdr, data) < 0) perror("capget failed:");
+
+    /* Clear all but the capability to bind to low ports */
+    data->effective = CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_SETGID);
+    data->permitted = CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_SETGID);
+    data->inheritable = 0;
+    if (capset(hdr, data) < 0) perror("capset failed: ");
+
+    cap_t cap = cap_get_proc();
+    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
+    cap_free(cap);
+
+
     //install SIGTERM handler
     struct sigaction sa;
     sa.sa_handler = SIGTERM_handler;
@@ -2501,9 +2528,9 @@ int main ( int argc, char *argv[] )
 
     // Set default value to structs.
     logging_facility->sval[0] = "stdout";
-    rules_file->filename[0] = "/etc/lpfw.rules";
-    pid_file->filename[0] = "/var/log/lpfw.pid";
-    log_file->filename[0] = "/tmp/lpfw.log";
+    rules_file->filename[0] = RULESFILE;
+    pid_file->filename[0] = PIDFILE;
+    log_file->filename[0] = LPFW_LOGFILE;
     
     char clipath[PATHSIZE-16];
     strcpy (clipath, owndir);

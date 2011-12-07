@@ -22,9 +22,11 @@
 #define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
 #define CACHE_EOL_MAGIC 38
 
-#define CONFIGFILE "/etc/lpfw.conf" //main config file
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"
+#define PIDFILE "/tmp/lpfw.pid"
+#define RULESFILE "/etc/lpfw.rules"
+#define LPFW_LOGFILE "/tmp/lpfw.log"
 
 #define TCPINFO "/proc/net/tcp"
 #define UDPINFO "/proc/net/udp"
