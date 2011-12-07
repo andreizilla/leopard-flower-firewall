@@ -14,8 +14,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <stdarg.h>
-#include "defines.h"
-#include "includes.h"
+#include "common/defines.h"
+#include "common/includes.h"
 
 int (*m_printf)(int loglevel, char *format, ...);
 void list();
