@@ -29,6 +29,11 @@ typedef struct m_dlist
     int *sockets_cache;//pointer to 2D array of cache
     DIR *dirstream;
     char pidfdpath[32];
+    //traffic counters
+    ulong out_allow_counter;
+    ulong out_block_counter;
+    ulong in_allow_counter;
+    ulong in_block_counter;
 } dlist;
 
 //structures used in msgq for communication daemon<>frontend
@@ -89,8 +94,8 @@ enum
     DROP,
     PORT_NOT_FOUND,
     SOCKET_NONE_PIDFD,
-    INODE_FOUND_IN_DLIST_ALLOW,
-    INODE_FOUND_IN_DLIST_DENY,
+    SOCKET_FOUND_IN_DLIST_ALLOW,
+    SOCKET_FOUND_IN_DLIST_DENY,
     PATH_FOUND_IN_DLIST_ALLOW,
     PATH_FOUND_IN_DLIST_DENY,
     NEW_INSTANCE_ALLOW,

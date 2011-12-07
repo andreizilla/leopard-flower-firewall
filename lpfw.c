@@ -86,7 +86,7 @@ pthread_t ct_del_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
-//fe_was_busy is a flag to know whether frontend was processing some request
+//fe_was_busy_* is a flag to know whether frontend was processing some request
 //Normally, if path is not found in dlist, we send a request to frontend
 //But in case it was busy when we started iterating dlist, we assume FRONTEND_BUSY
 //This prevents possible duplicate entries in dlist
@@ -96,6 +96,9 @@ int fe_was_busy_in, fe_was_busy_out;
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
 int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
+// path of pid of rule being to which the packet belongs
+char pid_out[PIDLENGTH], pid_in[PIDLENGTH];
+char path_out[PATHSIZE], path_in[PATHSIZE];
 // holds currently-being-processed packet's size for in and out NFQUEUE
 int out_packet_size, in_packet_size;
 
@@ -1247,7 +1250,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
+int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set )
 {
     char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
     char path[32];
@@ -1318,12 +1321,12 @@ int socket_find_in_dlist ( int *mysocket, int *nfmark_to_set )
                 {
                     *nfmark_to_set = temp->nfmark;
                     pthread_mutex_unlock ( &dlist_mutex );
-                    return INODE_FOUND_IN_DLIST_ALLOW;
+		    return SOCKET_FOUND_IN_DLIST_ALLOW;
                 }
                 if ( !strcmp ( temp->perms, DENY_ONCE ) || !strcmp ( temp->perms, DENY_ALWAYS ) )
                 {
                     pthread_mutex_unlock ( &dlist_mutex );
-                    return INODE_FOUND_IN_DLIST_DENY;
+		    return SOCKET_FOUND_IN_DLIST_DENY;
                 }
             }
         }
@@ -1802,7 +1805,7 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
 	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_tcp(&socketint);
@@ -1828,7 +1831,7 @@ int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, u
 	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_udp(&socketint);
@@ -1848,7 +1851,7 @@ int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long 
     int retval, socketint;
 
     if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
-    if (( retval = socket_find_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
+    if (( retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
     if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
     if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
     if ( !fe_active_flag_get() )
@@ -1884,6 +1887,8 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     }
     m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
 # endif
+
+    in_packet_size = ntohs(ip->tot_len);
     int verdict;
     u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
     char path[PATHSIZE], pid[PIDLENGTH];
@@ -2008,7 +2013,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
  switch ( verdict )
     {
     case ACCEPT:
-    case INODE_FOUND_IN_DLIST_ALLOW:
+    case SOCKET_FOUND_IN_DLIST_ALLOW:
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
@@ -2048,7 +2053,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case INODE_FOUND_IN_DLIST_DENY:
+    case SOCKET_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
@@ -2102,11 +2107,12 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
     struct iphdr *ip;
     u_int32_t id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
-    if ( !ph ) {printf ("ph == NULL, should ever happen, please report"); return 0;}
+    if ( !ph ) {printf ("ph == NULL, should never happen, please report"); return 0;}
     id = ntohl ( ph->packet_id );
     nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
     char daddr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
+    out_packet_size = ntohs(ip->tot_len);
     int verdict;
     u_int16_t sport_netbyteorder, dport_netbyteorder;
       char path[PATHSIZE], pid[PIDLENGTH];
@@ -2124,7 +2130,7 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
         int srctcp = ntohs ( tcp->source );     
 	m_printf ( MLOG_TRAFFIC, "<TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
 
-	//remember fe's state before we process
+	//remember f/e's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
 	if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 	    if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
@@ -2232,7 +2238,7 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
     switch ( verdict )
     {
     case ACCEPT:
-    case INODE_FOUND_IN_DLIST_ALLOW:
+    case SOCKET_FOUND_IN_DLIST_ALLOW:
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
@@ -2278,7 +2284,7 @@ return 0;
         m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
     case SENT_TO_FRONTEND:
         m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case INODE_FOUND_IN_DLIST_DENY:
+    case SOCKET_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     case PATH_FOUND_IN_DLIST_DENY:
         m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
