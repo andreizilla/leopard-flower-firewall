@@ -22,6 +22,8 @@
 #define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
 #define CACHE_EOL_MAGIC 38
 #define REFRESH_INTERVAL 2
+#define TEST_FAILED SIGUSR1
+#define TEST_SUCCEEDED SIGUSR2
 
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"
