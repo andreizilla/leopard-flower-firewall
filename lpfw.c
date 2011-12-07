@@ -7,10 +7,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
 #include <sys/time.h>
-<<<<<<< HEAD
 #include <sys/capability.h>
-=======
->>>>>>> 5d26020012d87de58b79bbad72d506cd3404b0c3
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -2553,22 +2550,11 @@ int main ( int argc, char *argv[] )
 
     // Set default value to structs.
     logging_facility->sval[0] = "stdout";
-<<<<<<< HEAD
     rules_file->filename[0] = RULESFILE;
     pid_file->filename[0] = PIDFILE;
     log_file->filename[0] = LPFW_LOGFILE;
-    
-=======
-    rules_file->filename[0] = "/etc/lpfw.rules";
-    pid_file->filename[0] = "/var/log/lpfw.pid";
-    log_file->filename[0] = "/tmp/lpfw.log";
 
-<<<<<<< HEAD
-#ifdef WITH_FRONTEND
->>>>>>> 5d26020012d87de58b79bbad72d506cd3404b0c3
-=======
 #ifndef WITHOUT_SYSVIPC
->>>>>>> dc578a6d69e650d2d72a2088bef05f00914f75df
     char clipath[PATHSIZE-16];
     strcpy (clipath, owndir);
     strcat(clipath, "lpfwcli");
