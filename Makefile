@@ -1,4 +1,4 @@
-GCCFLAGS = -fno-stack-protector
+GCCFLAGS =
 
 LPFWSOURCES 	=	lpfw.c \
 			msgq.c \
