@@ -7,7 +7,10 @@
 #include <sys/stat.h>
 #include <sys/socket.h> //required for netfilter.h
 #include <sys/time.h>
+<<<<<<< HEAD
 #include <sys/capability.h>
+=======
+>>>>>>> 5d26020012d87de58b79bbad72d506cd3404b0c3
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -44,7 +47,10 @@ char owndir[PATHSIZE]; //full path to the dir lpfw executable is in (with traili
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
-dlist *first, *copy_first;
+dlist *first;
+#ifdef WITH_FRONTEND
+dlist*copy_first;
+#endif
 
 //first item of sockets cache list
 char *first_cache;
@@ -2443,6 +2449,7 @@ void SIGTERM_handler ( int signal )
 
 int main ( int argc, char *argv[] )
 {
+#ifdef WITH_FRONTEND
     //argv[0] is the  path of the executable
     if ( argc >= 2 )
     {
@@ -2451,6 +2458,7 @@ int main ( int argc, char *argv[] )
             return frontend_mode ( argc, argv );
         }
     }
+#endif WITH_FRONTEND
 
     checkRoot();
 
@@ -2485,6 +2493,7 @@ int main ( int argc, char *argv[] )
         perror ( "sigaction" );
     }
 
+#ifdef WITH_FRONTEND
     //save own path
    int ownpid;
    char ownpidstr[16];
@@ -2500,7 +2509,7 @@ int main ( int argc, char *argv[] )
     int basenamelength;
     basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
     strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
-
+#endif
 
 
     //command line parsing contributed by Ramon Fried
@@ -2512,11 +2521,13 @@ int main ( int argc, char *argv[] )
     rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
     pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
     log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
-    
+
+#ifdef WITH_FRONTEND
     cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
     gui_path = arg_file0 ( NULL, "gui-path", "<path to file>", "Path to GUI frontend" );
     guipy_path = arg_file0 ( NULL, "guipy-path", "<path to file>", "Path to Python-based GUI frontend" );
-    
+#endif
+
     log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
     log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
     log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
@@ -2524,14 +2535,26 @@ int main ( int argc, char *argv[] )
     struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
     struct arg_end *end = arg_end ( 20 );
-    void *argtable[] = {logging_facility, rules_file, pid_file, log_file, cli_path, gui_path, guipy_path, log_info, log_traffic, log_debug, help, version, end};
+    void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
+		    #ifdef WITH_FRONTEND
+			cli_path, gui_path, guipy_path,
+		    #endif
+			log_info, log_traffic, log_debug, help, version, end};
 
     // Set default value to structs.
     logging_facility->sval[0] = "stdout";
+<<<<<<< HEAD
     rules_file->filename[0] = RULESFILE;
     pid_file->filename[0] = PIDFILE;
     log_file->filename[0] = LPFW_LOGFILE;
     
+=======
+    rules_file->filename[0] = "/etc/lpfw.rules";
+    pid_file->filename[0] = "/var/log/lpfw.pid";
+    log_file->filename[0] = "/tmp/lpfw.log";
+
+#ifdef WITH_FRONTEND
+>>>>>>> 5d26020012d87de58b79bbad72d506cd3404b0c3
     char clipath[PATHSIZE-16];
     strcpy (clipath, owndir);
     strcat(clipath, "lpfwcli");
@@ -2546,7 +2569,8 @@ int main ( int argc, char *argv[] )
     strcpy (guipypath, owndir);
     strcat(guipypath,"lpfwgui.py");
     guipy_path->filename[0] = guipypath;
-    
+#endif
+
     * ( log_info->ival ) = 1;
     * ( log_traffic->ival ) = 1;
 #ifdef DEBUG
@@ -2602,7 +2626,9 @@ int main ( int argc, char *argv[] )
 
     loggingInit();
     pidFileCheck();
+#ifdef WITH_FRONTEND
     msgq_init();
+#endif
     initialize_conntrack();
    
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
@@ -2660,6 +2686,7 @@ int main ( int argc, char *argv[] )
     first->prev = NULL;
     first->next = NULL;
 
+#ifdef WITH_FRONTEND
     //initialze dlist copy's first(reference) element
     if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
     {
@@ -2668,6 +2695,7 @@ int main ( int argc, char *argv[] )
     }
     copy_first->prev = NULL;
     copy_first->next = NULL;
+#endif
 
     //initialize first item in cache
     if ( ( first_cache = malloc ( MAX_CACHE*32 )) == NULL ){perror("malloc");}
