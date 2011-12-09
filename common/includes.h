@@ -23,12 +23,14 @@ typedef struct m_dlist
     ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
     off_t exesize; //executable's size
     char cpuhog; //flag to show that ann app generates too many new connections and thus lpfw uses certain workarounds to decrease CPU consumption
-    u_int32_t nfmark; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
+    u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
+    u_int32_t nfmark_out;
     struct m_dlist *prev; //previous element in dlist
     struct m_dlist *next; // next element in dlist
     int *sockets_cache;//pointer to 2D array of cache
     DIR *dirstream;
     char pidfdpath[32];
+    int ordinal_number; //each rule gets assigned a consecutive number
     //traffic counters
     ulong out_allow_counter;
     ulong out_block_counter;

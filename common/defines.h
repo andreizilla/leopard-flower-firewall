@@ -17,7 +17,9 @@
 #define DIGEST_SIZE 64
 #define TTYNAME 16
 #define DISPLAYNAME 32
-#define NFMARK_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
+#define NFMARKOUT_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
+#define NFMARKIN_BASE  21331
+#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE
 #define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
 #define CACHE_EOL_MAGIC 38

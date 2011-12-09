@@ -270,7 +270,7 @@ void* commandthread(void* ptr){
 	      if (!strcmp(msg_f2d.item.path, KERNEL_PROCESS)){ //don't set fe_awaiting_reply flags
 		    int nfmark;
 		    pthread_mutex_lock ( &nfmark_count_mutex );
-		    nfmark = NFMARK_BASE + nfmark_count;
+		    nfmark = NFMARKOUT_BASE + nfmark_count;
 		    nfmark_count++;
 		    pthread_mutex_unlock ( &nfmark_count_mutex );
 
@@ -320,7 +320,7 @@ void* commandthread(void* ptr){
 
 		  int nfmark;
 		   pthread_mutex_lock ( &nfmark_count_mutex );
-                    nfmark = NFMARK_BASE + nfmark_count;
+		    nfmark = NFMARKOUT_BASE + nfmark_count;
                     nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 		

@@ -79,6 +79,8 @@ pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread;
+pthread_t traffic_thread, trafficdestroy_thread;
+
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
 #endif
@@ -95,10 +97,13 @@ int fe_was_busy_in, fe_was_busy_out;
 //netfilter mark number for the packet (to be added to NF_MARK_BASE)
 int nfmark_count = 0;
 //netfilter mark to be put on an ALLOWed packet
-int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete;
-// path of pid of rule being to which the packet belongs
+int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete_in, nfmark_to_delete_out;
+// path of pid of rule being processed to which the packet belongs
 char pid_out[PIDLENGTH], pid_in[PIDLENGTH];
 char path_out[PATHSIZE], path_in[PATHSIZE];
+//numbers of rules to which current process belongs
+int rule_ordinal_out, rule_ordinal_in;
+
 // holds currently-being-processed packet's size for in and out NFQUEUE
 int out_packet_size, in_packet_size;
 
@@ -120,7 +125,8 @@ pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
     //while(1){printf("DELMARK");}
-  if (nfct_get_attr_u32(mct, ATTR_MARK) == nfmark_to_delete){
+  int mark = nfct_get_attr_u32(mct, ATTR_MARK);
+  if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out){
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
 	m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return NFCT_CB_CONTINUE;
@@ -130,6 +136,114 @@ int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
   }
   return NFCT_CB_CONTINUE;
 }
+
+int rules[200][9] = {};
+/*
+  [0] nfmark
+  [1] bytes in
+  [2] bytes out
+  [3] bytes in destroyed
+  [4] bytes out destroyed
+  [5] [1] + [3]
+  [6] [2] + [4]
+  [7] how many times previous [5] was larger than the present [5]
+  [8] how many times previous [6] was larger than the present [6]
+*/
+
+//process rules that trafficthread dumps every second to extract traffic statistics
+int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+{
+    int mark;
+    ulong in_bytes, out_bytes;
+    if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
+    {
+	printf ("nfmark 0 detected \n");
+	return NFCT_CB_CONTINUE;
+    }
+    in_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
+    out_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
+
+    int i;
+    for (i = 0; rules[i][0] != 0; ++i)
+    {
+	if (rules[i][0] != mark) continue;
+	rules[i][1] += in_bytes;
+	rules[i][2] += out_bytes;
+	return NFCT_CB_CONTINUE;
+    }
+    //the entry is not yet in array, adding now
+    rules[i][0] = mark;
+    rules[i][1] = in_bytes;
+    rules[i][2] = out_bytes;
+    return NFCT_CB_CONTINUE;
+}
+
+//process rules that trafficthread dumps every second to extract traffic statistics
+int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+{
+    int mark;
+    ulong in_bytes, out_bytes;
+    if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
+    {
+	printf ("destroy nfmark 0 detected \n");
+	return NFCT_CB_CONTINUE;
+    }
+    in_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
+    out_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
+
+    int i;
+    for (i = 0; rules[i][0] != 0; ++i)
+    {
+	if (rules[i][0] != mark) continue;
+	rules[i][3] += in_bytes;
+	rules[i][4] += out_bytes;
+	return NFCT_CB_CONTINUE;
+    }
+    printf ("Error: there was a request to destroy nfmark which is not in the list \n");
+    return NFCT_CB_CONTINUE;
+}
+
+//dump all ct rules every second
+void * trafficthread( void *ptr)
+{
+    u_int8_t family = AF_INET; //used by conntrack
+    struct nfct_handle *traffic_handle;
+    if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL){perror("nfct_open");}
+    if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_callback, NULL) == -1)) {perror("cb_reg");}
+    while(1)
+    {
+	//zero out from previous iteration
+	int i;
+	for (i=0; i<200; ++i)
+	{
+	    rules[i][1] = rules[i][2] = 0;
+	}
+	if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
+	printf("done in query, here's what we got\n");
+	for (i = 0; rules[i][0] != 0; ++i)
+	{
+	    if (rules[i][5] > rules[i][1]+rules[i][3]) ++rules[i][7];
+	    if (rules[i][6] > rules[i][2]+rules[i][4]) ++rules[i][8];
+	    rules[i][5] = rules[i][1]+rules[i][3];
+	    rules[i][6] = rules[i][2]+rules[i][4];
+
+	    printf ("%d >%d <%d >%d <%d >%d <%d errin:%d errout:%d \n", rules[i][0],
+		    rules[i][1], rules[i][2], rules[i][3], rules[i][4], rules[i][5], rules[i][6],
+		    rules[i][7], rules[i][8]);
+	}
+	sleep(1);
+    }
+}
+
+void * trafficdestroythread( void *ptr)
+{
+    struct nfct_handle *traffic_handle;
+    if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL){perror("nfct_open");}
+    if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_destroyfilter_callback, NULL) == -1)) {perror("cb_reg");}
+    int res = 0;
+    res = nfct_catch(traffic_handle); //should block here
+}
+
 
 void* ct_delthread ( void* ptr )
 {
@@ -406,6 +520,8 @@ dlist * dlist_copy()
 //Add new element to dlist
 void dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
+    static int rule_ordinal_count = 0;
+
     pthread_mutex_lock ( &dlist_mutex );
     dlist *temp = first;
 
@@ -446,7 +562,18 @@ void dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, un
     assert(sha != NULL);
     memcpy ( temp->sha, sha, DIGEST_SIZE );
     temp->exesize = size;
-    temp->nfmark = nfmark;
+    //either nfmark is for in or out traffic
+    if (nfmark >= NFMARKIN_BASE)
+    {
+	temp->nfmark_in = nfmark;
+	temp->nfmark_out = nfmark - NFMARK_DELTA;
+    }
+    else
+    {
+	temp->nfmark_out = nfmark;
+	temp->nfmark_in = nfmark + NFMARK_DELTA;
+    }
+    temp->ordinal_number = ++rule_ordinal_count;
     temp->first_instance = first_instance; //obsolete member,can be purged
     if (temp->is_active && strcmp(temp->path, KERNEL_PROCESS)){
 	strcpy(temp->pidfdpath,"/proc/");
@@ -475,8 +602,9 @@ void dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, un
 //	cache_temp->sockets[0][0] = CACHE_EOL_MAGIC;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
-    if ((temp->sockets_cache = (int*)malloc(sizeof(int)*MAX_CACHE)) == NULL){perror("malloc");}
-     *temp->sockets_cache = CACHE_EOL_MAGIC;
+      if ((temp->sockets_cache = (int*)malloc(sizeof(int)*MAX_CACHE)) == NULL){perror("malloc");}
+      *temp->sockets_cache = CACHE_EOL_MAGIC;
+
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
@@ -513,7 +641,8 @@ void dlist_del ( char *path, char *pid )
             temp->prev->next = temp->next;
             if ( temp->next != NULL )
                 temp->next->prev = temp->prev;
-            nfmark_to_delete = temp->nfmark;
+	    nfmark_to_delete_in = temp->nfmark_in;
+	    nfmark_to_delete_out = temp->nfmark_out;
 	    was_active = temp->is_active;
             free ( temp );
 
@@ -533,7 +662,7 @@ void dlist_del ( char *path, char *pid )
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int parsecache(int socket, char *path, char *pid){
+int parsecache_in(int socket, char *path, char *pid){
     int i;
     int retval;
     dlist *temp;
@@ -550,6 +679,8 @@ int parsecache(int socket, char *path, char *pid){
 		else retval = CACHE_TRIGGERED_DENY;
 		strcpy(path, temp->path);
 		strcpy(pid, temp->pid);
+		nfmark_to_set_in = temp->nfmark_in;
+		rule_ordinal_in = temp->ordinal_number;
 		pthread_mutex_unlock(&dlist_mutex);
 		return retval;
 	    }
@@ -559,6 +690,36 @@ int parsecache(int socket, char *path, char *pid){
     pthread_mutex_unlock(&dlist_mutex);
     return GOTO_NEXT_STEP;
 }
+
+int parsecache_out(int socket, char *path, char *pid){
+    int i;
+    int retval;
+    dlist *temp;
+    pthread_mutex_lock(&dlist_mutex);
+    temp = first;
+    while (temp->next != NULL){
+	temp = temp->next;
+	if(!temp->is_active) continue;
+	i = 0;
+	while (temp->sockets_cache[i] != CACHE_EOL_MAGIC){
+	    if (i >= MAX_CACHE-1) break;
+	    if (temp->sockets_cache[i] == socket){ //found match
+		if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
+		else retval = CACHE_TRIGGERED_DENY;
+		strcpy(path, temp->path);
+		strcpy(pid, temp->pid);
+		nfmark_to_set_out = temp->nfmark_out;
+		rule_ordinal_out = temp->ordinal_number;
+		pthread_mutex_unlock(&dlist_mutex);
+		return retval;
+	    }
+	    i++;
+	}
+    }
+    pthread_mutex_unlock(&dlist_mutex);
+    return GOTO_NEXT_STEP;
+}
+
 
 void* cachebuildthread ( void *pid ){
     DIR *mdir;
@@ -989,7 +1150,7 @@ loop:
 }
 
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
-int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime )
+int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime, mbool inflag )
 {
     pthread_mutex_lock ( &dlist_mutex );
     dlist* temp = first->next;
@@ -1047,8 +1208,14 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
                 {
                     pthread_mutex_lock ( &nfmark_count_mutex );
-                    temp->nfmark = NFMARK_BASE + nfmark_count;
-                    *nfmark_to_set = NFMARK_BASE + nfmark_count;
+		    if (inflag)
+		    {
+			temp->nfmark_in = *nfmark_to_set = NFMARKIN_BASE + nfmark_count;
+		    }
+		    else
+		    {
+			temp->nfmark_out = *nfmark_to_set = NFMARKOUT_BASE + nfmark_count;
+		    }
 		    nfmark_count++;
                     pthread_mutex_unlock ( &nfmark_count_mutex );
 
@@ -1114,7 +1281,15 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 strcpy ( tempperms, temp->perms );
                 strcpy ( temppid, temp->pid );
                 memcpy ( tempsha, temp->sha, DIGEST_SIZE );
-                int tempnfmark = temp->nfmark;
+		int tempnfmark;
+		if (inflag)
+		{
+		    tempnfmark = temp->nfmark_in;
+		}
+		else
+		{
+		    tempnfmark = temp->nfmark_out;
+		}
 
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
 
@@ -1126,11 +1301,17 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         int retval;
                         if ( !strcmp ( temp->perms, ALLOW_ALWAYS ) || !strcmp ( temp->perms, ALLOW_ONCE ) )
                         {
-                            pthread_mutex_lock ( &nfmark_count_mutex );
-                            temp->nfmark = NFMARK_BASE + nfmark_count;
-                            *nfmark_to_set = NFMARK_BASE + nfmark_count;
-                            nfmark_count++;
-                            pthread_mutex_unlock ( &nfmark_count_mutex );
+			    pthread_mutex_lock ( &nfmark_count_mutex );
+			    if (inflag)
+			    {
+				temp->nfmark_in = *nfmark_to_set = NFMARKIN_BASE + nfmark_count;
+			    }
+			    else
+			    {
+				temp->nfmark_out = *nfmark_to_set = NFMARKOUT_BASE + nfmark_count;
+			    }
+			    nfmark_count++;
+			    pthread_mutex_unlock ( &nfmark_count_mutex );
                             retval = FORKED_CHILD_ALLOW;
 
                         }
@@ -1250,7 +1431,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set )
+int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set, mbool inflag )
 {
     char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
     char path[32];
@@ -1319,7 +1500,14 @@ int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set )
 
                 if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
                 {
-                    *nfmark_to_set = temp->nfmark;
+		    if (inflag)
+		    {
+			*nfmark_to_set = temp->nfmark_in;
+		    }
+		    else
+		    {
+			*nfmark_to_set = temp->nfmark_out;
+		    }
                     pthread_mutex_unlock ( &dlist_mutex );
 		    return SOCKET_FOUND_IN_DLIST_ALLOW;
                 }
@@ -1793,19 +1981,19 @@ int port2socket_tcp ( int *portint, int *socketint )
     return GOTO_NEXT_STEP;
 }
 
-//Handler for TCP packets
-int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
+//Handler for TCP packets for INPUT NFQUEUE
+int packet_handle_tcp_in ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
     int retval, socketint;
     char cache_path[PATHSIZE];
     char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ((retval = parsecache(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
 	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set, TRUE ) ) != GOTO_NEXT_STEP ) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_tcp(&socketint);
@@ -1813,25 +2001,50 @@ int packet_handle_tcp ( int srctcp, int *nfmark_to_set, char *path, char *pid, u
     }
     else if (retval != GOTO_NEXT_STEP) goto out;
 
-    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime, TRUE ) ) != GOTO_NEXT_STEP) goto out;
+out:
+    return retval;
+}
+
+//Handler for TCP packets for OUTPUT NFQUEUE
+int packet_handle_tcp_out ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
+    int retval, socketint;
+    char cache_path[PATHSIZE];
+    char cache_pid[PIDLENGTH];
+    //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
+    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
+    if ((retval = parsecache_out(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+	m_printf (MLOG_DEBUG2, "(cache)");
+	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+	goto out;
+    }
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set, FALSE ) ) != GOTO_NEXT_STEP ) goto out;
+    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if (retval == SOCKET_NONE_PIDFD){
+	retval = socket_check_kernel_tcp(&socketint);
+	goto out;
+    }
+    else if (retval != GOTO_NEXT_STEP) goto out;
+
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime, FALSE ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
 }
 
 //Handler for UDP packets
-int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_in ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval, socketint;
     char cache_path[PATHSIZE];
     char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
     if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
-    if ((retval = parsecache(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
 	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set, TRUE )) != GOTO_NEXT_STEP) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_udp(&socketint);
@@ -1841,19 +2054,65 @@ int packet_handle_udp ( int srcudp, int *nfmark_to_set, char *path, char *pid, u
 
 
 
-    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime ) ) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime, TRUE ) ) != GOTO_NEXT_STEP) goto out;
 out:
     return retval;
 }
+
+//Handler for UDP packets
+int packet_handle_udp_out ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+{
+    int retval, socketint;
+    char cache_path[PATHSIZE];
+    char cache_pid[PIDLENGTH];
+    //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
+    if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
+    if ((retval = parsecache_out(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+	m_printf (MLOG_DEBUG2, "(cache)");
+	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+	goto out;
+    }
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set, FALSE )) != GOTO_NEXT_STEP) goto out;
+    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if (retval == SOCKET_NONE_PIDFD){
+	retval = socket_check_kernel_udp(&socketint);
+	goto out;
+    }
+    else if (retval != GOTO_NEXT_STEP) goto out;
+
+
+
+    if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime, FALSE ) ) != GOTO_NEXT_STEP) goto out;
+out:
+    return retval;
+}
+
+void increase_allowed_traffic_out(int out_packet_size)
+{
+    pthread_mutex_lock ( &dlist_mutex );
+    dlist *temp = first;
+    while ( temp->next != NULL )
+    {
+	temp = temp->next;
+	if (temp->ordinal_number != rule_ordinal_out) continue;
+	temp->out_allow_counter += out_packet_size;
+	printf ("Traffic: %lu ", temp->out_allow_counter);
+	pthread_mutex_unlock ( &dlist_mutex );
+	return;
+    }
+    pthread_mutex_unlock ( &dlist_mutex );
+    printf ("Ordinal number %d not found \n", rule_ordinal_out);
+}
+
 
 int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval, socketint;
 
     if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
-    if (( retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
+    if (( retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set, FALSE ) ) != GOTO_NEXT_STEP) goto out;
     if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
-    if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
+    if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime, FALSE ) )!= GOTO_NEXT_STEP) goto out;
     if ( !fe_active_flag_get() )
 out:
     return retval;
@@ -1863,7 +2122,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     pthread_mutex_lock(&lastpacket_mutex);
     gettimeofday(&lastpacket, NULL);
     pthread_mutex_unlock(&lastpacket_mutex);
-
 
 #ifdef DEBUG
     static int is_strange_daddr = 0;
@@ -1907,7 +2165,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_tcp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+	    if ((verdict = packet_handle_tcp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -1917,10 +2175,10 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 			//else
 			if (!strcmp(temp->pid, saddr)){
 			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
-				if (temp->is_active) nfmark_to_set_in = temp->nfmark;
+				if (temp->is_active) nfmark_to_set_in = temp->nfmark_in;
 				else { //the first time this rule triggered after being added from rulesfile
-				    temp->nfmark = NFMARK_BASE + nfmark_count;
-				    nfmark_to_set_in = NFMARK_BASE + nfmark_count;
+				    temp->nfmark_in = NFMARKIN_BASE + nfmark_count;
+				    nfmark_to_set_in = NFMARKIN_BASE + nfmark_count;
 				    nfmark_count++;
 				    temp->is_active = TRUE;
 				}
@@ -1956,7 +2214,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;            
-	    if ((verdict = packet_handle_udp ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+	    if ((verdict = packet_handle_udp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -1966,10 +2224,10 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 			//else
 			if (!strcmp(temp->pid, saddr)){
 			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
-				if (temp->is_active) nfmark_to_set_in = temp->nfmark;
+				if (temp->is_active) nfmark_to_set_in = temp->nfmark_in;
 				else { //the first time this rule triggered after being added from rulesfile
-				    temp->nfmark = NFMARK_BASE + nfmark_count;
-				    nfmark_to_set_in = NFMARK_BASE + nfmark_count;
+				    temp->nfmark_in = NFMARKIN_BASE + nfmark_count;
+				    nfmark_to_set_in = NFMARKIN_BASE + nfmark_count;
 				    nfmark_count++;
 				    temp->is_active = TRUE;
 				}
@@ -2132,7 +2390,7 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 
 	//remember f/e's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	if ((verdict = packet_handle_tcp ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+	if ((verdict = packet_handle_tcp_out ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 	    if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 
 		pthread_mutex_lock(&dlist_mutex);
@@ -2143,10 +2401,10 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 		    //else
 		    if (!strcmp(temp->pid, daddr)){
 			if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
-			    if (temp->is_active) nfmark_to_set_out = temp->nfmark;
-			    else { //the first time this rule triggered after being added from rulesfile
-				temp->nfmark = NFMARK_BASE + nfmark_count;
-				nfmark_to_set_out = NFMARK_BASE + nfmark_count;
+			    if (temp->is_active) nfmark_to_set_out = temp->nfmark_out;
+			    else
+			    { //the first time this rule triggered after being added from rulesfile
+				temp->nfmark_out = nfmark_to_set_out = NFMARKOUT_BASE + nfmark_count;
 				nfmark_count++;
 				temp->is_active = TRUE;
 			    }
@@ -2166,7 +2424,7 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 		verdict = SOCKET_NONE_PIDFD;
 		goto kernel_verdict;
 	    }
-	    //drop if fe was busy before we started processing
+	    //drop if f/e was busy before we started processing
 	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
 	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
@@ -2181,7 +2439,7 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 	m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
         
 	fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_udp ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+	    if ((verdict = packet_handle_udp_out ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -2191,10 +2449,9 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 			//else
 			if (!strcmp(temp->pid, daddr)){
 			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
-				if (temp->is_active) nfmark_to_set_out = temp->nfmark;
+				if (temp->is_active) nfmark_to_set_out = temp->nfmark_out;
 				else {
-				    temp->nfmark = NFMARK_BASE + nfmark_count;
-				    nfmark_to_set_out = NFMARK_BASE + nfmark_count;
+				    temp->nfmark_out = nfmark_to_set_out = NFMARKOUT_BASE + nfmark_count;
 				    nfmark_count++;
 				    temp->is_active = TRUE;
 				}
@@ -2243,6 +2500,9 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
     case CACHE_TRIGGERED_ALLOW:
+
+	increase_allowed_traffic_out(out_packet_size);
+
     case INKERNEL_RULE_ALLOW:
 
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
@@ -2771,8 +3031,8 @@ int main ( int argc, char *argv[] )
 
     if (capget(hdr, data) < 0) perror("capget failed:");
 
-    data->effective = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_DAC_OVERRIDE));
-    data->permitted = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_DAC_OVERRIDE));
+    data->effective = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_SETGID));
+    data->permitted = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_SETGID));
     data->inheritable = 0;
     if (capset(hdr, data) < 0) perror("capset failed: ");
 
@@ -2911,6 +3171,10 @@ int main ( int argc, char *argv[] )
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
+    pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
+    pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
+
+
 
 
     if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
