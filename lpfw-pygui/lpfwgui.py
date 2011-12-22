@@ -25,10 +25,12 @@ proc = 0
 path=pid=perms=0
 ruleslock = 0
 
-def refreshmodel(ruleslist):    
+def refreshmodel(ruleslist):  
+    "Fill the frontend with rules data"
     #empty the model, we're filling it anew, we can't use clear() cause it flushes headers too:
     global ruleslock
     ruleslock.acquire()
+    #modelAll contains all rules, modelActive - only those which are currently running and have transfered at least some traffic
     modelAll.removeRows(0,modelAll.rowCount())
     modelActive.removeRows(0,modelActive.rowCount())
            
@@ -38,19 +40,21 @@ def refreshmodel(ruleslist):
         return
     for item in ruleslist[0:-1]:#leave out the last EOF from iteration
         if (item[1] == "KERNEL PROCESS"):
-            #a whole different ball game starts here
-            name = QStandardItem("KERNEL")
-            pid = QStandardItem("N/A")
-            perms = QStandardItem("ALLOW_ALWAYS")
-            fullpath = QStandardItem("KERNEL-> "+item[1])
-            in_traf = QStandardItem()
-            out_traf = QStandardItem()
-            modelAll.appendRow((name,pid,perms,fullpath, in_traf, out_traf))
-            del fullpath,pid,perms,name, in_traf, out_traf
+            #a whole different ball game starts with KERNEL_PROCESS
+            ker_name = QStandardItem("KERNEL")
+            ker_pid = QStandardItem("N/A")
+            ker_perms = QStandardItem("ALLOW_ALWAYS")
+            ker_fullpath = QStandardItem("KERNEL-> "+item[1])
+            ker_in_traf = QStandardItem()
+            ker_out_traf = QStandardItem()
+            modelAll.appendRow((ker_name,ker_pid,ker_perms,ker_fullpath,ker_in_traf,ker_out_traf))
+            #see below why del is needed
+            del ker_fullpath,ker_pid,ker_perms,ker_name,ker_in_traf,ker_out_traf
             ruleslock.release()
             return
         else:
             fullpath = QStandardItem(item[0])
+            #item[4] contains nfmark
             fullpath.setData(item[4])
             if (item[1] == "0"):
                 pid_string = "N/A"
@@ -58,11 +62,14 @@ def refreshmodel(ruleslist):
                 pid_string = item[1]
             pid = QStandardItem(pid_string)
             perms = QStandardItem(item[2])
+            #only the name of the executable after the last /
             m_list = string.rsplit(item[0],"/",1)
             m_name = m_list[1]
             name = QStandardItem(m_name)
             in_traf = QStandardItem()
             out_traf = QStandardItem()
+            modelAll.appendRow((name,pid,perms,fullpath,in_traf,out_traf))
+            del fullpath,pid,perms,name,in_traf,out_traf
             print "Received: %s" %(item[0])
             if (pid_string != "N/A"):
                 fullpath2 = QStandardItem(item[0])
@@ -72,11 +79,9 @@ def refreshmodel(ruleslist):
                 name2 = QStandardItem(m_name)
                 in_traf2 = QStandardItem()
                 out_traf2 = QStandardItem()
-                modelActive.appendRow((name2,pid2,perms2,fullpath2, in_traf2, out_traf2))
+                modelActive.appendRow((name2,pid2,perms2,fullpath2,in_traf2,out_traf2))
                 del fullpath2,pid2,perms2,name2, in_traf2, out_traf2
-            modelAll.appendRow((name,pid,perms,fullpath, in_traf, out_traf))
 #apparently(???) deletion causes its contents to be COPIED into QModel rather than be referenced. If a variable is reused w/out deletion, its contents simply gets re-written
-            del fullpath,pid,perms,name,in_traf,out_traf
     ruleslock.release()
     
     
@@ -85,32 +90,24 @@ def quitApp():
     proc.stdin.write("F2DCOMM_UNREG")
    
 def traffic_handler(ruleslist):
+    "Receive every second nfmarks and traffic stats and put them in the model"
     global ruleslock
     ruleslock.acquire()
     #take all nfmarks 0th 3rd 6th etc. and look them up in the model
     i = -1
     for nfmark in ruleslist:
         i = i + 1
-        if ((i % 3) != 0):
+        if ((i % 3) != 0): #only every third
             continue
-        if (ruleslist[i] == 0):
-            break
-        rows = modelAll.rowCount()
         for j in range(modelAll.rowCount()):
             #4th element of each line has nfmark in its data field
-            modelitem = modelAll.item(j,3)
-            data = modelitem.data().toString()
-            if (modelitem.data().toString() == nfmark):
-                modelitem = modelAll.item(j,4)
-                modelitem.setText(str(ruleslist[i+1]))
+            if (modelAll.item(j,3).data().toString() == nfmark):
+                modelAll.item(j,4).setText(str(ruleslist[i+1]))
                 modelAll.item(j,5).setText(str(ruleslist[i+2]))
         for j in range(modelActive.rowCount()):
             #4th element of each line has nfmark in its data field
-            modelitem = modelActive.item(j,3)
-            data = modelitem.data().toString()
-            if (modelitem.data().toString() == nfmark):
-                modelitem = modelActive.item(j,4)
-                modelitem.setText(str(ruleslist[i+1]))
+            if (modelActive.item(j,3).data().toString() == nfmark):
+                modelActive.item(j,4).setText(str(ruleslist[i+1]))
                 modelActive.item(j,5).setText(str(ruleslist[i+2]))
         
     ruleslock.release()
