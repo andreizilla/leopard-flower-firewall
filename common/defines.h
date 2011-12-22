@@ -19,10 +19,12 @@
 #define DISPLAYNAME 32
 #define NFMARKOUT_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
 #define NFMARKIN_BASE  21331
-#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE
+#define NFMARK_DELTA 10000
+//#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE
 #define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
 #define CACHE_EOL_MAGIC 38
+#define RULES_EXPORT 500
 #define REFRESH_INTERVAL 2
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
@@ -39,11 +41,11 @@
 #define UDP6INFO "/proc/net/udp6"
 #define ICMPINFO "/proc/net/raw"
 
-#define ALLOW_ONCE "ALLOW ONCE"
-#define ALLOW_ALWAYS "ALLOW ALWAYS"
-#define DENY_ONCE "DENY ONCE"
-#define DENY_ALWAYS "DENY ALWAYS"
-#define KERNEL_PROCESS "KERNEL PROCESS"
+#define ALLOW_ONCE "ALLOW_ONCE"
+#define ALLOW_ALWAYS "ALLOW_ALWAYS"
+#define DENY_ONCE "DENY_ONCE"
+#define DENY_ALWAYS "DENY_ALWAYS"
+#define KERNEL_PROCESS "KERNEL_PROCESS"
 
 #define MLOG_INFO 1
 #define MLOG_TRAFFIC 2

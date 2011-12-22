@@ -1,5 +1,5 @@
-import sys, os, thread, time, string, threading
-sys.path.append('/sda/newrepo/gui/')
+import sys, os, thread, time, string, threading, subprocess
+sys.path.append('/sda/newrepo/lpfw-pygui/')
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator
 import resource
 from PyQt4.QtCore import pyqtSignal, Qt
@@ -7,8 +7,7 @@ from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
 from prefs import Ui_Form
-import ipc_wrapper
-from multiprocessing import Pipe, Process
+from multiprocessing import Pipe, Process, Lock
 
 D2FCOMM_ASK_OUT = 0
 D2FCOMM_ASK_IN = 1
@@ -22,175 +21,166 @@ F2DCOMM_REG = 8
 F2DCOMM_UNREG = 9
 
 #global vars
-mq_d2fdel=mq_f2d=mq_d2flist=mq_d2f=11
-s=p=4
+proc = 0
 path=pid=perms=0
-process_finished = 0
+ruleslock = 0
 
-def quitApp():
-    print "In quitApp" 
-    IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_UNREG)  
-    global p
-    global process_finished
-    process_finished = 1
-    p.terminate();
-   
-    
-
-def listRules():
-    IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_LIST)  
-    flist = []
-    while 1:
-        print "mq_d2flist msgrcv start"
-        print mq_d2flist, mq_d2f
-        item = IPC_wrapper.msgrcv(mq_d2flist)
-        print "mq_d2flist msgrcv finished"
-        flist.append(item)
-        if (item[1] == "EOF"): 
-            s.send(flist)  
-            print flist
-            break
-
-
-def getFromProcess_thread():
-    global s
-    global p
-    r,s = Pipe()
-    p = Process(target=msgq_init_process)
-    p.start()
-    r.poll(None)
-    global mq_d2f
-    global mq_d2fdel
-    global mq_d2flist
-    global mq_f2d
-    mq_d2f,mq_d2fdel,mq_d2flist,mq_f2d = r.recv()
-
-    global process_finished
-    while 1:
-        print "r.poll start"
-        while 1:
-            print "here %d" %(process_finished)
-            if (process_finished):
-                break
-            try:
-                r.poll(None) #returns when there is something to read
-                break
-                #system may trigger IOError, just retry reading
-            except IOError:
-                print "IOError caught"
-                #this exception may be raised when application is closing and terminates the Process, let's sleep and let app terminate this thread, if we don't then we will be on r.poll and prevent app closing
-        
-        if (process_finished):
-            break
-        flist = r.recv()
-        print "r.recv finished"
-        #check if this is an ASK request
-        print len(flist)
-        global path
-        global pid
-        global perms
-        
-        if (flist[0] == D2FCOMM_ASK_OUT):
-            path = flist[1]
-            pid = flist[2]
-            
-            print "calling emitaskuserOUT"
-            window.emitAskUserOUT()
-            continue
-        if (flist[0] == D2FCOMM_ASK_IN):         
-            path = flist[1]
-            pid = flist[2]
-            #perms contains remote host's IP address
-            perms = flist[3]
-            
-            print "calling emitaskuserIN"
-            window.emitAskUserIN()
-            continue
-        
-        #if it's not ask request then it is a list request
-        #empty the model, we're filling it anew, we can't use clear() cause it flushes headers too, too we do this:
-        modelAll.removeRows(0,modelAll.rowCount())
-        modelActive.removeRows(0,modelActive.rowCount())
-               
-        #if there's only one element, it's EOF; dont go through iterations,just leave the model empty
-        if (len(flist) == 1): continue
-        for item in flist[0:-1]:#leave out the last EOF from iteration
-            if (item[1] == "KERNEL PROCESS"):
-                #a whole different ball game starts here
-                name = QStandardItem("KERNEL")
-                pid = QStandardItem("N/A")
-                perms = QStandardItem("ALLOW ALWAYS")
-                fullpath = QStandardItem("KERNEL-> "+item[2])
-                modelAll.appendRow((name,pid,perms,fullpath))
-                del fullpath,pid,perms,name
-                continue
-            
-            fullpath = QStandardItem(item[1])
-            if (item[2] == "0"):
+def refreshmodel(ruleslist):    
+    #empty the model, we're filling it anew, we can't use clear() cause it flushes headers too:
+    global ruleslock
+    ruleslock.acquire()
+    modelAll.removeRows(0,modelAll.rowCount())
+    modelActive.removeRows(0,modelActive.rowCount())
+           
+    #if there's only one element, it's EOF; dont go through iterations,just leave the model empty
+    if (len(ruleslist) == 1):
+        ruleslock.release()
+        return
+    for item in ruleslist[0:-1]:#leave out the last EOF from iteration
+        if (item[1] == "KERNEL PROCESS"):
+            #a whole different ball game starts here
+            name = QStandardItem("KERNEL")
+            pid = QStandardItem("N/A")
+            perms = QStandardItem("ALLOW_ALWAYS")
+            fullpath = QStandardItem("KERNEL-> "+item[1])
+            in_traf = QStandardItem()
+            out_traf = QStandardItem()
+            modelAll.appendRow((name,pid,perms,fullpath, in_traf, out_traf))
+            del fullpath,pid,perms,name, in_traf, out_traf
+            ruleslock.release()
+            return
+        else:
+            fullpath = QStandardItem(item[0])
+            fullpath.setData(item[4])
+            if (item[1] == "0"):
                 pid_string = "N/A"
-            else: pid_string = item[2]
+            else: 
+                pid_string = item[1]
             pid = QStandardItem(pid_string)
-            perms = QStandardItem(item[3])
-            m_list = string.rsplit(item[1],"/",1)
+            perms = QStandardItem(item[2])
+            m_list = string.rsplit(item[0],"/",1)
             m_name = m_list[1]
             name = QStandardItem(m_name)
-            print "Received: %s" %(item[1])
+            in_traf = QStandardItem()
+            out_traf = QStandardItem()
+            print "Received: %s" %(item[0])
             if (pid_string != "N/A"):
-                fullpath2 = QStandardItem(item[1])
+                fullpath2 = QStandardItem(item[0])
+                fullpath2.setData(item[4])
                 pid2 = QStandardItem(pid_string)
-                perms2 = QStandardItem(item[3])
+                perms2 = QStandardItem(item[2])
                 name2 = QStandardItem(m_name)
-                modelActive.appendRow((name2,pid2,perms2,fullpath2))
-                del fullpath2,pid2,perms2,name2
-            modelAll.appendRow((name,pid,perms,fullpath))
-            #apparently(???) deletion causes its contents to be COPIED into QModel rather than be referenced. If a variable is reused w/out deletion, its contents simply gets re-written
-            del fullpath,pid,perms,name
+                in_traf2 = QStandardItem()
+                out_traf2 = QStandardItem()
+                modelActive.appendRow((name2,pid2,perms2,fullpath2, in_traf2, out_traf2))
+                del fullpath2,pid2,perms2,name2, in_traf2, out_traf2
+            modelAll.appendRow((name,pid,perms,fullpath, in_traf, out_traf))
+#apparently(???) deletion causes its contents to be COPIED into QModel rather than be referenced. If a variable is reused w/out deletion, its contents simply gets re-written
+            del fullpath,pid,perms,name,in_traf,out_traf
+    ruleslock.release()
     
     
-
-def msgq_init_process():
-    "initializes SysV message queue inter-process communication mechanism, through which frontend will receive instructions from the backend"
-      
-    FTOKID_D2F = 0
-    FTOKID_F2D = 1
-    FTOKID_D2FLIST = 2
-    FTOKID_F2DLIST = 3
-    FTOKID_D2FDEL = 4
-    FTOKID_F2DDEL = 5
-    FTOKID_CREDS = 6 
-    global s,mq_d2f,mq_d2fdel,mq_d2flist,mq_f2d
-    
-    ftok_d2f = IPC_wrapper.ftok("/tmp/lpfw", FTOKID_D2F)
-    mq_d2f= IPC_wrapper.msgget(ftok_d2f, 0)
-    ftok_d2flist = IPC_wrapper.ftok("/tmp/lpfw", FTOKID_D2FLIST)
-    mq_d2flist= IPC_wrapper.msgget(ftok_d2flist, 0)
-    mq_f2d= IPC_wrapper.msgget(IPC_wrapper.ftok("/tmp/lpfw", FTOKID_F2D), 0)
-    mq_d2fdel= IPC_wrapper.msgget(IPC_wrapper.ftok("/tmp/lpfw", FTOKID_D2FDEL), 0)
-    print "%d %d %d %d" %(mq_d2f,mq_d2fdel,mq_d2flist,mq_f2d)
-    
-    #send back these IDs - they can't be global vars, cause we are in a different process
-    s.send((mq_d2f,mq_d2fdel,mq_d2flist,mq_f2d))
-    
-    IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_REG)
-    listRules()
-    
-    while 1:
-        print "mq_d2 msgrcv start"
-        item= IPC_wrapper.msgrcv(mq_d2f)
-        print "mq_d2 msgrcv finish"
-        if (item[0] == D2FCOMM_ASK_OUT or item[0] == D2FCOMM_ASK_IN):
-            print "BE ASKED"
-            s.send(item)
+def quitApp():
+    print "In quitApp" 
+    proc.stdin.write("F2DCOMM_UNREG")
+   
+def traffic_handler(ruleslist):
+    global ruleslock
+    ruleslock.acquire()
+    #take all nfmarks 0th 3rd 6th etc. and look them up in the model
+    i = -1
+    for nfmark in ruleslist:
+        i = i + 1
+        if ((i % 3) != 0):
             continue
-        elif (item[0] == D2FCOMM_LIST):
-            print "BE LISTING"
-            listRules()
-        else:
-            print "unknown command"
-
+        if (ruleslist[i] == 0):
+            break
+        rows = modelAll.rowCount()
+        for j in range(modelAll.rowCount()):
+            #4th element of each line has nfmark in its data field
+            modelitem = modelAll.item(j,3)
+            data = modelitem.data().toString()
+            if (modelitem.data().toString() == nfmark):
+                modelitem = modelAll.item(j,4)
+                modelitem.setText(str(ruleslist[i+1]))
+                modelAll.item(j,5).setText(str(ruleslist[i+2]))
+        for j in range(modelActive.rowCount()):
+            #4th element of each line has nfmark in its data field
+            modelitem = modelActive.item(j,3)
+            data = modelitem.data().toString()
+            if (modelitem.data().toString() == nfmark):
+                modelitem = modelActive.item(j,4)
+                modelitem.setText(str(ruleslist[i+1]))
+                modelActive.item(j,5).setText(str(ruleslist[i+2]))
+        
+    ruleslock.release()
+    
+    
+def stdoutthread(stdout):
+    while 1:
+        message = stdout.readline() #readline needs \n to unblock, it doesnt clear that \n though        
+        msglist = []
+        msglist = message.split(' ')
+        
+        if msglist[0] == "RULESLIST":
+            print msglist
+            ruleslist = []
+            item = []
+            i = 0
+            while (msglist[i*5+1] != "EOF\n"):
+                item.append(msglist[5*i+1])
+                item.append(msglist[5*i+2])
+                item.append(msglist[5*i+3])
+                item.append(msglist[5*i+4])
+                item.append(msglist[5*i+5])            
+                ruleslist.append(item)
+                item = []
+                i = i+1
+            ruleslist.append("EOF")
+            print ruleslist
+            refreshmodel(ruleslist)
+            continue
+        elif msglist[0] == "TRAFFIC":
+            msglist.pop(0)
+            traffic_handler(msglist)
+        elif msglist[0] == "D2FCOMM_LIST":
+            global proc
+            proc.stdin.write("F2DCOMM_LIST")
+        elif msglist[0] == "D2FCOMM_ASK_OUT":
+            global path
+            global pid
+            path = msglist[1]
+            pid = msglist[2]
+            print "calling emitaskuserOUT"
+            window.emitAskUserOUT()
+        elif msglist[0] == "D2FCOMM_ASK_IN":
+            global path
+            global pid
+            global perms
+            path = msglist[1]
+            pid = msglist[2]
+            perms = msglist[3]
+            print "calling emitaskuserIN"
+            window.emitAskUserIN()            
             
             
-
+            
+        
+def msgq_init(): 
+    print "in msgq_init"
+    global proc
+    proc = subprocess.Popen(["/sda/newrepo/lpfw-pygui/ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+     
+    stdout_thread = threading.Thread(target=stdoutthread, args=(proc.stderr,))
+    stdout_thread.daemon = False
+    stdout_thread.start()
+    
+    proc.stdin.write("F2DCOMM_REG ")
+    time.sleep(1)
+    proc.stdin.write("F2DCOMM_LIST ")
+    
+    
+            
 
 class myDialogOut(QDialog, Ui_DialogOut):
     def __init__(self):
@@ -203,30 +193,33 @@ class myDialogOut(QDialog, Ui_DialogOut):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+        global proc
+        proc.stdin.write("F2DCOMM_ADD IGNORED")
      
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+        global proc
+        proc.stdin.write("F2DCOMM_ADD IGNORED")
             
     def allowClicked(self):
         print "allow clicked"
-        if (self.checkBox.isChecked()): verdict = "ALLOW ALWAYS"
-        else: verdict = "ALLOW ONCE"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
-        listRules()
+        if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
+        else: verdict = "ALLOW_ONCE"     
+        global proc
+        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
+        time.sleep(1)
+        proc.stdin.write("F2DCOMM_LIST")
         
     def denyClicked(self):
         print "deny clicked"
-        if (self.checkBox.isChecked()): verdict = "DENY ALWAYS"
-        else: verdict = "DENY ONCE"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
-        listRules()
-
-        
-        
-        
+        if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
+        else: verdict = "DENY_ONCE"     
+        global proc
+        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
+        time.sleep(1)
+        proc.stdin.write("F2DCOMM_LIST")
+             
         
 class myDialogIn(QDialog, Ui_DialogIn):
     def __init__(self):
@@ -239,27 +232,38 @@ class myDialogIn(QDialog, Ui_DialogIn):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+        
+        global proc
+        proc.stdin.write("F2DCOMM_ADD IGNORED")
+        
 
     
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "IGNORED")
+        
+        global proc
+        proc.stdin.write("F2DCOMM_ADD IGNORED")
             
     def allowClicked(self):
         print "allow clicked"
-        if (self.checkBox.isChecked()): verdict = "ALLOW ALWAYS"
-        else: verdict = "ALLOW ONCE"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
-        listRules()
+        if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
+        else: verdict = "ALLOW_ONCE"   
+        global proc
+        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
+        time.sleep(1)
+        proc.stdin.write("F2DCOMM_LIST")
+
         
     def denyClicked(self):
         print "deny clicked"
-        if (self.checkBox.isChecked()): verdict = "DENY ALWAYS"
-        else: verdict = "DENY ONCE"
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = verdict)
-        listRules()        
+        if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
+        else: verdict = "DENY_ONCE"
+        global proc
+        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
+        time.sleep(1)
+        proc.stdin.write("F2DCOMM_LIST")
+        
         
 class mForm(QWidget, Ui_Form):
     def __init__(self):
@@ -295,19 +299,20 @@ class mForm(QWidget, Ui_Form):
         ip = ip1+"."+ip2+"."+ip3+"."+ip4
         
         self.hide()
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_ADD, perms = "ALLOW ALWAYS", path = "KERNEL PROCESS", pid = ip)   
-        listRules()
-
+        global proc
+        proc.stdin.write("F2DCOMM_ADD ALLOW_ALWAYS KERNEL_PROCESS %s" %(ip))
+        proc.stdin.write("F2DCOMM_LIST")        
+        
         
         
 class myMainWindow(QMainWindow, Ui_MainWindow):
-    askuserINsig = pyqtSignal()
-    askuserOUTsig = pyqtSignal()
+    askuserINsig = pyqtSignal() #connected to askUserIN
+    askuserOUTsig = pyqtSignal() #connected to askUserOUT
     quitflag = 0
     
     def saveRules(self):
-        IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_WRT)
-
+        global proc
+        proc.stdin.write("F2DCOMM_WRT")       
     
     def showActiveOnly(self):
         self.tableView.setModel(modelActive)
@@ -320,9 +325,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.actionShow_active_only.setEnabled(True)
         self.actionShow_all.setEnabled(False)
         self.actionShow_active_only.setChecked(False)
-        
-        
-
+    
     def askUserOUT(self):
         print "In askUserOut"
         global path
@@ -338,7 +341,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         global perms
         dialogIn.label_name.setText(path)
         dialogIn.label_pid.setText(pid)
-        dialogIn.label_ip.setText(perms)
+        dialogIn.label_ip.setText(str(perms))
         dialogIn.show()
         
     def rulesMenuTriggered(self):
@@ -381,15 +384,13 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
                     mpath = "KERNEL PROCESS"
                 else:    
                     mpid = "0"
-            IPC_wrapper.msgsnd(mq_f2d, F2DCOMM_DELANDACK, path=mpath, pid=mpid)
-            print "finished sending item to delete to backend"
-            #the backend sends an acknowledgement after rule has been deleted, so we could request a fresh dlist
-        print "Start waiting for ACK of delete..."
-        retval = IPC_wrapper.msgrcv(mq_d2fdel)
-        print retval
-        print "Received delete ACK"
+            
+            global proc
+            proc.stdin.write("F2DCOMM_DELANDACK %s %s " %(mpath,mpid))
+            #TODO wait for delete acknowledgement
+           
         #now we need to update the list ourselves
-        listRules()
+        proc.stdin.write("F2DCOMM_LIST")        
     
     def emitAskUserOUT(self):
         "this is a workaround for not invoking qdialog from a different thread"
@@ -410,8 +411,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             event.accept()
             quitApp()
         
-    def realQuit(self):
-        
+    def realQuit(self):    
         self.quitflag = 1
         self.close()
 
@@ -435,7 +435,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     #don't clutter console with debuginfo
 if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     #I don't know how to redirect output to /dev/null so just make a tmp file until I figure out
-    logfile = open("/tmp/lpfwguipy.log", "w")
+    logfile = open("/dev/null", "w")
     sys.stdout = logfile
         
 app=QApplication(sys.argv)
@@ -459,9 +459,9 @@ actionExit.triggered.connect(window.realQuit)
 
 
 modelAll = QStandardItemModel()
-modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path"))
+modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path", "Incoming allowed", "Outgoing allowed"))
 modelActive = QStandardItemModel()
-modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path"))
+modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path", "Incoming allowed", "Outgoing allowed"))
 window.tableView.setModel(modelAll)
 dialogOut = myDialogOut()
 dialogOut.setWindowTitle("Leopard Flower firewall")
@@ -469,11 +469,9 @@ dialogIn = myDialogIn()
 dialogIn.setWindowTitle("Leopard Flower firewall")
 prefs_dialog = mForm()
 
-#start the thread which initializes msgq and listens for be requests
-#thread.start_new_thread(getFromProcess_thread, ())
+global ruleslock
+ruleslock = Lock();
 
-m_thread = threading.Thread(target=getFromProcess_thread)
-m_thread.daemon = False
-m_thread.start()
+msgq_init()
 
 sys.exit(app.exec_())

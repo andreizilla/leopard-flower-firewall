@@ -62,6 +62,9 @@ extern int fe_list();
 extern void msgq_init();
 extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
+extern int mqd_d2ftraffic;
+extern struct msqid_ds *msgqid_d2ftraffic;
+
 
 //Forward declarations to make code parser happy
 int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
@@ -133,7 +136,8 @@ int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
   return NFCT_CB_CONTINUE;
 }
 
-int rules[200][9] = {};
+int rules[RULES_EXPORT][9] = {};
+int rulesexp[RULES_EXPORT][3] = {};
 /*
   [0] nfmark
   [1] bytes in
@@ -153,7 +157,7 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
     ulong in_bytes, out_bytes;
     if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
     {
-	printf ("nfmark 0 detected \n");
+	//printf ("nfmark 0 detected \n");
 	return NFCT_CB_CONTINUE;
     }
     out_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
@@ -199,6 +203,13 @@ int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_co
     return NFCT_CB_CONTINUE;
 }
 
+typedef struct
+{
+    long type;
+    int rulesexp[RULES_EXPORT][3];
+} mymsg;
+
+
 //dump all ct rules every second
 void * trafficthread( void *ptr)
 {
@@ -210,12 +221,12 @@ void * trafficthread( void *ptr)
     {
 	//zero out from previous iteration
 	int i;
-	for (i=0; i<200; ++i)
+	for (i=0; i<RULES_EXPORT; ++i)
 	{
-	    rules[i][1] = rules[i][2] = 0;
+	    rules[i][1] = rules[i][2] = rulesexp[i][0] = rulesexp[i][1] = rulesexp[i][2] = 0;
 	}
 	if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1){perror("query-DELETE");}
-	printf("done in query, here's what we got\n");
+	//printf("done in query, here's what we got\n");
 	for (i = 0; rules[i][0] != 0; ++i)
 	{
 	    if (rules[i][5] > rules[i][1]+rules[i][3]) ++rules[i][7];
@@ -223,9 +234,65 @@ void * trafficthread( void *ptr)
 	    rules[i][5] = rules[i][1]+rules[i][3];
 	    rules[i][6] = rules[i][2]+rules[i][4];
 
-	    printf ("%d >%d <%d >%d <%d >%d <%d errin:%d errout:%d \n", rules[i][0],
-		    rules[i][1], rules[i][2], rules[i][3], rules[i][4], rules[i][5], rules[i][6],
-		    rules[i][7], rules[i][8]);
+	   // printf ("%d >%d <%d >%d <%d >%d <%d errin:%d errout:%d \n", rules[i][0],
+		//    rules[i][1], rules[i][2], rules[i][3], rules[i][4], rules[i][5], rules[i][6],
+		//    rules[i][7], rules[i][8]);
+	}
+
+	//rearrange array for export
+	int j;
+	for (i=0; rules[i][0] != 0; ++i)
+	{
+	    for (j=0; rulesexp[j][0] !=0; ++j)
+	    {
+		if (rules[i][0] >= NFMARKIN_BASE)
+		{
+		    int nfd = NFMARK_DELTA;
+		    int delta = rules[i][0] - NFMARK_DELTA;
+		    if (delta == rulesexp[j][0])
+		    {
+			rulesexp[j][1] += rules[i][6];
+			rulesexp[j][2] += rules[i][5];
+			goto next;
+		    }
+		}
+		if (rules[i][0] == rulesexp[j][0])
+		{
+		    rulesexp[j][1] += rules[i][5];
+		    rulesexp[j][2] += rules[i][6];
+		    goto next;
+		}
+	    }
+	    if (rules[i][0] >= NFMARKIN_BASE)
+	    {
+		rulesexp[j][0] = rules[i][0] - NFMARK_DELTA;
+		rulesexp[j][1] = rules[i][6];
+		rulesexp[j][2] = rules[i][5];
+	    }
+	    else
+	    {
+		rulesexp[j][0] = rules[i][0];
+		rulesexp[j][1] = rules[i][5];
+		rulesexp[j][2] = rules[i][6];
+	    }
+	    next:
+	    ;
+	}
+	for (i = 0; rulesexp[i][0] != 0; ++i){
+	    //printf("rulesexp: %d: >%d <%d \n", rulesexp[i][0], rulesexp[i][1], rulesexp[i][2]);
+	}
+
+	mymsg msg;
+	msg.type = 1;
+	memcpy (msg.rulesexp, rulesexp, sizeof(msg.rulesexp));
+
+	msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
+	if (msgqid_d2ftraffic->msg_qnum == 0)
+	{
+	    if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.rulesexp ), IPC_NOWAIT ) == -1 )
+	    {
+		printf ( "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
+	    }
 	}
 	sleep(1);
     }
@@ -497,6 +564,7 @@ dlist * dlist_copy()
         strcpy ( copy_temp->perms, temp->perms );
         strcpy ( copy_temp->pid, temp->pid );
 	copy_temp->is_active = temp->is_active;
+	copy_temp->nfmark_out = temp->nfmark_out;
 
         temp = temp->next;
     }
@@ -909,6 +977,7 @@ void* rulesdumpthread ( void *ptr )
         dlist *temp;
         pthread_mutex_lock ( &dlist_mutex );
         temp = first->next;
+	char nfmarkstr[16];
         while ( temp != NULL )
         {
 
@@ -919,8 +988,11 @@ void* rulesdumpthread ( void *ptr )
             fputs ( temp->perms, fd );
             fputc ( '\n', fd );
 	    fputc ( temp->is_active, fd );
+	    fputc ( '\n', fd );
+	    sprintf(nfmarkstr, "%d", temp->nfmark_out);
+	    fputs (nfmarkstr, fd);
             fputc ( '\n', fd );
-            fputc ( '\n', fd );
+	    fputc ( '\n', fd );
 
             temp = temp->next;
         }

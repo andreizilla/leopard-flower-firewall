@@ -45,8 +45,8 @@ extern int nfmark_count;
 
 
 //message queue id - communication link beteeen daemon and frontend
-int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel, mqd_creds;
-struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgqid_creds;
+int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel, mqd_creds, mqd_d2ftraffic;
+struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgqid_creds, *msgqid_d2ftraffic;
 
     pthread_t command_thread, regfrontend_thread;
 
@@ -220,6 +220,7 @@ void* commandthread(void* ptr){
                     strcpy(msg_d2flist.item.pid, temp->pid);
                     strcpy(msg_d2flist.item.perms, temp->perms);
 		    msg_d2flist.item.is_active = temp->is_active;
+		    msg_d2flist.item.nfmark_out = temp->nfmark_out;
                     if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
                         m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                     }
@@ -391,10 +392,12 @@ void* commandthread(void* ptr){
     msgqid_d2f = malloc(sizeof (struct msqid_ds));
     msgqid_f2d = malloc(sizeof (struct msqid_ds));
     msgqid_d2flist = malloc(sizeof (struct msqid_ds));
-    msgqid_d2fdel = malloc(sizeof (struct msqid_ds));
+    //msgqid_d2fdel = malloc(sizeof (struct msqid_ds)); //not in use
     msgqid_creds = malloc(sizeof (struct msqid_ds));
+    msgqid_d2ftraffic = malloc(sizeof (struct msqid_ds));
 
-    key_t ipckey_d2f, ipckey_f2d, ipckey_d2flist, ipckey_d2fdel, ipckey_creds;
+
+    key_t ipckey_d2f, ipckey_f2d, ipckey_d2flist, ipckey_d2fdel, ipckey_creds, ipckey_d2ftraffic;
     if (remove(TMPFILE) != 0)
         m_printf(MLOG_DEBUG, "remove: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     if (creat(TMPFILE,
@@ -426,6 +429,10 @@ void* commandthread(void* ptr){
     if ((ipckey_creds = ftok(TMPFILE, FTOKID_CREDS)) == -1)
         m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_creds);
+
+    if ((ipckey_d2ftraffic = ftok(TMPFILE, FTOKID_D2FTRAFFIC)) == -1)
+	m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_d2ftraffic);
 
     /* Set up the message queue to communicate between daemon and GUI*/
     //we need to first get the Qid, then use this id to delete Q
@@ -514,6 +521,21 @@ creds_bits = OTHERS_WRITABLE_ONLY;
     }
     m_printf(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
 
+    //-------------------------------------------------
+
+    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | creds_bits)) == -1) {
+	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    //remove queue
+    msgctl(mqd_d2ftraffic, IPC_RMID, 0);
+    //create it again
+    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | creds_bits)) == -1) {
+	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    m_printf(MLOG_DEBUG, "Traffic msgq id %d\n", mqd_d2ftraffic);
+
+    //------------------------------------------------------------
+
     pthread_create(&command_thread, NULL, commandthread, NULL);
     pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
 
@@ -585,7 +607,7 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
     strcpy(msg_d2f.item.path, path);
     strcpy(msg_d2f.item.pid, pid);
     msg_d2f.item.command = D2FCOMM_ASK_IN;
-    //next fields of struct will be simply re-used. Not nice, but what's wrong with re-cycling?
+    //the following fields of struct will be simply re-used. Not nice, but what's wrong with re-cycling?
     strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.item.perms));
     msg_d2f.item.stime = sport;
     msg_d2f.item.inode = dport;

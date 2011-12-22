@@ -16,6 +16,8 @@ typedef struct m_dlist
     char pid[PIDLENGTH]; //its pid
     char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
     mbool is_active; //TRUE if app has already been seen sending packets
+    u_int32_t nfmark_out;
+    u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
     unsigned char first_instance; //TRUE for a first instance of an app or a parent process
     //sha must be a uchar, otherwise if it's just char, printf "%x" will promote it to int and cause a lot of pain, SIGV
     unsigned char sha[65]; //sha512sum digest
@@ -23,8 +25,6 @@ typedef struct m_dlist
     ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
     off_t exesize; //executable's size
     char cpuhog; //flag to show that ann app generates too many new connections and thus lpfw uses certain workarounds to decrease CPU consumption
-    u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
-    u_int32_t nfmark_out;
     struct m_dlist *prev; //previous element in dlist
     struct m_dlist *next; // next element in dlist
     int *sockets_cache;//pointer to 2D array of cache
@@ -85,8 +85,9 @@ enum
     FTOKID_D2FLIST,
     FTOKID_F2DLIST,
     FTOKID_D2FDEL,
-    FTOKID_F2DDEL,
-    FTOKID_CREDS
+    FTOKID_F2DDEL = 5,
+    FTOKID_CREDS,
+    FTOKID_D2FTRAFFIC
 };
 
 enum
@@ -132,7 +133,7 @@ enum
     D2FCOMM_LIST,
     F2DCOMM_LIST,
     F2DCOMM_ADD,
-    F2DCOMM_DEL,
+    F2DCOMM_DEL, //not in use, superseded by DELANDACK
     F2DCOMM_DELANDACK,
     F2DCOMM_WRT,
     F2DCOMM_REG,

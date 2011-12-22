@@ -13,7 +13,7 @@ ssize_t msgrcv(int msqid, void* msgp, size_t msgsz, long msgtyp, int msgflg)
 #include "common/includes.h" //for msg_struct
 #include "/usr/include/python2.6/Python.h"
 
-static PyObject * IPC_wrapper_ftok(PyObject *self, PyObject *args){
+static PyObject * ipc_wrapper_ftok(PyObject *self, PyObject *args){
   char* path;
   int id;
  if (!PyArg_ParseTuple(args, "si", &path, &id)) return NULL;
@@ -22,7 +22,7 @@ static PyObject * IPC_wrapper_ftok(PyObject *self, PyObject *args){
  return (PyObject*)Py_BuildValue("i", retval );
 }
 
-static PyObject * IPC_wrapper_msgget(PyObject *self, PyObject *args){
+static PyObject * ipc_wrapper_msgget(PyObject *self, PyObject *args){
   key_t key;
   int msgflg;
  if (!PyArg_ParseTuple(args, "ii", &key, &msgflg)) return NULL;
@@ -33,7 +33,7 @@ static PyObject * IPC_wrapper_msgget(PyObject *self, PyObject *args){
 
 static char *keywords[] = {"msqid","command","perms","flags","path","pid",NULL};
 
-static PyObject * IPC_wrapper_msgsnd(PyObject *self, PyObject *args, PyObject *pKwds){
+static PyObject * ipc_wrapper_msgsnd(PyObject *self, PyObject *args, PyObject *pKwds){
   int msqid;
   msg_struct msg;
   int msgflg = 0; //optional argument
@@ -50,7 +50,7 @@ msg.type = 1; //all messages will have type == 1
 #ifdef DEBUG
 printf("Doing msgsnd\n");
 #endif
-int retval = msgsnd(msqid, &msg, sizeof(msg_struct), msgflg);
+int retval = msgsnd(msqid, &msg, sizeof(msg.item), msgflg);
 #ifdef DEBUG
 printf("Done msgsnd\n");
 #endif
@@ -58,7 +58,7 @@ printf("Done msgsnd\n");
  return (PyObject*)Py_BuildValue("i", retval );
 }
 
-static PyObject * IPC_wrapper_msgrcv(PyObject *self, PyObject *args){
+static PyObject * ipc_wrapper_msgrcv(PyObject *self, PyObject *args){
  int msqid;
   msg_struct msg;
   int msgflg = 0;//optional argument
@@ -66,7 +66,7 @@ static PyObject * IPC_wrapper_msgrcv(PyObject *self, PyObject *args){
 #ifdef DEBUG
  printf("before msgrcv\n");
 #endif
-  int retval = msgrcv(msqid, &msg, sizeof(msg_struct), 0, msgflg);
+  int retval = msgrcv(msqid, &msg, sizeof(msg.item), 0, msgflg);
 #ifdef DEBUG
   printf("after msgrcv %d\n", retval);
 #endif
@@ -75,17 +75,49 @@ static PyObject * IPC_wrapper_msgrcv(PyObject *self, PyObject *args){
  return (PyObject*)Py_BuildValue("issscc", msg.item.command, msg.item.path, msg.item.pid, msg.item.perms, msg.item.is_active, msg.item.first_instance);
 }
 
+typedef struct
+{
+    long type;
+    int rulesexp[RULES_EXPORT][3];
+} mymsg;
+
+static PyObject * ipc_wrapper_msgrcv_traffic(PyObject *self, PyObject *args){
+ int msqid;
+  mymsg msg;
+ if (!PyArg_ParseTuple(args, "i", &msqid)) return NULL;
+#ifdef DEBUG
+ printf("before msgrcv\n");
+#endif
+  int retval = msgrcv(msqid, &msg, sizeof(msg.rulesexp), 0, 0);
+#ifdef DEBUG
+  printf("after msgrcv %d\n", retval);
+#endif
+ if (retval == -1){return (PyObject*)Py_BuildValue("s",strerror(errno));}
+ PyObject *tuple;
+ tuple = PyTuple_New( RULES_EXPORT * 3 * sizeof(u_int32_t));
+ int i = 0;
+ for (i = 0; msg.rulesexp[i]; ++i)
+ {
+     PyTuple_SetItem(tuple, i*3, PyInt_FromLong(msg.rulesexp[i][0]));
+     PyTuple_SetItem(tuple, i*3+1, PyInt_FromLong(msg.rulesexp[i][1]));
+     PyTuple_SetItem(tuple, i*3+2, PyInt_FromLong(msg.rulesexp[i][2]));
+ }
+ return tuple;
+}
+
+
 static PyMethodDef
-IPC_wrapperMethods[] = {
-     { "ftok", IPC_wrapper_ftok, METH_VARARGS },
-     { "msgget", IPC_wrapper_msgget, METH_VARARGS },
-     { "msgsnd", IPC_wrapper_msgsnd, METH_VARARGS | METH_KEYWORDS },
-     { "msgrcv", IPC_wrapper_msgrcv, METH_VARARGS },
+ipc_wrapperMethods[] = {
+     { "ftok", ipc_wrapper_ftok, METH_VARARGS },
+     { "msgget", ipc_wrapper_msgget, METH_VARARGS },
+     { "msgsnd", ipc_wrapper_msgsnd, METH_VARARGS | METH_KEYWORDS },
+     { "msgrcv", ipc_wrapper_msgrcv, METH_VARARGS },
+     { "msgrcv_traffic", ipc_wrapper_msgrcv_traffic, METH_VARARGS },
      { NULL, NULL },
 };
 
- void initIPC_wrapper() {
-          Py_InitModule("IPC_wrapper", IPC_wrapperMethods);
+ void initipc_wrapper() {
+	  Py_InitModule("ipc_wrapper", ipc_wrapperMethods);
     }
     
     
