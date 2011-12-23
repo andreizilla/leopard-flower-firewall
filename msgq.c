@@ -102,18 +102,6 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
         return ;
     }
 
-	struct stat path_stat;
-	if (!strcmp (msg_creds.creds.params[0], "--cli")){
-	   if (stat(cli_path->filename[0], &path_stat) == -1 ){
-	    m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-	    if (errno == ENOENT){
-	    m_printf(MLOG_INFO, "Unable to find %s\n", cli_path->filename[0]);
-	    }
-	    return;
-	   }
-	}
-
-
     //fork, setuid exec xterm and wait for its termination
     //probably some variables become unavailable in child
     pid_t child_pid;

@@ -2845,7 +2845,7 @@ int parsecomlineargs(int argc, char* argv[])
     strcat(guipath, "lpfwgui");
     gui_path->filename[0] = guipath;
 
-    char *guipypath;
+    char *git guipypath;
     guipypath = malloc(PATHSIZE -16);
     strcpy (guipypath, owndir);
     strcat(guipypath,"lpfwgui.py");
