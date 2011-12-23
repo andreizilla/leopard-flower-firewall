@@ -41,6 +41,8 @@ extern dlist * dlist_copy();
 extern struct arg_file *cli_path, *gui_path, *guipy_path;
 extern pthread_mutex_t nfmark_count_mutex, msgq_mutex;
 extern int nfmark_count;
+extern void dlist_del ( char *path, char *pid );
+
 
 
 
@@ -99,6 +101,18 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
        m_printf (LOG_INFO, "You are trying to run lpfw's frontend from a tty terminal. Such possibility is disabled in this version of lpfw due to security reasons. Try to rerun this command from within an X terminal\n");
         return ;
     }
+
+	struct stat path_stat;
+	if (!strcmp (msg_creds.creds.params[0], "--cli")){
+	   if (stat(cli_path->filename[0], &path_stat) == -1 ){
+	    m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    if (errno == ENOENT){
+	    m_printf(MLOG_INFO, "Unable to find %s\n", cli_path->filename[0]);
+	    }
+	    return;
+	   }
+	}
+
 
     //fork, setuid exec xterm and wait for its termination
     //probably some variables become unavailable in child
@@ -237,9 +251,6 @@ void* commandthread(void* ptr){
 
             case F2DCOMM_DELANDACK:
                 dlist_del(msg_f2d.item.path, msg_f2d.item.pid);
-                if (msgsnd(mqd_d2fdel, &msg_d2fdel, sizeof (msg_struct), 0) == -1) {
-                    m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-                }
                 continue;
 
             case F2DCOMM_WRT:
@@ -624,4 +635,4 @@ int fe_list() {
             msg_d2f.item.command = D2FCOMM_LIST;
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
                 m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+}

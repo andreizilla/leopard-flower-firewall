@@ -74,10 +74,6 @@ void msgq_f2ddel(dlist rule, int ack_flag) {
         if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
             m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
-	//get acknowledgement that the rule has been deleted
-        if (msgrcv(mqd_d2fdel, &msg_d2fdel, sizeof (msg_struct), 0, 0) == -1) {
-            m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-        };
     }
 }
 

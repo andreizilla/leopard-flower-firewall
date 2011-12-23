@@ -65,6 +65,8 @@ extern  void frontend_unregister();
 extern  void msgq_initialize();
 extern void msgq_add(msg_struct add_struct);
 extern void msgq_list();
+extern void msgq_f2ddel(dlist rule, int ack_flag);
+
 
 int m_printf_file(int loglevel, char *format, ...) {
     char logstring[PATHSIZE*2]; //shaould be enough for the longest line in log
@@ -701,7 +703,6 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 //delete the entry from the screen by refreshing the screnn
                 //wclear(lw);
                 //list();
-                msgq_list();
                 if (active > 1) --active;
                 //mvwchgat(lw,view_active-1,0,-1,0,0,NULL);
                 //wrefresh(lw);

@@ -367,11 +367,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
                     mpid = "0"
             
             send_to_backend("F2DCOMM_DELANDACK %s %s " %(mpath,mpid))
-            #TODO wait for delete acknowledgement
-           
-        #now we need to update the list ourselves
-        send_to_backend("F2DCOMM_LIST")        
-    
+               
     def emitAskUserOUT(self):
         "this is a workaround for not invoking qdialog from a different thread"
         print "in emitAskUserOut"

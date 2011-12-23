@@ -734,6 +734,7 @@ void dlist_del ( char *path, char *pid )
 		pthread_cond_signal(&condvar);
 	    }
 	    pthread_mutex_unlock ( &dlist_mutex );
+	    fe_list();
 	    return;
         }
         temp = temp->next;
@@ -989,7 +990,6 @@ void* refreshthread ( void* ptr )
                 // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
                 pthread_mutex_unlock ( &dlist_mutex );
                 dlist_del ( temp->path, temp->pid );
-                fe_list();
                 break;
             }
         }
@@ -2778,9 +2778,9 @@ void SIGTERM_handler ( int signal )
     return;
 }
 
+/*command line parsing contributed by Ramon Fried*/
 int parsecomlineargs(int argc, char* argv[])
 {
-   //command line parsing contributed by Ramon Fried
     // if the parsing of the arguments was unsuccessful
     int nerrors;
 
@@ -2814,7 +2814,7 @@ int parsecomlineargs(int argc, char* argv[])
 
     struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
-    struct arg_end *end = arg_end ( 20 );
+    struct arg_end *end = arg_end ( 30 );
     void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
     #ifndef WITHOUT_SYSVIPC
 	cli_path, gui_path, guipy_path,
@@ -2832,17 +2832,21 @@ int parsecomlineargs(int argc, char* argv[])
     log_file->filename[0] = LPFW_LOGFILE;
 
 #ifndef WITHOUT_SYSVIPC
-    char clipath[PATHSIZE-16];
+
+    char *clipath;
+    clipath = malloc(PATHSIZE-16);
     strcpy (clipath, owndir);
     strcat(clipath, "lpfwcli");
     cli_path->filename[0] = clipath;
 
-    char guipath[PATHSIZE-16];
+    char *guipath;
+    guipath = malloc(PATHSIZE-16);
     strcpy (guipath, owndir);
     strcat(guipath, "lpfwgui");
     gui_path->filename[0] = guipath;
 
-    char guipypath[PATHSIZE -16];
+    char *guipypath;
+    guipypath = malloc(PATHSIZE -16);
     strcpy (guipypath, owndir);
     strcat(guipypath,"lpfwgui.py");
     guipy_path->filename[0] = guipypath;
@@ -2900,7 +2904,6 @@ int parsecomlineargs(int argc, char* argv[])
 
     // Free memory - don't do this cause args needed later on
     //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
-
 }
 
 
