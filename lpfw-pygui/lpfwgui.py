@@ -121,15 +121,16 @@ def traffic_handler(ruleslist):
     
     
 def stdoutthread(stdout):
+    "receive commands from backend"
     global path
     global pid
     global perms
     while 1:
         message = stdout.readline() #readline needs \n to unblock, it doesnt clear that \n though        
         msglist = []
-        msglist = message.split(' ')
-        
+        msglist = message.split(' ')    
         if msglist[0] == "RULESLIST":
+            #rules in format (path, pid, perms, isactive, nfmark) with trailing EOF
             print msglist
             ruleslist = []
             item = []
@@ -151,7 +152,6 @@ def stdoutthread(stdout):
             msglist.pop(0)
             traffic_handler(msglist)
         elif msglist[0] == "D2FCOMM_LIST":
-            global proc
             send_to_backend("F2DCOMM_LIST")
         elif msglist[0] == "D2FCOMM_ASK_OUT":
             path = msglist[1]
@@ -165,9 +165,7 @@ def stdoutthread(stdout):
             print "calling emitaskuserIN"
             window.emitAskUserIN()            
             
-            
-            
-        
+                   
 def msgq_init(): 
     print "in msgq_init"
     global proc
@@ -228,9 +226,7 @@ class myDialogIn(QDialog, Ui_DialogIn):
         "in case when user pressed Escape"
         print "in escapePressed"
         send_to_backend("F2DCOMM_ADD IGNORED")
-        
-
-    
+         
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
@@ -339,7 +335,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     def deleteMenuTriggered(self):
         "send delete request to backend"
         index = self.tableView.selectedIndexes()[0]
-        #scan model row by row to see which row the item belongs to
+        #scan model row by row to see which row the selected item belongs to
         activeModel = self.tableView.model()
         rowCount = activeModel.rowCount()
         colCount = activeModel.columnCount()
@@ -454,7 +450,5 @@ dialogIn.setWindowTitle("Leopard Flower firewall")
 prefs_dialog = mForm()
 
 ruleslock = Lock();
-
 msgq_init()
-
 sys.exit(app.exec_())

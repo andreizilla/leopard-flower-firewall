@@ -64,6 +64,7 @@ extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 extern int mqd_d2ftraffic;
 extern struct msqid_ds *msgqid_d2ftraffic;
+extern void* run_tests(void *);
 
 
 //Forward declarations to make code parser happy
@@ -863,9 +864,6 @@ void* cachebuildthread ( void *pid ){
 }
 
 
-
-
-
 void* nfqinputthread ( void *ptr )
 {
     ptr = 0;
@@ -877,76 +875,6 @@ while ( ( rv = recv ( nfqfd_input, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
     nfq_handle_packet ( globalh_in, buf, rv );
 }
 }
-
-void* unittestthread ( void *ptr )
-{
-    ptr = 0;
-    //	Test if refresh_thread is working:
-    //1. create a new process
-    //2. add it to dlist
-    //3. check that it has been added to dlist successfully
-    //4. terminate the process
-    //5. make sure its entry in procfs doesnt exist anymore
-    //6. sleep REFRESH_INTERVAL+1 sec
-    //7. make sure the rule is not in dlist anymore(it should have been deleted by refresh_thread)
-
-    pid_t childpid;
-    pid_t parentpid;
-    parentpid = getpid();
-    char exepath[PATH_MAX];
-    char pidstr[16];
-
-    if ((childpid = fork()) == -1)
-    {
-	m_printf ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	kill (parentpid, TEST_FAILED);
-    }
-    if (childpid == 0) //child
-    {
-	pid_t ownpid;
-	ownpid = getpid();
-	sprintf(pidstr, "%d", (int)ownpid);
-	printf ("Forked a child with PID: %s\n", pidstr);
-	//lookup own name
-	char exelink[32] = "/proc/";
-	strcat(exelink, pidstr);
-	strcat(exelink, "/exe");
-	memset ( exepath , 0, PATH_MAX);
-	//readlink fails if PID isn't running
-	if ( readlink ( exelink, exepath, PATH_MAX ) == -1 )
-	{
-	    m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	    kill (parentpid, TEST_FAILED);
-	}
-	printf ("Own path is %s\n", exepath);
-	dlist_add(exepath, pidstr, DENY_ALWAYS, TRUE, "0", 0 , 0, 0, 0 );
-	return;
-    }
-    if (childpid > 0) //parent
-    {
-	int stat_loc;
-	wait(childpid, &stat_loc, 0); //wait for child to return
-	sleep(REFRESH_INTERVAL+1);
-	dlist *temp;
-	pthread_mutex_lock(&dlist_mutex);
-	temp = first;
-	while (temp->next != NULL)
-	{
-	    temp = temp->next;
-	    if (!strcmp(temp->pid, pidstr))
-	    {
-		printf("PID is still in dlist\n");
-		pthread_mutex_unlock(&dlist_mutex);
-		kill (parentpid, TEST_FAILED);
-	    }
-	}
-	pthread_mutex_unlock(&dlist_mutex);
-	kill (parentpid, TEST_SUCCEEDED);
-
-    }
-}
-
-
 
 void* rulesdumpthread ( void *ptr )
 {
@@ -2850,7 +2778,7 @@ void SIGTERM_handler ( int signal )
     return;
 }
 
-void parsecomlineargs(int argc, char* argv[])
+int parsecomlineargs(int argc, char* argv[])
 {
 #ifndef WITHOUT_SYSVIPC
     //argv[0] is the  path of the executable
@@ -3173,31 +3101,6 @@ int main ( int argc, char *argv[] )
 
     rules_load();
     pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
-#ifdef DEBUG
-    pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
-    if (argc > 1)
-    {
-	if (!strcmp (argv[1], "--test"))
-	{
-	    //install handlers for unittestthread's verdict signals
-	    struct sigaction sa1;
-	    sa1.sa_handler = TEST_FAILED_handler;
-	    sigemptyset ( &sa1.sa_mask );
-	    if ( sigaction ( TEST_FAILED, &sa1, NULL ) == -1 )
-	    {
-		perror ( "sigaction" );
-	    }
-	    struct sigaction sa2;
-	    sa2.sa_handler = TEST_SUCCEEDED_handler;
-	    sigemptyset ( &sa2.sa_mask );
-	    if ( sigaction ( TEST_SUCCEEDED, &sa2, NULL ) == -1 )
-	    {
-		perror ( "sigaction" );
-	    }
-	    pthread_create ( &unittest_thread, NULL, unittestthread, NULL );
-	}
-    }
-#endif
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
@@ -3237,6 +3140,16 @@ int main ( int argc, char *argv[] )
 
     if ((udp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(udp6_membuf,0, MEMBUF_SIZE);
+
+
+#ifdef DEBUG
+    pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
+
+    if (argc > 1 && !strcmp (argv[1], "--test"))
+    {
+	pthread_create ( &unittest_thread, NULL, run_tests, NULL );
+    }
+#endif
     
     //endless loop of receiving packets and calling a handler on each packet
     int rv;
