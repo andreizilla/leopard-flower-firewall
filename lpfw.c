@@ -2808,6 +2808,10 @@ int parsecomlineargs(int argc, char* argv[])
 #ifdef DEBUG
     struct arg_lit *test = arg_lit0 ( NULL, "test", "Run unit test" );
 #endif
+    struct arg_lit *cli = arg_lit0 ( NULL, "cli", "Start ncurses frontend" );
+    struct arg_lit *gui = arg_lit0 ( NULL, "gui", "Start standalone GUI frontend" );
+    struct arg_lit *pygui = arg_lit0 ( NULL, "pygui", "Start Python-based frontend" );
+
     struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
     struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
     struct arg_end *end = arg_end ( 20 );
@@ -2819,7 +2823,7 @@ int parsecomlineargs(int argc, char* argv[])
     #ifdef DEBUG
 	test,
     #endif
-	end};
+	cli, gui, pygui, end};
 
     // Set default values
     logging_facility->sval[0] = "stdout";
