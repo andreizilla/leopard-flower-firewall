@@ -25,6 +25,13 @@ proc = 0
 path=pid=perms=0
 ruleslock = 0
 
+def send_to_backend(message):
+    global proc
+    proc.stdin.write(message)
+    #sleep is required to achieve unbufferedness, otherwise messages get buffered sometimes
+    time.sleep(0.1)
+
+
 def refreshmodel(ruleslist):  
     "Fill the frontend with rules data"
     #empty the model, we're filling it anew, we can't use clear() cause it flushes headers too:
@@ -87,7 +94,7 @@ def refreshmodel(ruleslist):
     
 def quitApp():
     print "In quitApp" 
-    proc.stdin.write("F2DCOMM_UNREG")
+    send_to_backend("F2DCOMM_UNREG")
    
 def traffic_handler(ruleslist):
     "Receive every second nfmarks and traffic stats and put them in the model"
@@ -114,6 +121,9 @@ def traffic_handler(ruleslist):
     
     
 def stdoutthread(stdout):
+    global path
+    global pid
+    global perms
     while 1:
         message = stdout.readline() #readline needs \n to unblock, it doesnt clear that \n though        
         msglist = []
@@ -142,18 +152,13 @@ def stdoutthread(stdout):
             traffic_handler(msglist)
         elif msglist[0] == "D2FCOMM_LIST":
             global proc
-            proc.stdin.write("F2DCOMM_LIST")
+            send_to_backend("F2DCOMM_LIST")
         elif msglist[0] == "D2FCOMM_ASK_OUT":
-            global path
-            global pid
             path = msglist[1]
             pid = msglist[2]
             print "calling emitaskuserOUT"
             window.emitAskUserOUT()
         elif msglist[0] == "D2FCOMM_ASK_IN":
-            global path
-            global pid
-            global perms
             path = msglist[1]
             pid = msglist[2]
             perms = msglist[3]
@@ -172,10 +177,9 @@ def msgq_init():
     stdout_thread.daemon = False
     stdout_thread.start()
     
-    proc.stdin.write("F2DCOMM_REG ")
-    time.sleep(1)
-    proc.stdin.write("F2DCOMM_LIST ")
-    
+    send_to_backend("F2DCOMM_REG ")
+    send_to_backend("F2DCOMM_LIST ")
+
     
             
 
@@ -190,32 +194,26 @@ class myDialogOut(QDialog, Ui_DialogOut):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        global proc
-        proc.stdin.write("F2DCOMM_ADD IGNORED")
+        send_to_backend("F2DCOMM_ADD IGNORED")
      
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        global proc
-        proc.stdin.write("F2DCOMM_ADD IGNORED")
+        send_to_backend("F2DCOMM_ADD IGNORED")
             
     def allowClicked(self):
         print "allow clicked"
         if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
         else: verdict = "ALLOW_ONCE"     
-        global proc
-        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
-        time.sleep(1)
-        proc.stdin.write("F2DCOMM_LIST")
+        send_to_backend("F2DCOMM_ADD %s " %(verdict))
+        send_to_backend("F2DCOMM_LIST")
         
     def denyClicked(self):
         print "deny clicked"
         if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
         else: verdict = "DENY_ONCE"     
-        global proc
-        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
-        time.sleep(1)
-        proc.stdin.write("F2DCOMM_LIST")
+        send_to_backend("F2DCOMM_ADD %s " %(verdict))
+        send_to_backend("F2DCOMM_LIST")
              
         
 class myDialogIn(QDialog, Ui_DialogIn):
@@ -229,37 +227,29 @@ class myDialogIn(QDialog, Ui_DialogIn):
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
-        
-        global proc
-        proc.stdin.write("F2DCOMM_ADD IGNORED")
+        send_to_backend("F2DCOMM_ADD IGNORED")
         
 
     
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
-        
-        global proc
-        proc.stdin.write("F2DCOMM_ADD IGNORED")
+        send_to_backend("F2DCOMM_ADD IGNORED")
             
     def allowClicked(self):
         print "allow clicked"
         if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
         else: verdict = "ALLOW_ONCE"   
-        global proc
-        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
-        time.sleep(1)
-        proc.stdin.write("F2DCOMM_LIST")
+        send_to_backend("F2DCOMM_ADD %s " %(verdict))
+        send_to_backend("F2DCOMM_LIST")
 
         
     def denyClicked(self):
         print "deny clicked"
         if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
         else: verdict = "DENY_ONCE"
-        global proc
-        proc.stdin.write("F2DCOMM_ADD %s " %(verdict))
-        time.sleep(1)
-        proc.stdin.write("F2DCOMM_LIST")
+        send_to_backend("F2DCOMM_ADD %s " %(verdict))
+        send_to_backend("F2DCOMM_LIST")
         
         
 class mForm(QWidget, Ui_Form):
@@ -296,9 +286,8 @@ class mForm(QWidget, Ui_Form):
         ip = ip1+"."+ip2+"."+ip3+"."+ip4
         
         self.hide()
-        global proc
-        proc.stdin.write("F2DCOMM_ADD ALLOW_ALWAYS KERNEL_PROCESS %s" %(ip))
-        proc.stdin.write("F2DCOMM_LIST")        
+        send_to_backend("F2DCOMM_ADD ALLOW_ALWAYS KERNEL_PROCESS %s" %(ip))
+        send_to_backend("F2DCOMM_LIST")        
         
         
         
@@ -308,8 +297,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     quitflag = 0
     
     def saveRules(self):
-        global proc
-        proc.stdin.write("F2DCOMM_WRT")       
+        send_to_backend("F2DCOMM_WRT")       
     
     def showActiveOnly(self):
         self.tableView.setModel(modelActive)
@@ -382,12 +370,11 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
                 else:    
                     mpid = "0"
             
-            global proc
-            proc.stdin.write("F2DCOMM_DELANDACK %s %s " %(mpath,mpid))
+            send_to_backend("F2DCOMM_DELANDACK %s %s " %(mpath,mpid))
             #TODO wait for delete acknowledgement
            
         #now we need to update the list ourselves
-        proc.stdin.write("F2DCOMM_LIST")        
+        send_to_backend("F2DCOMM_LIST")        
     
     def emitAskUserOUT(self):
         "this is a workaround for not invoking qdialog from a different thread"
@@ -466,7 +453,6 @@ dialogIn = myDialogIn()
 dialogIn.setWindowTitle("Leopard Flower firewall")
 prefs_dialog = mForm()
 
-global ruleslock
 ruleslock = Lock();
 
 msgq_init()
