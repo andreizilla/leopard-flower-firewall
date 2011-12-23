@@ -2780,69 +2780,7 @@ void SIGTERM_handler ( int signal )
 
 int parsecomlineargs(int argc, char* argv[])
 {
-#ifndef WITHOUT_SYSVIPC
-    //argv[0] is the  path of the executable
-    if ( argc >= 2 )
-    {
-        if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--guipy"))
-        {
-            return frontend_mode ( argc, argv );
-        }
-    }
-#endif
-
-    checkRoot();
-
-    cap_user_header_t       hdr;
-    cap_user_data_t         data;
-
-    hdr = malloc(sizeof(*hdr));
-    data = malloc (sizeof(*data));
-
-    memset(hdr, 0, sizeof(*hdr));
-    hdr->version = _LINUX_CAPABILITY_VERSION;
-
-    if (capget(hdr, data) < 0) perror("capget failed:");
-
-    /* Clear all but the capability to bind to low ports */
-    data->effective = CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_SETGID);
-    data->permitted = CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_SETGID);
-    data->inheritable = 0;
-    if (capset(hdr, data) < 0) perror("capset failed: ");
-
-    cap_t cap = cap_get_proc();
-    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
-    cap_free(cap);
-
-
-    //install SIGTERM handler
-    struct sigaction sa;
-    sa.sa_handler = SIGTERM_handler;
-    sigemptyset ( &sa.sa_mask );
-    if ( sigaction ( SIGTERM, &sa, NULL ) == -1 )
-    {
-        perror ( "sigaction" );
-    }
-
-#ifndef WITHOUT_SYSVIPC
-    //save own path
-   int ownpid;
-   char ownpidstr[16];
-   ownpid = getpid();
-   char exepath[PATHSIZE];
-   strcpy(exepath,"/proc/");
-   sprintf(ownpidstr, "%d", ownpid );
-   strcat(exepath, ownpidstr);
-   strcat(exepath, "/exe");
-   memset(ownpath,0,PATHSIZE);
-   readlink(exepath,ownpath,PATHSIZE-1);   
-      
-    int basenamelength;
-    basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
-    strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
-#endif
-
-    //command line parsing contributed by Ramon Fried
+   //command line parsing contributed by Ramon Fried
     // if the parsing of the arguments was unsuccessful
     int nerrors;
 
@@ -2974,6 +2912,11 @@ int main ( int argc, char *argv[] )
         }
     }
 #endif
+    if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
+    {
+	parsecomlineargs(argc, argv);
+	return 0;
+    }
 
     checkRoot();
 
