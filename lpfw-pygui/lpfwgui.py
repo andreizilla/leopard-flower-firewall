@@ -46,7 +46,7 @@ def refreshmodel(ruleslist):
         ruleslock.release()
         return
     for item in ruleslist[0:-1]:#leave out the last EOF from iteration
-        if (item[1] == "KERNEL PROCESS"):
+        if (item[0] == "KERNEL_PROCESS"):
             #a whole different ball game starts with KERNEL_PROCESS
             ker_name = QStandardItem("KERNEL")
             ker_pid = QStandardItem("N/A")
@@ -57,8 +57,6 @@ def refreshmodel(ruleslist):
             modelAll.appendRow((ker_name,ker_pid,ker_perms,ker_fullpath,ker_in_traf,ker_out_traf))
             #see below why del is needed
             del ker_fullpath,ker_pid,ker_perms,ker_name,ker_in_traf,ker_out_traf
-            ruleslock.release()
-            return
         else:
             fullpath = QStandardItem(item[0])
             #item[4] contains nfmark
@@ -95,6 +93,8 @@ def refreshmodel(ruleslist):
 def quitApp():
     print "In quitApp" 
     send_to_backend("F2DCOMM_UNREG")
+    send_to_backend("QUIT")
+
    
 def traffic_handler(ruleslist):
     "Receive every second nfmarks and traffic stats and put them in the model"
@@ -172,15 +172,14 @@ def msgq_init():
     proc = subprocess.Popen(["/sda/newrepo/lpfw-pygui/ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
      
     stdout_thread = threading.Thread(target=stdoutthread, args=(proc.stderr,))
-    stdout_thread.daemon = False
+    #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reeading pipe
+    stdout_thread.daemon = True
     stdout_thread.start()
     
     send_to_backend("F2DCOMM_REG ")
     send_to_backend("F2DCOMM_LIST ")
 
     
-            
-
 class myDialogOut(QDialog, Ui_DialogOut):
     def __init__(self):
         QDialog.__init__(self)
@@ -282,7 +281,7 @@ class mForm(QWidget, Ui_Form):
         ip = ip1+"."+ip2+"."+ip3+"."+ip4
         
         self.hide()
-        send_to_backend("F2DCOMM_ADD ALLOW_ALWAYS KERNEL_PROCESS %s" %(ip))
+        send_to_backend("F2DCOMM_ADD KERNEL_PROCESS %s ALLOW_ALWAYS " %(ip))
         send_to_backend("F2DCOMM_LIST")        
         
         
@@ -334,6 +333,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
 
     def deleteMenuTriggered(self):
         "send delete request to backend"
+        if (len(self.tableView.selectedIndexes()) == 0):
+            #after rulesmenu was triggered, the model refreshed and no index is selected anymore
+            return
         index = self.tableView.selectedIndexes()[0]
         #scan model row by row to see which row the selected item belongs to
         activeModel = self.tableView.model()
@@ -362,7 +364,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             if (mpid == "N/A"): 
                 if (mpath.find("KERNEL-> ") == 0):
                     mpid = mpath.lstrip("KERNEL-> ") #IP goes to pid field
-                    mpath = "KERNEL PROCESS"
+                    mpath = "KERNEL_PROCESS"
                 else:    
                     mpid = "0"
             
@@ -387,7 +389,8 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             event.accept()
             quitApp()
         
-    def realQuit(self):    
+    def realQuit(self): 
+        print "in realQuit"
         self.quitflag = 1
         self.close()
 

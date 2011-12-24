@@ -186,7 +186,7 @@ int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_co
     ulong in_bytes, out_bytes;
     if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
     {
-	printf ("destroy nfmark 0 detected \n");
+	//printf ("destroy nfmark 0 detected \n");
 	return NFCT_CB_CONTINUE;
     }
     out_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
@@ -2845,7 +2845,7 @@ int parsecomlineargs(int argc, char* argv[])
     strcat(guipath, "lpfwgui");
     gui_path->filename[0] = guipath;
 
-    char *git guipypath;
+    char *guipypath;
     guipypath = malloc(PATHSIZE -16);
     strcpy (guipypath, owndir);
     strcat(guipypath,"lpfwgui.py");
