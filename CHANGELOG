@@ -1,4 +1,8 @@
-Version 0.4 (released ca. Oct 2011)
+Version 0.4 (ca. Jan 2012)
+Added allowed traffic counters in frontend.
+Support for kernel-initiated traffic (NFS, Samba etc.)
+
+Version 0.4rc3 (released ca. Oct 2011)
 Graphical frontend introduced both as a standalone executable or as a python application.
 Significantly decreased CPU usage on torrent upload.
 LPFW now filters incoming connections.
@@ -8,7 +12,6 @@ Version 0.3 (released ca. Sep 2011)
 Executables are checked for their sha512 sums
 Both active and inactive rules are shown now. Inactive ones have "0" in PID column
 More verbose and polished logging
-
 
 Version 0.2
 new ncurses interface
