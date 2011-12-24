@@ -2925,7 +2925,9 @@ int main ( int argc, char *argv[] )
 	return 0;
     }
 
+#ifndef DEBUG
     checkRoot();
+#endif
 
     //hdr and data are pointers to structures!!! not structures
     cap_user_header_t       hdr;
