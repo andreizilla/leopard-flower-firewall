@@ -703,7 +703,7 @@ if (argc == 1 || strcmp(argv[1],"magic_number")){
                 //delete the entry from the screen by refreshing the screnn
                 //wclear(lw);
                 //list();
-                if (active > 1) --active;
+		if (active > 1) --active;
                 //mvwchgat(lw,view_active-1,0,-1,0,0,NULL);
                 //wrefresh(lw);
                 continue;

@@ -147,7 +147,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	  //if exec returns here it means there was an error
 	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
 	}
-	else if (!strcmp (msg_creds.creds.params[0], "--guipy")){
+	else if (!strcmp (msg_creds.creds.params[0], "--pygui")){
 	 if (stat(guipy_path->filename[0], &path_stat) == -1 ){
             m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){

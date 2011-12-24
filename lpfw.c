@@ -2913,7 +2913,7 @@ int main ( int argc, char *argv[] )
     //argv[0] is the  path of the executable
     if ( argc >= 2 )
     {
-        if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--guipy"))
+	if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui"))
         {
             return frontend_mode ( argc, argv );
         }
