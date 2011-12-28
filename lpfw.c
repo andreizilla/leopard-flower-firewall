@@ -2799,7 +2799,7 @@ int parsecomlineargs(int argc, char* argv[])
 #ifndef WITHOUT_SYSVIPC
     cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
     gui_path = arg_file0 ( NULL, "gui-path", "<path to file>", "Path to GUI frontend" );
-    guipy_path = arg_file0 ( NULL, "guipy-path", "<path to file>", "Path to Python-based GUI frontend" );
+    pygui_path = arg_file0 ( NULL, "pygui-path", "<path to file>", "Path to Python-based GUI frontend" );
 #endif
 
     log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );

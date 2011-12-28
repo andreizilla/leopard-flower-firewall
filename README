@@ -48,7 +48,7 @@ COMMANDLINE ARGUMENTS:
   --gui-path=
   Path to a standalone graphical frontend. Default: in the same folder as lpfw
 
-  --guipy-path
+  --pygui-path
   Path to python-based graphical frontend lpfwgui.py. It will be launched in python. Default: in the same folder as lpfw 
 
   --log-info=
@@ -59,7 +59,7 @@ COMMANDLINE ARGUMENTS:
   To invoke a frontend, issue the following;
   lpfw --cli	Ncurses
   lpfw --gui	Standalone
-  lpfw --guipy	Python-based
+  lpfw --pygui	Python-based
 
 
 
@@ -73,7 +73,7 @@ KNOWN ISSUES:
     6. Access to network filesystems like NFS, CIFS, SMB an others or to in-kernel servers like khttpd will not be detected by LPFW since such access doesn't create user-space sockets. You will have to manually add iptables rules for such services.
     7. If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
     8. After going to sleep and waking up the PC, LPFW doesn't work properly, it has to be restarted.
-	9. Albeit lpfwgui is a simple frontend, it consumes 30+ Mb of memory. An attempt to reduce memory consumption is underway.
+    9. Albeit lpfwgui is a simple frontend, it consumes 30+ Mb of memory. An attempt to reduce memory consumption is underway.
 
 
 
@@ -87,22 +87,29 @@ HEADLESS MODE - WITHOUT FRONTEND:
   By default rules are written to /etc/lpfw.rules in the following  blocks of text:
 
   full path to the executable file <new line character>
-  ALLOW ALWAYS or DENY ALWAYS <new line character>
+  ALLOW_ALWAYS or DENY_ALWAYS <new line character>
   executable file's size in bytes <new line character>
   executable file's sha512 sum in hexadecimal representation <new line character>
-  (optional line) additional options like [CPUHOG] <new line character>
   the block ends with a <new line character>
+
+    or (if traffic was initiated by the kernel as is the case with NFS, SMB mounts)
+   KERNEL_PROCESS <new line character>
+   IP adress which the kernel is allowed to send/receive traffic to/from <new line character>
+   ALLOW_ALWAYS or DENY_ALWAYS <new line character>
 
   Example:
  --------------------------------------------------
   /usr/bin/wget
-  ALLOW ALWAYS
+  ALLOW_ALWAYS
   333356
   083c1c88f8ded3cc1d6f83687e3092efab938d6a18ad5f95728189861e9d7bb145651a3a0b7846df69f02f10c50e45361880d4ea2549615a655643ed0bd20fa9
-  [CPUHOG]
+
+  KERNEL_PROCESS
+  8.8.8.8
+  DENY_ALWAYS
 
   /home/wwwwww/apps/browsers/opera-11.10-2048.i386.linux/lib/opera/opera
-  ALLOW ALWAYS
+  ALLOW_ALWAYS
   16634040
   7c4f6bd7c742c4bb8096e18fea5f92c6eade14152cf0ccdd36934b61ce1f578553e65be377408d34727c9aabed4ab3842f8cbbe776cd156d75f160925bea8c9f
 
