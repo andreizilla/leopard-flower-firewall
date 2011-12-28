@@ -2925,30 +2925,60 @@ int main ( int argc, char *argv[] )
 	return 0;
     }
 
-#ifndef DEBUG
-    checkRoot();
-#endif
+    //=======  Capabilities check
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	perror("Capabilities unavailable");
+    }
 
-    //hdr and data are pointers to structures!!! not structures
-    cap_user_header_t       hdr;
-    cap_user_data_t         data;
+    cap_flag_value_t value;
+    cap_get_flag(cap_current, CAP_SYS_PTRACE, CAP_PERMITTED, &value);
+    if (value == CAP_CLEAR)
+    {
+	printf ("CAP_SYS_PTRACE is not permitted \n");
+	exit(0);
+    }
+    cap_get_flag(cap_current, CAP_NET_ADMIN, CAP_PERMITTED, &value);
+    if (value == CAP_CLEAR)
+    {
+	printf ("CAP_NET_ADMIN is not permitted \n");
+	exit(0);
+    }
+    cap_get_flag(cap_current, CAP_DAC_READ_SEARCH, CAP_PERMITTED, &value);
+    if (value == CAP_CLEAR)
+    {
+	printf ("CAP_DAC_READ_SEARCH is not permitted \n");
+	exit(0);
+    }
+    cap_get_flag(cap_current, CAP_SETUID, CAP_PERMITTED, &value);
+    if (value == CAP_CLEAR)
+    {
+	printf ("CAP_SETUID is not permitted \n");
+	exit(0);
+    }
+    cap_get_flag(cap_current, CAP_SETGID, CAP_PERMITTED, &value);
+    if (value == CAP_CLEAR)
+    {
+	printf ("CAP_SETGID is not permitted \n");
+	exit(0);
+    }
 
-    hdr = malloc(sizeof(*hdr));
-    data = malloc (sizeof(*data));
+    cap_clear(cap_current);
+    const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID};
+    cap_set_flag(cap_current, CAP_PERMITTED, 5, caps_list, CAP_SET);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 5, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	perror("cap_set_proc()");
+    }
 
-    memset(hdr, 0, sizeof(*hdr));
-    hdr->version = _LINUX_CAPABILITY_VERSION;
-
-    if (capget(hdr, data) < 0) perror("capget failed:");
-
-    data->effective = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_SETGID));
-    data->permitted = (CAP_TO_MASK(CAP_SYS_PTRACE) | CAP_TO_MASK(CAP_NET_ADMIN) | CAP_TO_MASK(CAP_DAC_READ_SEARCH) | CAP_TO_MASK(CAP_SETGID));
-    data->inheritable = 0;
-    if (capset(hdr, data) < 0) perror("capset failed: ");
 
     cap_t cap = cap_get_proc();
     printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
     cap_free(cap);
+
 
 
 
@@ -2984,6 +3014,12 @@ int main ( int argc, char *argv[] )
     msgq_init();
 #endif
     initialize_conntrack();
+
+    int ret;
+    if (setuid(0) == -1)
+    {
+	perror("setuid");
+    }
    
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
