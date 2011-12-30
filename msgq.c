@@ -13,6 +13,7 @@
 #include <sys/time.h>
 #include <grp.h>
 #include <sys/stat.h>
+#include <sys/capability.h>
 #include "argtable/argtable2.h" //for some externs
 
 //Forward declarations needed for kdevelop to do code parsing correctly
@@ -38,7 +39,7 @@ extern void fe_active_flag_set (int boolean);
 extern void child_close_nfqueue();
 extern int sha512_stream(FILE *stream, void *resblock);
 extern dlist * dlist_copy();
-extern struct arg_file *cli_path, *gui_path, *guipy_path;
+extern struct arg_file *cli_path, *gui_path, *pygui_path;
 extern pthread_mutex_t nfmark_count_mutex, msgq_mutex;
 extern int nfmark_count;
 extern void dlist_del ( char *path, char *pid );
@@ -148,14 +149,14 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
 	}
 	else if (!strcmp (msg_creds.creds.params[0], "--pygui")){
-	 if (stat(guipy_path->filename[0], &path_stat) == -1 ){
+	 if (stat(pygui_path->filename[0], &path_stat) == -1 ){
             m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
-	    m_printf(MLOG_INFO, "Unable to find %s\n", guipy_path->filename[0]); 
+	    m_printf(MLOG_INFO, "Unable to find %s\n", pygui_path->filename[0]);
 	    }
 	    return;
 	 }
-	 execl ("/usr/bin/python", "python",guipy_path->filename[0], (char*)0);
+	 execl ("/usr/bin/python", "python",pygui_path->filename[0], (char*)0);
 	   //if exec returns here it means there was an error
 	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
      
@@ -354,7 +355,7 @@ void* commandthread(void* ptr){
         if (errno == 0) {
             m_printf(MLOG_INFO, "lpfwuser group does not exit, creating...\n");
             if (system("groupadd lpfwuser") == -1) {
-                m_printf(MLOG_INFO, "error in system()\n");
+		m_printf(MLOG_INFO, "error in system(groupadd)\n");
                 return;
             }
             //get group id again after group creation
@@ -383,9 +384,32 @@ void* commandthread(void* ptr){
     }
 #endif
     lpfwuser_gid = m_group->gr_gid;
-    if (setgid(lpfwuser_gid) == -1){
+
+    //enable CAP_SETGID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    const cap_value_t caps_list[] = {CAP_SETGID};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+
+    //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
+    if (setgid(lpfwuser_gid) == -1)
+    {
         perror ("setgid ");
         return;
+    }
+    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	perror("cap_set_proc()");
     }
 
     msgqid_d2f = malloc(sizeof (struct msqid_ds));

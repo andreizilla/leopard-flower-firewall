@@ -35,7 +35,7 @@ struct nfq_handle *globalh_out, *globalh_in;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
-struct arg_file *rules_file, *pid_file, *log_file, *cli_path, *gui_path, *guipy_path;
+struct arg_file *rules_file, *pid_file, *log_file, *cli_path, *gui_path, *pygui_path;
 struct arg_int *log_info, *log_traffic, *log_debug;
 
 char ownpath[PATHSIZE]; //full path of lpfw executable
@@ -301,6 +301,26 @@ void * trafficthread( void *ptr)
 
 void * trafficdestroythread( void *ptr)
 {
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    printf("traffic destroy caps start : %s\n", cap_to_text(cap_current, NULL));
+    cap_clear(cap_current);
+
+    const cap_value_t caps_list[] = {CAP_SETUID, CAP_NET_ADMIN};
+    cap_set_flag(cap_current, CAP_PERMITTED, 2, caps_list, CAP_SET);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 2, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	perror("cap_set_proc()");
+    }
+
+    cap_current = cap_get_proc();
+    printf("traffic destroy caps end : %s\n", cap_to_text(cap_current, NULL));
+    cap_free(cap_current);
+
+
+
+
     struct nfct_handle *traffic_handle;
     if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL){perror("nfct_open");}
     if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_destroyfilter_callback, NULL) == -1)) {perror("cb_reg");}
@@ -2591,6 +2611,7 @@ void pidFileCheck() {
     char procbuf[20];
     char srchstr[2] = {0x0A, 0};
     int pid;
+    FILE *newpid;
     int newpidfd;
     char *ptr;
     char pid2str[8];
@@ -2600,7 +2621,7 @@ void pidFileCheck() {
         if ( ( pidfd = fopen ( pid_file->filename[0], "r" ) ) == NULL )
         {
             m_printf ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-            die();
+	    exit(0);
         };
         fgets ( pidbuf, 8, pidfd );
         fclose ( pidfd );
@@ -2617,6 +2638,7 @@ void pidFileCheck() {
                 procfd = fopen ( procstring, "r" );
                 //let's replace 0x0A with 0x00
                 fgets ( procbuf, 20, procfd );
+		fclose(procfd);
                 ptr = strstr ( procbuf, srchstr );
                 *ptr = 0;
                 //compare the actual string, if found = carry on
@@ -2638,16 +2660,17 @@ void pidFileCheck() {
 
 
     //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-    if ( ( newpidfd = open ( pid_file->filename[0], O_CREAT | O_TRUNC | O_RDWR ) ) == -1 )
+    if ( ( newpid = fopen ( pid_file->filename[0], "w" ) ) == NULL )
     {
 	m_printf ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
     }
-
     sprintf ( pid2str, "%d", ( int ) getpid() );
     ssize_t size;
+    newpidfd = fileno(newpid);
     if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
         m_printf ( MLOG_INFO, "write: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    close ( newpidfd );
+    close(newpidfd);
+    fclose ( newpid );
 }
 
 void checkRoot()
@@ -2817,7 +2840,7 @@ int parsecomlineargs(int argc, char* argv[])
     struct arg_end *end = arg_end ( 30 );
     void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
     #ifndef WITHOUT_SYSVIPC
-	cli_path, gui_path, guipy_path,
+	cli_path, gui_path, pygui_path,
     #endif
 	log_info, log_traffic, log_debug, help, version,
     #ifdef DEBUG
@@ -2845,11 +2868,11 @@ int parsecomlineargs(int argc, char* argv[])
     strcat(guipath, "lpfwgui");
     gui_path->filename[0] = guipath;
 
-    char *guipypath;
-    guipypath = malloc(PATHSIZE -16);
-    strcpy (guipypath, owndir);
-    strcat(guipypath,"lpfwgui.py");
-    guipy_path->filename[0] = guipypath;
+    char *pyguipath;
+    pyguipath = malloc(PATHSIZE -16);
+    strcpy (pyguipath, owndir);
+    strcat(pyguipath,"lpfwgui.py");
+    pygui_path->filename[0] = pyguipath;
 #endif
 
     * ( log_info->ival ) = 1;
@@ -2906,31 +2929,15 @@ int parsecomlineargs(int argc, char* argv[])
     //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
 
-
-int main ( int argc, char *argv[] )
+/* chack that we have the 5 needed capabilities and if we do, then drop all the other capabilities */
+void capabilities_setup()
 {
-#ifndef WITHOUT_SYSVIPC
-    //argv[0] is the  path of the executable
-    if ( argc >= 2 )
-    {
-	if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui"))
-        {
-            return frontend_mode ( argc, argv );
-        }
-    }
-#endif
-    if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
-    {
-	parsecomlineargs(argc, argv);
-	return 0;
-    }
-
     //=======  Capabilities check
     cap_t cap_current;
     cap_current = cap_get_proc();
     if (cap_current == NULL)
     {
-	perror("Capabilities unavailable");
+	perror("cap_get_proc()");
     }
 
     cap_flag_value_t value;
@@ -2968,19 +2975,36 @@ int main ( int argc, char *argv[] )
     cap_clear(cap_current);
     const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID};
     cap_set_flag(cap_current, CAP_PERMITTED, 5, caps_list, CAP_SET);
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 5, caps_list, CAP_SET);
+    //cap_set_flag(cap_current,  CAP_EFFECTIVE, 5, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
 	perror("cap_set_proc()");
     }
 
-
     cap_t cap = cap_get_proc();
     printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
     cap_free(cap);
+}
 
+int main ( int argc, char *argv[] )
+{
+#ifndef WITHOUT_SYSVIPC
+    //argv[0] is the  path of the executable
+    if ( argc >= 2 )
+    {
+	if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui"))
+        {
+            return frontend_mode ( argc, argv );
+        }
+    }
+#endif
+    if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
+    {
+	parsecomlineargs(argc, argv);
+	return 0;
+    }
 
-
+   capabilities_setup();
 
     //install SIGTERM handler
     struct sigaction sa;
@@ -3013,13 +3037,22 @@ int main ( int argc, char *argv[] )
 #ifndef WITHOUT_SYSVIPC
     msgq_init();
 #endif
+    cap_t cap = cap_get_proc();
+    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
+    cap_free(cap);
+
     initialize_conntrack();
 
-    int ret;
-    if (setuid(0) == -1)
+    uid_t uid, euid;
+    uid = getuid();
+    euid = geteuid();
+    printf (" orig uid euid %d %d \n", uid, euid);
+
+    if (seteuid(0) == -1)
     {
-	perror("setuid");
+	perror("setuid0");
     }
+
    
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -3030,13 +3063,30 @@ int main ( int argc, char *argv[] )
     if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
 	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
+    //if (seteuid(uid) == -1){perror("setuid1");}
+    uid = getuid();
+    euid = geteuid();
+    printf ("restoreduid2 %d %d \n", uid, euid);
+
+
 
     //-----------------Register queue handler-------------
     int nfqfd;
     globalh_out = nfq_open();
     if ( !globalh_out ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
+    if (setuid(0) == -1)
+    {
+	perror("setuid3.1 ");
+    }
+    if (seteuid(0) == -1)
+    {
+	perror("setuid3");
+    }
     if ( nfq_unbind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    //if (seteuid(uid) == -1){perror("setuid4");}
+    uid = getuid();
+    printf ("restoreduid5 %d \n", uid);
     struct nfq_q_handle * globalqh = nfq_create_queue ( globalh_out, NFQNUM_OUTPUT, &nfq_handle_out, NULL );
     if ( !globalqh ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
@@ -3053,8 +3103,15 @@ int main ( int argc, char *argv[] )
     //-----------------Register queue handler for INPUT chain-----
     globalh_in = nfq_open();
     if ( !globalh_in ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
+    if (seteuid(0) == -1)
+    {
+	perror("setuid6");
+    }
     if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    //if (seteuid(uid) == -1){perror("setuid7");}
+    uid = getuid();
+    printf ("restoreduid %d \n", uid);
     struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
     if ( !globalqh_input ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
@@ -3066,6 +3123,13 @@ int main ( int argc, char *argv[] )
     nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
+
+    //if (seteuid(uid) == -1){perror("setuid8");}
+    uid = getuid();
+    printf ("restoreduid9 %d \n", uid);
+
+
+
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
