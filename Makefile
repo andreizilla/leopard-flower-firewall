@@ -22,6 +22,9 @@ lpfw: $(SOURCES)
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfw
 
+release: GCCFLAGS += -g
+release: lpfw
+
 install:
 	cp lpfw $(DESTDIR)
 

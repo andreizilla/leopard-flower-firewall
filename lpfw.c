@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <syslog.h>
+#include <grp.h>
 #include <libnfnetlink/libnfnetlink.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
@@ -29,6 +30,8 @@
 #include "common/defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
+
+gid_t lpfwuser_gid;
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle *globalh_out, *globalh_in;
@@ -301,26 +304,6 @@ void * trafficthread( void *ptr)
 
 void * trafficdestroythread( void *ptr)
 {
-    cap_t cap_current;
-    cap_current = cap_get_proc();
-    printf("traffic destroy caps start : %s\n", cap_to_text(cap_current, NULL));
-    cap_clear(cap_current);
-
-    const cap_value_t caps_list[] = {CAP_SETUID, CAP_NET_ADMIN};
-    cap_set_flag(cap_current, CAP_PERMITTED, 2, caps_list, CAP_SET);
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 2, caps_list, CAP_SET);
-    if (cap_set_proc(cap_current) == -1)
-    {
-	perror("cap_set_proc()");
-    }
-
-    cap_current = cap_get_proc();
-    printf("traffic destroy caps end : %s\n", cap_to_text(cap_current, NULL));
-    cap_free(cap_current);
-
-
-
-
     struct nfct_handle *traffic_handle;
     if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL){perror("nfct_open");}
     if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_destroyfilter_callback, NULL) == -1)) {perror("cb_reg");}
@@ -2606,12 +2589,12 @@ void pidFileCheck() {
     struct stat m_stat;
     FILE *pidfd;
     FILE *procfd;
+    FILE *newpid;
     char pidbuf[8];
     char procstring[20];
     char procbuf[20];
     char srchstr[2] = {0x0A, 0};
     int pid;
-    FILE *newpid;
     int newpidfd;
     char *ptr;
     char pid2str[8];
@@ -2635,18 +2618,22 @@ void pidFileCheck() {
                 strcpy ( procstring, "/proc/" );
                 strcat ( procstring, pidbuf );
                 strcat ( procstring, "/comm" );
-                procfd = fopen ( procstring, "r" );
+		if ( ( procfd = fopen ( procstring, "r" )) == NULL)
+		{
+		    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		    exit(0);
+		}
                 //let's replace 0x0A with 0x00
-                fgets ( procbuf, 20, procfd );
+		fgets ( procbuf, 19, procfd );
 		fclose(procfd);
                 ptr = strstr ( procbuf, srchstr );
                 *ptr = 0;
-                //compare the actual string, if found = carry on
-                if ( strcmp ( "lpfw", procbuf ) == 0 )
+		//compare the actual string, if found => carry on
+		if ( !strcmp ( "lpfw", procbuf ) )
                 {
-                    //make sure that the running instant is NOT out instant
+		    //make sure that the running instance is NOT out instance
                     //(can happen when PID of previously crashed lpfw coincides with ours)
-                    if ( ( pid_t ) pid != getpid() )
+		    if ( ( pid_t ) pid != getpid() )
                     {
                         m_printf ( MLOG_INFO, "lpfw is already running\n" );
                         die();
@@ -2663,13 +2650,17 @@ void pidFileCheck() {
     if ( ( newpid = fopen ( pid_file->filename[0], "w" ) ) == NULL )
     {
 	m_printf ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return;
     }
     sprintf ( pid2str, "%d", ( int ) getpid() );
     ssize_t size;
     newpidfd = fileno(newpid);
     if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
+    {
         m_printf ( MLOG_INFO, "write: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    close(newpidfd);
+	return;
+    }
+    //close(newpidfd);
     fclose ( newpid );
 }
 
@@ -2975,7 +2966,6 @@ void capabilities_setup()
     cap_clear(cap_current);
     const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID};
     cap_set_flag(cap_current, CAP_PERMITTED, 5, caps_list, CAP_SET);
-    //cap_set_flag(cap_current,  CAP_EFFECTIVE, 5, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
 	perror("cap_set_proc()");
@@ -2984,6 +2974,77 @@ void capabilities_setup()
     cap_t cap = cap_get_proc();
     printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
     cap_free(cap);
+}
+
+void create_group()
+{
+    //First we need to create/(check existence of) lpfwuser group and add ourselves to it
+    errno = 0;
+    struct group *m_group;
+    m_group = getgrnam("lpfwuser");
+    if (!m_group) {
+	if (errno == 0) {
+	    m_printf(MLOG_INFO, "lpfwuser group does not exit, creating...\n");
+	    if (system("groupadd lpfwuser") == -1) {
+		m_printf(MLOG_INFO, "error in system(groupadd)\n");
+		return;
+	    }
+	    //get group id again after group creation
+	    errno = 0;
+	    m_group = getgrnam("lpfwuser");
+	    if(!m_group){
+		if (errno == 0){
+		    m_printf (MLOG_INFO, "lpfwuser group still doesn't exist even though we've just created it");
+		}
+		else{
+		    perror ("getgrnam");
+		}
+	    }
+	    lpfwuser_gid = m_group->gr_gid;
+	} else {
+	    printf("Error in getgrnam\n");
+	perror ("getgrnam");
+	}
+	return;
+    }
+    //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
+#ifndef DEBUG
+    if (!(m_group->gr_mem[0] == NULL)){
+	m_printf (MLOG_INFO, "lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
+	exit(0);
+    }
+#endif
+    lpfwuser_gid = m_group->gr_gid;
+
+    //enable CAP_SETGID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    const cap_value_t caps_list[] = {CAP_SETGID};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+
+    //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
+    if (setgid(lpfwuser_gid) == -1)
+    {
+	perror ("setgid ");
+	return;
+    }
+    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	perror("cap_set_proc()");
+    }
+
+
+
 }
 
 int main ( int argc, char *argv[] )
@@ -3005,6 +3066,7 @@ int main ( int argc, char *argv[] )
     }
 
    capabilities_setup();
+   create_group();
 
     //install SIGTERM handler
     struct sigaction sa;
@@ -3034,23 +3096,36 @@ int main ( int argc, char *argv[] )
     parsecomlineargs(argc, argv);
     loggingInit();
     pidFileCheck();
+
 #ifndef WITHOUT_SYSVIPC
     msgq_init();
 #endif
-    cap_t cap = cap_get_proc();
-    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
-    cap_free(cap);
 
     initialize_conntrack();
 
+#ifdef DEBUG
     uid_t uid, euid;
     uid = getuid();
     euid = geteuid();
     printf (" orig uid euid %d %d \n", uid, euid);
+#endif
 
+    //enable CAP_SETUID to call iptables
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    const cap_value_t caps_list[] = {CAP_SETUID};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	m_printf(MLOG_INFO, "cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
     if (seteuid(0) == -1)
     {
-	perror("setuid0");
+	m_printf(MLOG_INFO, "seteuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 
    
@@ -3063,30 +3138,13 @@ int main ( int argc, char *argv[] )
     if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
 	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
-    //if (seteuid(uid) == -1){perror("setuid1");}
-    uid = getuid();
-    euid = geteuid();
-    printf ("restoreduid2 %d %d \n", uid, euid);
-
-
 
     //-----------------Register queue handler-------------
     int nfqfd;
     globalh_out = nfq_open();
     if ( !globalh_out ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if (setuid(0) == -1)
-    {
-	perror("setuid3.1 ");
-    }
-    if (seteuid(0) == -1)
-    {
-	perror("setuid3");
-    }
     if ( nfq_unbind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    //if (seteuid(uid) == -1){perror("setuid4");}
-    uid = getuid();
-    printf ("restoreduid5 %d \n", uid);
     struct nfq_q_handle * globalqh = nfq_create_queue ( globalh_out, NFQNUM_OUTPUT, &nfq_handle_out, NULL );
     if ( !globalqh ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
@@ -3103,15 +3161,8 @@ int main ( int argc, char *argv[] )
     //-----------------Register queue handler for INPUT chain-----
     globalh_in = nfq_open();
     if ( !globalh_in ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if (seteuid(0) == -1)
-    {
-	perror("setuid6");
-    }
     if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
     if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    //if (seteuid(uid) == -1){perror("setuid7");}
-    uid = getuid();
-    printf ("restoreduid %d \n", uid);
     struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
     if ( !globalqh_input ){
         m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
@@ -3123,13 +3174,6 @@ int main ( int argc, char *argv[] )
     nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
-
-    //if (seteuid(uid) == -1){perror("setuid8");}
-    uid = getuid();
-    printf ("restoreduid9 %d \n", uid);
-
-
-
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
@@ -3158,8 +3202,6 @@ int main ( int argc, char *argv[] )
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
     pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
     pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
-
-
 
 
     if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){

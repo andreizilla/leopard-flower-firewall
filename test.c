@@ -87,18 +87,19 @@ int test2 ()
 
     //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
     int sock;
-    struct sockaddr_in server, client;
+    struct sockaddr_in server;
+    const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
+				  .sin_port = htons(48879)};
+
+
+
 
     if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
     {
 	strerror(errno);
 	return -1;
     }
-    memset(&client, 0, sizeof(client));
-    client.sin_family = AF_INET;
-    client.sin_addr.s_addr = INADDR_ANY;
-    client.sin_port = htons(48879);
-    if (bind(sock, (struct sockadrr *) &client, sizeof(client)) < 0)
+    if (bind(sock, ( const struct sockaddr *) &client, sizeof(client)) < 0)
     {
 	strerror(errno);
 	return -1;

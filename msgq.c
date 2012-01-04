@@ -11,7 +11,6 @@
 #include <malloc.h>
 #include <dirent.h> //for ino_t
 #include <sys/time.h>
-#include <grp.h>
 #include <sys/stat.h>
 #include <sys/capability.h>
 #include "argtable/argtable2.h" //for some externs
@@ -43,6 +42,7 @@ extern struct arg_file *cli_path, *gui_path, *pygui_path;
 extern pthread_mutex_t nfmark_count_mutex, msgq_mutex;
 extern int nfmark_count;
 extern void dlist_del ( char *path, char *pid );
+extern gid_t lpfwuser_gid;
 
 
 
@@ -52,8 +52,6 @@ int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel, mqd_creds, mqd_d2ftraffic;
 struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgqid_creds, *msgqid_d2ftraffic;
 
     pthread_t command_thread, regfrontend_thread;
-
-    gid_t lpfwuser_gid;
 
     //flag to show that fe is processing our query
     int fe_awaiting_reply = FALSE;
@@ -66,8 +64,10 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     //TODO: Paranoid anti spoofing measures: only allow one msg_struct_creds packet on the queue first get the current struct
     
     //block until message is received
+    interrupted:
     if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_struct_creds), 0, 0) == -1) {
-        m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	m_printf(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	if (errno == EINTR) goto interrupted;
     }
     //extract last sender's PID and check the binary path is the same path as this lpfw instance
     msgctl(mqd_creds, IPC_STAT, msgqid_creds);
@@ -190,12 +190,16 @@ void* commandthread(void* ptr){
     ptr = 0;
     dlist *temp;
  
-    // continue statement doesn't apply to switch it causes to jump to while()
+    // N.B. continue statement doesn't apply to switch it causes to jump to while()
     while (1) {
         //block until message is received from frontend:
-        if (msgrcv(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0, 0) == -1) {
-            m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	interrupted:
+	if (msgrcv(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0, 0) == -1)
+	{
+	    m_printf(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    if (errno == EINTR) goto interrupted;
         }
+
 #ifdef DEBUG
     struct timeval time_struct;
         gettimeofday(&time_struct, NULL);
@@ -340,77 +344,12 @@ void* commandthread(void* ptr){
                 m_printf(MLOG_INFO, "Unregistered frontend\n");
                 continue;
 
-            default: m_printf(MLOG_INFO, "unknown command");
+	    default: m_printf(MLOG_INFO, "unknown command in commandthread \n");
         }
     }
 }
 
     void msgq_init() {
-
-    //First we need to create/(check existence of) lpfwuser group and add ourselves to it
-    errno = 0;
-    struct group *m_group;
-    m_group = getgrnam("lpfwuser");
-    if (!m_group) {
-        if (errno == 0) {
-            m_printf(MLOG_INFO, "lpfwuser group does not exit, creating...\n");
-            if (system("groupadd lpfwuser") == -1) {
-		m_printf(MLOG_INFO, "error in system(groupadd)\n");
-                return;
-            }
-            //get group id again after group creation
-            errno = 0;
-            m_group = getgrnam("lpfwuser");
-            if(!m_group){
-                if (errno == 0){
-                    m_printf (MLOG_INFO, "lpfwuser group still doesn't exist even though we've just created it");
-                }
-                else{
-                    perror ("getgrnam");
-                }
-            }
-            lpfwuser_gid = m_group->gr_gid;
-        } else {
-            printf("Error in getgrnam\n");
-        perror ("getgrnam");
-        }
-        return;
-    }
-    //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
-#ifndef DEBUG
-    if (!(m_group->gr_mem[0] == NULL)){
-        m_printf (MLOG_INFO, "lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
-        exit(0);
-    }
-#endif
-    lpfwuser_gid = m_group->gr_gid;
-
-    //enable CAP_SETGID in effective set
-    cap_t cap_current;
-    cap_current = cap_get_proc();
-    if (cap_current == NULL)
-    {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-    const cap_value_t caps_list[] = {CAP_SETGID};
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
-    if (cap_set_proc(cap_current) == -1)
-    {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-
-    //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
-    if (setgid(lpfwuser_gid) == -1)
-    {
-        perror ("setgid ");
-        return;
-    }
-    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
-    if (cap_set_proc(cap_current) == -1)
-    {
-	perror("cap_set_proc()");
-    }
 
     msgqid_d2f = malloc(sizeof (struct msqid_ds));
     msgqid_f2d = malloc(sizeof (struct msqid_ds));
@@ -424,12 +363,13 @@ void* commandthread(void* ptr){
     if (remove(TMPFILE) != 0)
         m_printf(MLOG_DEBUG, "remove: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     if (creat(TMPFILE,
-      //make world readable to avoid permission cock-us during debugging
-#ifdef DEBUG 
+
+#ifdef DEBUG       //make world readable to avoid permission cock-ups during debugging
 	      0666
 #else
-	      0004
+	      0060 //lpfwuser group members may RDWR
 #endif
+
     ) == 1)
         m_printf(MLOG_INFO, "creat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     //-----------------------------------
