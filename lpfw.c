@@ -1542,8 +1542,13 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
             fd_DIR = opendir ( path );
             if ( !fd_DIR )
             {
-                m_printf ( MLOG_INFO, "PID quit while scanning /proc,opendir:%s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		cap_t cap = cap_get_proc();
+		printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
+		cap_free(cap);
+		//PID quit while scanning /proc
+		m_printf ( MLOG_INFO, "opendir(%s):%s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
                 continue;
+
             } // permission denied or some other error
             do
             {
@@ -2489,7 +2494,6 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
                 m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 continue;
             }
-
             else {
                 m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 break;
@@ -3042,10 +3046,37 @@ void create_group()
     {
 	perror("cap_set_proc()");
     }
-
-
-
 }
+
+void setuid_root()
+{
+    //enable CAP_SETUID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    const cap_value_t caps_list[] = {CAP_SETUID};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
+    if (setuid(0) == -1)
+    {
+	perror ("setuid ");
+	return;
+    }
+    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	perror("cap_set_proc()");
+    }
+}
+
 
 int main ( int argc, char *argv[] )
 {
@@ -3066,6 +3097,7 @@ int main ( int argc, char *argv[] )
     }
 
    capabilities_setup();
+   setuid_root();
    create_group();
 
     //install SIGTERM handler
@@ -3109,25 +3141,6 @@ int main ( int argc, char *argv[] )
     euid = geteuid();
     printf (" orig uid euid %d %d \n", uid, euid);
 #endif
-
-    //enable CAP_SETUID to call iptables
-    cap_t cap_current;
-    cap_current = cap_get_proc();
-    if (cap_current == NULL)
-    {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-    const cap_value_t caps_list[] = {CAP_SETUID};
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
-    if (cap_set_proc(cap_current) == -1)
-    {
-	m_printf(MLOG_INFO, "cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-    if (seteuid(0) == -1)
-    {
-	m_printf(MLOG_INFO, "seteuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-
    
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
         m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -3138,6 +3151,20 @@ int main ( int argc, char *argv[] )
     if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
 	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
+
+    //enable CAP_SETUID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+    {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
+    const cap_value_t caps_list[] = {CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+    {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
 
     //-----------------Register queue handler-------------
     int nfqfd;
@@ -3174,6 +3201,10 @@ int main ( int argc, char *argv[] )
     nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
+
+    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
+    //if (cap_set_proc(cap_current) == -1){perror("cap_set_proc()");}
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
