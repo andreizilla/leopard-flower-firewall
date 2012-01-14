@@ -81,8 +81,12 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     strcat(procpath, "/exe");
     memset(exepath, 0, PATHSIZE);
 
-    //lpfw --cli sleeps only 3 secs, after which procpath isnt available, so no breakpoints before the next line
-    readlink(procpath, exepath, PATHSIZE - 1);
+    //lpfw --cli sleeps only 3 secs, after which procpath isnt available, so no breakpoints before
+    //the next line
+    if (readlink(procpath, exepath, PATHSIZE - 1) == -1)
+    {
+	m_printf(MLOG_INFO, "readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    }
 #ifdef DEBUG
     printf("%s, %s\n",  exepath, ownpath);
 #endif
@@ -109,9 +113,39 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     child_pid =  fork();
       if (child_pid == 0){ //child process
         child_close_nfqueue();
-        setgid(lpfwuser_gid);
-        setuid(msg_creds.creds.uid);
-	
+	/* no need to setgid on child since gid==lpfwuser is inherited from parent
+	if (setgid(lpfwuser_gid) == -1)
+	{
+	    m_printf(MLOG_INFO, "setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	}
+	*/
+
+	//enable CAP_SETUID in effective set
+	cap_t cap_current;
+	cap_current = cap_get_proc();
+	if (cap_current == NULL)
+	{
+	    printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	}
+	const cap_value_t caps_list[] = {CAP_SETUID};
+	cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+	if (cap_set_proc(cap_current) == -1)
+	{
+	    printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	}
+	//setuid and immediately remove CAP_SETUID from both perm. and eff. sets
+	if (setuid(msg_creds.creds.uid) == -1)
+	{
+	    m_printf(MLOG_INFO, "setuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	}
+	cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+	cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
+	if (cap_set_proc(cap_current) == -1)
+	{
+	    perror("cap_set_proc()");
+	}
+
+
         //check that frontend file exists and launch it
 	struct stat path_stat;
 	if (!strcmp (msg_creds.creds.params[0], "--cli")){

@@ -214,7 +214,7 @@ typedef struct
 } mymsg;
 
 
-//dump all ct rules every second
+//dump all ct rules every second and send them to frontend
 void * trafficthread( void *ptr)
 {
     u_int8_t family = AF_INET; //used by conntrack
@@ -295,7 +295,7 @@ void * trafficthread( void *ptr)
 	{
 	    if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.rulesexp ), IPC_NOWAIT ) == -1 )
 	    {
-		printf ( "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
+		m_printf (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
 	    }
 	}
 	sleep(1);
@@ -308,7 +308,7 @@ void * trafficdestroythread( void *ptr)
     if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL){perror("nfct_open");}
     if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_destroyfilter_callback, NULL) == -1)) {perror("cb_reg");}
     int res = 0;
-    res = nfct_catch(traffic_handle); //should block here
+    res = nfct_catch(traffic_handle); //the thread should block here
 }
 
 
@@ -2972,14 +2972,17 @@ void capabilities_setup()
     cap_set_flag(cap_current, CAP_PERMITTED, 5, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
-	perror("cap_set_proc()");
+	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 
+#ifdef DEBUG
     cap_t cap = cap_get_proc();
-    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
+    printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));   
     cap_free(cap);
+#endif
 }
 
+/* Create group lpfwuser. Backend and frontend both should belong to this group to communicate over sysvmsgq */
 void create_group()
 {
     //First we need to create/(check existence of) lpfwuser group and add ourselves to it
@@ -3048,6 +3051,7 @@ void create_group()
     }
 }
 
+/* Setuid() lpfw to root */
 void setuid_root()
 {
     //enable CAP_SETUID in effective set
@@ -3061,7 +3065,7 @@ void setuid_root()
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
-	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
     if (setuid(0) == -1)
@@ -3069,18 +3073,20 @@ void setuid_root()
 	perror ("setuid ");
 	return;
     }
-    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
+    //we still neet to setuid in fe_reg_thread so leave this CAP in permitted set
+    //cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
     if (cap_set_proc(cap_current) == -1)
     {
-	perror("cap_set_proc()");
+	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 }
 
 
 int main ( int argc, char *argv[] )
 {
-#ifndef WITHOUT_SYSVIPC
+
+    #ifndef WITHOUT_SYSVIPC
     //argv[0] is the  path of the executable
     if ( argc >= 2 )
     {
@@ -3089,16 +3095,17 @@ int main ( int argc, char *argv[] )
             return frontend_mode ( argc, argv );
         }
     }
-#endif
+    #endif
+
     if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
     {
 	parsecomlineargs(argc, argv);
 	return 0;
     }
 
-   capabilities_setup();
-   setuid_root();
-   create_group();
+    capabilities_setup();
+    setuid_root();
+    create_group();
 
     //install SIGTERM handler
     struct sigaction sa;
@@ -3118,7 +3125,10 @@ int main ( int argc, char *argv[] )
    strcat(exepath, ownpidstr);
    strcat(exepath, "/exe");
    memset(ownpath,0,PATHSIZE);
-   readlink(exepath,ownpath,PATHSIZE-1);   
+   if (readlink(exepath,ownpath,PATHSIZE-1) == -1)
+   {
+       printf("readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+   }
       
     int basenamelength;
     basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
@@ -3128,11 +3138,6 @@ int main ( int argc, char *argv[] )
     parsecomlineargs(argc, argv);
     loggingInit();
     pidFileCheck();
-
-#ifndef WITHOUT_SYSVIPC
-    msgq_init();
-#endif
-
     initialize_conntrack();
 
 #ifdef DEBUG
@@ -3152,19 +3157,23 @@ int main ( int argc, char *argv[] )
 	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
 
-    //enable CAP_SETUID in effective set
+    //enable CAP in effective set
     cap_t cap_current;
     cap_current = cap_get_proc();
     if (cap_current == NULL)
     {
-	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	m_printf(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     const cap_value_t caps_list[] = {CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE};
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
-	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
+
+#ifndef WITHOUT_SYSVIPC
+    msgq_init();
+#endif
 
     //-----------------Register queue handler-------------
     int nfqfd;
@@ -3201,10 +3210,6 @@ int main ( int argc, char *argv[] )
     nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
-
-    cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
-    //if (cap_set_proc(cap_current) == -1){perror("cap_set_proc()");}
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
