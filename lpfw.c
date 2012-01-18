@@ -3195,7 +3195,7 @@ int main ( int argc, char *argv[] )
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh_input, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
     nfqfd_input = nfq_fd ( globalh_in );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
