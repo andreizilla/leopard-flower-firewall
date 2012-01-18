@@ -804,7 +804,7 @@ int parsecache_out(int socket, char *path, char *pid){
     return GOTO_NEXT_STEP;
 }
 
-
+/* scan all /proc and build a correlation of PIDs to inode numbers */
 void* cachebuildthread ( void *pid ){
     DIR *mdir;
     struct dirent *mdirent;
@@ -1808,9 +1808,10 @@ int socket_check_kernel_tcp(int *socket){
 //find in procfs which socket corresponds to source port
 int port2socket_udp ( int *portint, int *socketint )
 {
-    char buffer[4];
+    char buffer[5];
     char procport[12];
     char socketstr[12];
+    long m_socketint;
     int not_found_once=0;
     int bytesread_udp = 0;
     int bytesread_udp6 = 0;
@@ -1843,53 +1844,49 @@ int port2socket_udp ( int *portint, int *socketint )
     m_printf (MLOG_DEBUG2, "udp6 bytes read: %d\n", bytesread_udp6);
 
     dont_fread:
-    while(1){
-        memcpy(buffer, &udp_membuf[144+128*i], 4);
-        if (!memcmp ( porthex, buffer, 4 ) ){//match!
-            memcpy(socketstr, &udp_membuf[144+128*i+76], 12);
-            goto endloop;
-        }
-        if (buffer[0] != 0){ //EOF not reached, reiterate
-            i++;
-            continue;
-        }
-        // else EOF reached with no match, check if it was IPv6 socket
-        i = 0;
-        while(1){
-            memcpy(buffer,&udp6_membuf[184+171*i],4);
-            if ( !memcmp ( porthex, buffer, 4 ) ){ //match!
-                memcpy(socketstr, &udp6_membuf[184+171*i+100],12);
-                goto endloop;
-            }
-            if (buffer[0] != 0){ //EOF not reached, reiterate
-                i++;
-                continue;
-            }
-            //else EOF reached with no match, if it was 1st iteration then reread proc file
-	    if (not_found_once) return SRCPORT_NOT_FOUND_IN_PROC;
-            //else
-            nanosleep(&timer, &dummy);
-            not_found_once=1;
-            goto do_fread;
-            }
+    ;
+    char newline[2] = {'\n','\0'};
+    char *token;
+    token = strtok(udp_membuf, newline); //skip the first line (column headers)
+    while ((token = strtok(NULL, newline)) != NULL){ //take a line until EOF
+	sscanf(token, "%*s %*8s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
+	if (!strcmp (porthex, buffer))
+	    goto endloop;
     }
+     // else EOF reached with no match, check if it was IPv6 socket
+
+    token = strtok(udp6_membuf, newline); //skip the first line (column headers)
+    while ((token = strtok(NULL, newline)) != NULL){ //take a line until EOF
+	sscanf(token, "%*s %*32s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
+	if (!strcmp (porthex, buffer))
+	    goto endloop;
+    }
+
+	    //else EOF reached with no match, if it was 1st iteration then reread proc file
+    if (not_found_once){
+	return SRCPORT_NOT_FOUND_IN_PROC;
+    }
+    //else
+    nanosleep(&timer, &dummy);
+    not_found_once=1;
+    goto do_fread;
+
     endloop:
-    i=1;
-    while (socketstr[i] != 32){i++;}
-    socketstr[i] = 0; // 0x20 == space, see /proc/net/tcp
-    *socketint = atoi ( socketstr );
+    *socketint = m_socketint;
     if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
-        return GOTO_NEXT_STEP;
+    //else
+    return GOTO_NEXT_STEP;
 }
 
 
 
 //find in procfs which socket corresponds to source port
-int port2socket_tcp ( int *portint, int *socketint )
+int  port2socket_tcp ( int *portint, int *socketint )
 {
-    char buffer[4];
+    char buffer[5];
     char procport[12];
     char socketstr[12];
+    long m_socketint;
     int not_found_once=0;
     int bytesread_tcp = 0;
     int bytesread_tcp6 = 0;
@@ -1922,43 +1919,35 @@ int port2socket_tcp ( int *portint, int *socketint )
     m_printf (MLOG_DEBUG2, "tcp6 bytes read: %d\n", bytesread_tcp6);
 
     dont_fread:
-    while(1){
-        memcpy(buffer, &tcp_membuf[165+150*i], 4);
-        if (!memcmp ( porthex, buffer, 4 ) ){//match!
-            memcpy(socketstr, &tcp_membuf[165+150*i+76], 12);
-            goto endloop;
-        }
-        if (buffer[0] != 0){ //EOF not reached, reiterate
-            i++;
-            continue;
-        }
-        // else EOF reached with no match, check if it was IPv6 socket
-        i = 0;
-        while(1){
-            memcpy(buffer,&tcp6_membuf[184+171*i],4);
-            if ( !memcmp ( porthex, buffer, 4 ) ){ //match!
-                memcpy(socketstr, &tcp6_membuf[184+171*i+100],12);
-                goto endloop;
-            }
-            if (buffer[0] != 0){ //EOF not reached, reiterate
-                i++;
-                continue;
-            }
-            //else EOF reached with no match, if it was 1st iteration then reread proc file
-	    if (not_found_once){
-		return SRCPORT_NOT_FOUND_IN_PROC;
-	    }
-            //else
-            nanosleep(&timer, &dummy);
-            not_found_once=1;
-            goto do_fread;
-            }
+    ;
+    char newline[2] = {'\n','\0'};
+    char *token;
+    token = strtok(tcp_membuf, newline); //skip the first line (column headers)
+    while ((token = strtok(NULL, newline)) != NULL){ //take a line until EOF
+	sscanf(token, "%*s %*8s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
+	if (!strcmp (porthex, buffer))
+	    goto endloop;
     }
+     // else EOF reached with no match, check if it was IPv6 socket
+
+    token = strtok(tcp6_membuf, newline); //skip the first line (column headers)
+    while ((token = strtok(NULL, newline)) != NULL){ //take a line until EOF
+	sscanf(token, "%*s %*32s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer,& m_socketint);
+	if (!strcmp (porthex, buffer))
+	    goto endloop;
+    }
+
+            //else EOF reached with no match, if it was 1st iteration then reread proc file
+    if (not_found_once){
+	return SRCPORT_NOT_FOUND_IN_PROC;
+    }
+    //else
+    nanosleep(&timer, &dummy);
+    not_found_once=1;
+    goto do_fread;
+
     endloop:
-    i=1;
-    while (socketstr[i] != 32){i++;}
-    socketstr[i] = 0; // 0x20 == space, see /proc/net/tcp
-    *socketint = atoi ( socketstr );
+    *socketint = m_socketint;
     if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
     //else
     return GOTO_NEXT_STEP;
@@ -3188,7 +3177,7 @@ int main ( int argc, char *argv[] )
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
     if ( nfq_set_mode ( globalqh, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh, 300 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_queue_maxlen ( globalqh, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
     nfqfd = nfq_fd ( globalh_out );
     m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
