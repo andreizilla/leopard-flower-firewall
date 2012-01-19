@@ -701,25 +701,10 @@ void dlist_del ( char *path, char *pid )
     {
         if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, pid ) )
         {
-//	    //remove cache entry first
-//	    pthread_mutex_lock(&cache_mutex);
-//	    cache_item *temp_cache;
-//	    temp_cache = first_cache;
-//	    while (temp_cache->next != NULL){
-//		temp_cache = temp_cache->next;
-//		if ( !(!strcmp ( temp_cache->path, path ) && !strcmp ( temp_cache->pid, pid )) ) continue;
-//		//else found entry, remove it
-//		temp_cache->prev->next = temp_cache->next;
-//		if (temp_cache->next != NULL)
-//		    temp_cache->next->prev = temp_cache->prev;
-//		free(temp_cache);
-//		goto cache_removed;
-//	    }
-//	    m_printf ( MLOG_INFO, "cache entry for %s with PID %s was not found. Needs investigation\n", path, pid );
-
-//	    cache_removed:
-//	    pthread_mutex_unlock(&cache_mutex);
-
+	   //free cache entry first
+	    free(temp->sockets_cache);
+	    //free dirstream
+	    closedir (temp->dirstream);
             //remove the item
             temp->prev->next = temp->next;
             if ( temp->next != NULL )
@@ -804,7 +789,7 @@ int parsecache_out(int socket, char *path, char *pid){
     return GOTO_NEXT_STEP;
 }
 
-/* scan all /proc and build a correlation of PIDs to inode numbers */
+/* scan only active /proc entries and build a correlation of PIDs to inode numbers */
 void* cachebuildthread ( void *pid ){
     DIR *mdir;
     struct dirent *mdirent;
