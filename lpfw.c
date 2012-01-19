@@ -395,6 +395,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         if ( !* ( log_info->ival ) ) return 0;
         va_start ( args, format );
         vprintf ( format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_TRAFFIC:
@@ -402,6 +403,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         if ( !* ( log_traffic->ival ) ) return 0;
         va_start ( args, format );
         vprintf ( format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_DEBUG:
@@ -409,6 +411,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         if ( !* ( log_debug->ival ) ) return 0;
         va_start ( args, format );
         vprintf ( format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_DEBUG2:
@@ -416,6 +419,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
 	// check if  logging enabled
 	va_start ( args, format );
 	vprintf ( format, args );
+	va_end (args);
 	//fsync(filelogfd);
 #endif
 	return 0;
@@ -424,6 +428,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
 	// check if  logging enabled
 	va_start ( args, format );
 	vprintf ( format, args );
+	va_end (args);
 	//fsync(filelogfd);
 #endif
 	return 0;
@@ -431,6 +436,7 @@ int m_printf_stdout ( int loglevel, char * format, ... )
         va_start ( args, format );
         printf ( "ALERT: " );
         vprintf ( format, args );
+	va_end (args);
         return 0;
     }
 }
@@ -447,23 +453,27 @@ int m_printf_file ( int loglevel, char * format, ... )
         if ( !* ( log_info->ival ) ) return 0;
         va_start ( args, format );
         vsprintf ( logstring, format, args );
+	va_end (args);
         write ( fileno ( fileloginfo_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_TRAFFIC:
         if ( !* ( log_traffic->ival ) ) return 0;
         va_start ( args, format );
         vsprintf ( logstring, format, args );
+	va_end (args);
         write ( fileno ( filelogtraffic_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_DEBUG:
         if ( !* ( log_debug->ival ) ) return 0;
         va_start ( args, format );
         vsprintf ( logstring, format, args );
+	va_end (args);
         write ( fileno ( filelogdebug_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
         va_start ( args, format );
         write ( fileno ( filelogdebug_stream ), "ALERT: ", strlen ( logstring ) );
+	va_end (args);
 
 //         vfprintf ( fileloginfofd, format, args );
 //         fprintf ( filelogtrafficfd, "ALERT: " );
@@ -485,24 +495,28 @@ int m_printf_syslog ( int loglevel, char *format, ... )
         if ( !* ( log_info->ival ) ) return 0;
         va_start ( args, format );
         vsyslog ( LOG_INFO, format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_TRAFFIC:
         if ( !* ( log_traffic->ival ) ) return 0;
         va_start ( args, format );
         vsyslog ( LOG_INFO, format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_DEBUG:
         if ( !* ( log_debug->ival ) ) return 0;
         va_start ( args, format );
         vsyslog ( LOG_INFO, format, args );
+	va_end (args);
         //fsync(filelogfd);
         return 0;
     case MLOG_ALERT: //Alerts get logget unconditionally to all log channels
         va_start ( args, format );
         syslog ( LOG_INFO, "ALERT: " );
         vsyslog ( LOG_INFO, format, args );
+	va_end (args);
         return 0;
     }
 }
