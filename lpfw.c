@@ -970,6 +970,8 @@ void* refreshthread ( void* ptr )
                     //we get here only if there was no PATH match
                     strcpy ( temp->pid, "0" );
 		    temp->is_active = FALSE;
+		    temp->nfmark_in = 0;
+		    temp->nfmark_out = 0;
                     fe_list();
                     break;
                 }
