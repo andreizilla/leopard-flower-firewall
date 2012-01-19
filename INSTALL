@@ -1,39 +1,34 @@
-<<<----Leopard Flower 0.4 (released Oct 2011)---->>>
+<<<----Leopard Flower 0.4 (released Jan 2012)---->>>
 
 INSTALLATION INSTRUCTIONS
 
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
-The following packaged must be installed for lpfw to compile:
-
+The following packaged must be installed for lpfw daemon to compile:
 libnetfilter-queue-dev
 libnetfilter-conntrack-dev
 libnfnetlink-dev
 libcap-dev
-libncurses5-dev (to use ncurses frontend)
+Issue "make" in the source root directory
+
+The following packaged must be installed for lpfwcli frontend to compile:
+libncurses5-dev
 optional: zenity(for popup notifications)
+Issue "make" from within lpfw-cli directory
+
+The following packaged must be installed for python frontend to compile:
 libpython2.6
 python2.6-dev
-
-These packages are needed for lpfwgui to run
-
-libnetfilter_queue
-libnetfilter_conntrack
+Additionally the following packages must be installed for python frontend to run:
 libqtcore4
-libqtgui 4
+libqtgui4
 python (v2.6)
 python-qt4
+Issue "make" from within lpfw-pygui directory
 
-Navigate into the source code folder and run "make"
-
-Additionally you need to compile IPC_wrapper.so which is used by python-based graphical frontend. 
-Simply issue make ipcwrapper
-
-lpfw should be placed into the same folder as all the *.py files from gui folder.
-Run lpfw as root.
-Run lpfw --guipy as regular user. 
-
-
+lpfw should be placed into the same folder as lpfwcli and/or all the *.py(c) files from lpfw-pygui folder.
+Run lpfw as root or user with capabilities CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID
+Run lpfw --cli or lpfw --pygui as regular user.
 
 
 

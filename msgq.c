@@ -58,7 +58,8 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     //struct of what was sent to f.e.dd
     dlist sent_to_fe_struct;
 
- // register frontend when "lpfw --cli" is invoked.The thread is restarted by invoking ptxhread_create towards the enf of it
+ // register frontend when "lpfw --cli" is invoked.The thread is restarted by invoking pthread_create
+ // towards the end of it
  void*  fe_reg_thread(void* ptr){
     ptr = 0;
     //TODO: Paranoid anti spoofing measures: only allow one msg_struct_creds packet on the queue first get the current struct

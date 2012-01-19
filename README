@@ -1,6 +1,6 @@
-<<<----Leopard Flower 0.4 (released Oct 2011)---->>>
+<<<----Leopard Flower 0.4 (released Jan 2012)---->>>
 
-  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a graphical frontend called.
+  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a graphical frontend.
 
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
@@ -71,10 +71,8 @@ KNOWN ISSUES:
     3. Only IPv4 is supported, IPv6 support is underway.
     4. A combination of exceptionally large executables(20Mb+) + slow CPU may result in a 2+ seconds delay when an application connects to the web for the first time, due to heavy calculations performed by sha512 checksumming function.
     5. Only TCP, UDP, ICMP (partly, see above) protocols are supported. If your system happens to use any other transport protocol besides TCP/UDP/ICMP and you don't want those packets discarded by lpfw, consider adding a rule to iptables something like: >>> iptables -I OUTPUT 1 -p udplite -j ACCEPT <<< This rule should preceed NFQUEUE rule.
-    6. Access to network filesystems like NFS, CIFS, SMB an others or to in-kernel servers like khttpd will not be detected by LPFW since such access doesn't create user-space sockets. You will have to manually add iptables rules for such services.
-    7. If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
-    8. After going to sleep and waking up the PC, LPFW doesn't work properly, it has to be restarted.
-    9. Albeit lpfwgui is a simple frontend, it consumes 30+ Mb of memory. An attempt to reduce memory consumption is underway.
+    6. If LPFW crashes, the user will have to issue "iptables -F" as root to be able to access the internet without restarting computer.
+    7. Albeit lpfwgui is a simple frontend, it consumes 30+ Mb of memory. An attempt to reduce memory consumption is underway.
 
 
 
@@ -134,3 +132,7 @@ In order to establish a correlation between a packet which hit nfq and the appli
 3 Finally extract the application name from /proc/<PID>/exe
 
 LPFW sets a unique netfilter mark on all connections of a specific app. This enables LPFW to instantly halt all app's internet activity if user chooses so. In order to set such a netfilter mark, LPFW uses libnetfilter_conntrack library.
+
+SECURITY
+
+LPFW needs to start with capabilities CAP_SYS_PTRACE (to readlink() root files), CAP_NET_ADMIN, CAP_DAC_READ_SEARCH (to scan all /proc/ entries), CAP_SETUID, CAP_SETGID. Each threas tries to keep only capabilities needed just for its execution.

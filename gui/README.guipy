@@ -4,7 +4,7 @@ This is a Python-based frontend for Leopard Flower.
   python-qt
   libqtcore4, libqtgui4
 
-  1. Place all *.py files into the same directory as lpfw.
+  1. Place all *.py(c) files into the same directory as lpfw.
       Alternatively you can start lpfw with commandline argument --guipy-path= followed by a path of lpfwgui.py
   2. If not already launched, launch lpfw as root from terminal
   3. Issue "lpfw --guipy" as a regular user (not root)
