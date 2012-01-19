@@ -2980,9 +2980,9 @@ void create_group()
     m_group = getgrnam("lpfwuser");
     if (!m_group) {
 	if (errno == 0) {
-	    m_printf(MLOG_INFO, "lpfwuser group does not exit, creating...\n");
+	    printf("lpfwuser group does not exit, creating...\n");
 	    if (system("groupadd lpfwuser") == -1) {
-		m_printf(MLOG_INFO, "error in system(groupadd)\n");
+		printf("error in system(groupadd)\n");
 		return;
 	    }
 	    //get group id again after group creation
@@ -2990,7 +2990,7 @@ void create_group()
 	    m_group = getgrnam("lpfwuser");
 	    if(!m_group){
 		if (errno == 0){
-		    m_printf (MLOG_INFO, "lpfwuser group still doesn't exist even though we've just created it");
+		   printf ("lpfwuser group still doesn't exist even though we've just created it");
 		}
 		else{
 		    perror ("getgrnam");
@@ -3006,7 +3006,7 @@ void create_group()
     //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
 #ifndef DEBUG
     if (!(m_group->gr_mem[0] == NULL)){
-	m_printf (MLOG_INFO, "lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
+	printf ("lpfwuser group contains users. This group should not contain any users. This is a security issue. Please remove all user from that group and restart application. Exitting\n");
 	exit(0);
     }
 #endif
@@ -3017,26 +3017,26 @@ void create_group()
     cap_current = cap_get_proc();
     if (cap_current == NULL)
     {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     const cap_value_t caps_list[] = {CAP_SETGID};
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 
     //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
     if (setgid(lpfwuser_gid) == -1)
     {
-	perror ("setgid ");
+	printf("setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	return;
     }
     cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
     if (cap_set_proc(cap_current) == -1)
     {
-	perror("cap_set_proc()");
+	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 }
 

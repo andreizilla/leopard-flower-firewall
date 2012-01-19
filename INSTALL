@@ -9,6 +9,7 @@ The following packaged must be installed for lpfw to compile:
 libnetfilter-queue-dev
 libnetfilter-conntrack-dev
 libnfnetlink-dev
+libcap-dev
 libncurses5-dev (to use ncurses frontend)
 optional: zenity(for popup notifications)
 libpython2.6

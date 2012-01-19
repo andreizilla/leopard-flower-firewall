@@ -125,13 +125,13 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	cap_current = cap_get_proc();
 	if (cap_current == NULL)
 	{
-	    printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	const cap_value_t caps_list[] = {CAP_SETUID};
 	cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
 	if (cap_set_proc(cap_current) == -1)
 	{
-	    printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	//setuid and immediately remove CAP_SETUID from both perm. and eff. sets
 	if (setuid(msg_creds.creds.uid) == -1)
@@ -142,7 +142,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
 	if (cap_set_proc(cap_current) == -1)
 	{
-	    perror("cap_set_proc()");
+	    m_printf(MLOG_INFO, "cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 
 
