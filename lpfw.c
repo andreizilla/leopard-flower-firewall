@@ -2728,8 +2728,9 @@ int frontend_mode ( int argc, char *argv[] )
 
     if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
     {
-        printf ( "msgsnd: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    };
+
+	printf ( "msgsnd: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    }
 
     //we need to sleep a little because lpfw is extracting out path from /proc/PID/exe
     //if we quit immediately, this information won't be available

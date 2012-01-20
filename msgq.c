@@ -434,14 +434,20 @@ void* commandthread(void* ptr){
 //WORLD_ACCESS perms on msgq to facilitate debugging
 #define GROUP_ACCESS 0660
 #define WORLD_ACCESS 0666
+#define OTHERS_ACCESS 0662 //write to msgq
 
-int perm_bits;
+int perm_bits, creds_bits;
 
 #ifdef DEBUG
 perm_bits = WORLD_ACCESS;
+creds_bits = WORLD_ACCESS;
 #else
 perm_bits = GROUP_ACCESS;
+creds_bits = OTHERS_ACCESS;
 #endif
+
+//creds_bits require special treatment b/c when user launches ./lpfw --gui, we don't know in advance
+//what the user's UID is. So we allow any user to invoke the frontend.
 
     if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -494,13 +500,13 @@ perm_bits = GROUP_ACCESS;
     //This particular message queue should be writable by anyone, hence permission 0002
     //because we don't know in advance what user will be invoking the frontend
 
-    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | perm_bits)) == -1) {
+    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_creds, IPC_RMID, 0);
     //create it again
-    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | perm_bits)) == -1) {
+    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
