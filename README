@@ -12,9 +12,9 @@ These instructions apply specifically to Ubuntu 10.10 but are very likely to wor
 
 SIMPLE CONFIGURATION:
   1. Make sure files lpfw and lpfwgui are in the same folder
-  2. In a terminal window launch "lpfw" as root
-  3. In a terminal window of an X session launch "lpfw --gui" as a regular user (not root). You will see the graphical frontend.
-  4. Is you prefer to use a command line frontend instead of the graphical one, issue "lpfw --cli" in a terminal window of an X session.
+  2. In a terminal window navigate into the folder where lpfw is located and launch "./lpfw" as root
+  3. In a terminal window of an X session launch "./lpfw --gui" as a regular user (not root). You will see the graphical frontend.
+  4. Is you prefer to use a command line frontend instead of the graphical one, issue "./lpfw --cli" in a terminal window of an X session.
 
 
 
@@ -23,7 +23,7 @@ ADVANCED CONFIGURATION:
   1. If you don't want lpfw to look for lpfwcli/lpfwgui in the same folder, you can pass to lpfw a command line option --cli-path=/--gui-path= followed by a path to lpfwcli/lpfwgui
   2. If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
   3. 30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
-  4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "lpfw --cli"/"lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
+  4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "./lpfw --cli" or "./lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
 
 
 
