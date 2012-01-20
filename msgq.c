@@ -226,6 +226,7 @@ void* commandthread(void* ptr){
 	if (msgrcv(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0, 0) == -1)
 	{
 	    m_printf(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    sleep(1); //avoid overwhelming the log
 	    if (errno == EINTR) goto interrupted;
         }
 
@@ -430,70 +431,61 @@ void* commandthread(void* ptr){
     //we need to first get the Qid, then use this id to delete Q
     //then create it again, thus ensuring the Q is cleared
 
-    //message queues D2F are only readable to group members 0040
-    //whereas F2D are writable 0020
-    //lpfw is run by root and it has read/write permissions anyway
-    
-#define GROUP_READABLE_ONLY 0040
-#define GROUP_WRITABLE_ONLY 0020
-#define OTHERS_WRITABLE_ONLY 0002
+//WORLD_ACCESS perms on msgq to facilitate debugging
+#define GROUP_ACCESS 0660
 #define WORLD_ACCESS 0666
 
-int read_bits, write_bits, creds_bits;
+int perm_bits;
 
 #ifdef DEBUG
-read_bits = WORLD_ACCESS;
-write_bits = WORLD_ACCESS;
-creds_bits = WORLD_ACCESS;
+perm_bits = WORLD_ACCESS;
 #else
-read_bits = GROUP_READABLE_ONLY;
-write_bits = GROUP_WRITABLE_ONLY;
-creds_bits = OTHERS_WRITABLE_ONLY;
+perm_bits = GROUP_ACCESS;
 #endif
 
-    if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2f, IPC_RMID, 0);
     //create it again
-    if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2f);
     //----------------------------------------------------
-    if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2flist, IPC_RMID, 0);
     //create it again
-    if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2flist);
 
     //---------------------------------------------------------
 
-    if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | write_bits)) == -1) {
+    if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_f2d, IPC_RMID, 0);
     //create it again
-    if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | write_bits)) == -1) {
+    if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_f2d);
 
     //------------------------------------------------------
-    if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2fdel, IPC_RMID, 0);
     //create it again
-    if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | read_bits)) == -1) {
+    if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2fdel);
@@ -502,26 +494,26 @@ creds_bits = OTHERS_WRITABLE_ONLY;
     //This particular message queue should be writable by anyone, hence permission 0002
     //because we don't know in advance what user will be invoking the frontend
 
-    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
+    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_creds, IPC_RMID, 0);
     //create it again
-    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
+    if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | perm_bits)) == -1) {
         m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
 
     //-------------------------------------------------
 
-    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | creds_bits)) == -1) {
+    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits)) == -1) {
 	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2ftraffic, IPC_RMID, 0);
     //create it again
-    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | creds_bits)) == -1) {
+    if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits)) == -1) {
 	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     m_printf(MLOG_DEBUG, "Traffic msgq id %d\n", mqd_d2ftraffic);
