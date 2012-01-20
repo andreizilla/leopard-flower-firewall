@@ -33,7 +33,9 @@ void* f2dthread(void * ptr) {
 
     while (1)
     {
-	printf ("Listening from commands from f/e \n");
+#ifdef DEBUG
+	printf ("Listening for commands from f/e \n");
+#endif
 	int size;
 	char sizestring[8];
 	char *token;
@@ -45,8 +47,9 @@ void* f2dthread(void * ptr) {
 	memset(line, 0, sizeof(line));
 	read (0, line, sizeof(line)); //unblocks when zero byte is encounter
 	//dissect the line and forward it on
-
+#ifdef DEBUG
 	printf ("f/e asked %s\n", line);
+#endif
 	token = strtok(line, search);
 	if (!strcmp(token, "F2DCOMM_LIST"))
 	{
@@ -129,7 +132,7 @@ void* d2fthread(void * ptr) {
 		strcpy(message, "D2FCOMM_LIST ");
 		break;
 	    default:
-		printf ("Received an invalid command. Please report\n");
+		printf("Received an invalid command. Please report %s,%d\n",__FILE__, __LINE__);
 		break;
 	}
 	strcat (message, msg_d2f.item.path);
@@ -168,7 +171,9 @@ void* d2flistthread(void * ptr) {
 	    if (!strcmp(msg_d2flist.item.path, "EOF"))
 	    {
 		strcat (message, "EOF");
+#ifdef DEBUG
 		printf ("sending message %s\n", message);
+#endif
 		send_message(message);
 		break;
 	    }
@@ -184,13 +189,15 @@ void* d2flistthread(void * ptr) {
 		else if (!strcmp (msg_d2flist.item.perms, DENY_ALWAYS)) strcat(message, "DENY_ALWAYS ");
 		else
 		{
-		    printf ("A rule without permission set detected \n");
+		    printf("A rule without permission set detected %s,%d\n",__FILE__, __LINE__);
 		}
 		if (msg_d2flist.item.is_active) strcat (message, "ACTIVE ");
 		else strcat (message, "NOTACTIVE ");
 		char nfmark_str[16];
 		sprintf(nfmark_str, "%d", msg_d2flist.item.nfmark_out);
+#ifdef DEBUG
 		printf ("%s nfmark %d\n", msg_d2flist.item.path, msg_d2flist.item.nfmark_out);
+#endif
 		strcat (message, nfmark_str);
 		strcat(message, " ");
 	    }
@@ -218,7 +225,9 @@ void* d2ftrafficthread(void * ptr) {
 	printf("msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	exit(0);
     };
+#ifdef DEBUG
     printf ("traffic mqid: %d\n", mqd_d2ftraffic);
+#endif
 
     mymsg msg_d2ftraffic;
     char message[MAX_LINE_LENGTH];
@@ -251,8 +260,6 @@ void* d2ftrafficthread(void * ptr) {
 }
 
 
-
-
 int main ( int argc, char *argv[] )
 {    
     pthread_t f2d_thread, d2f_thread, d2flist_thread, d2fdel_thread, d2ftraffic_thread;
@@ -261,8 +268,9 @@ int main ( int argc, char *argv[] )
     pthread_create(&d2flist_thread, NULL, d2flistthread, NULL);
     //pthread_create(&d2fdel_thread, NULL, d2fdelthread, NULL);
     pthread_create(&d2ftraffic_thread, NULL, d2ftrafficthread, NULL);
-
+#ifdef DEBUG
     printf ("Beginning the main loop \n");
+#endif
     while(1)
     {
 	sleep(100);
