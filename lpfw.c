@@ -2060,6 +2060,7 @@ out:
     return retval;
 }
 
+/* Not in use atm b/c trafficthread calculates traffic
 void increase_allowed_traffic_out(int out_packet_size)
 {
     pthread_mutex_lock ( &dlist_mutex );
@@ -2076,7 +2077,7 @@ void increase_allowed_traffic_out(int out_packet_size)
     pthread_mutex_unlock ( &dlist_mutex );
     printf ("Ordinal number %d not found \n", rule_ordinal_out);
 }
-
+*/
 
 int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
@@ -2456,9 +2457,6 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
     case NEW_INSTANCE_ALLOW:
     case FORKED_CHILD_ALLOW:
     case CACHE_TRIGGERED_ALLOW:
-
-	increase_allowed_traffic_out(out_packet_size);
-
     case INKERNEL_RULE_ALLOW:
 
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
