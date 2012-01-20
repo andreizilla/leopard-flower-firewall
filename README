@@ -114,6 +114,24 @@ HEADLESS MODE - WITHOUT FRONTEND:
 
 ---------------------------------------------------------
 
+TRAFFIC LOGGING FORMAT
+
+An example of traffic log's line:
+<UDP src 11239 dst 80.233.253.203:40320  /home/wwwwww/apps/skype_static-2.2.0.35/skype 2150 allow
+1 2   3    4    5          6        7                                8                   9    10
+
+1. direction of traffic "<" outgoing, ">" incoming
+2. Protocol type UDP / TCP
+3. stands for "source", i.e. the machine which originated the packet
+4. port on source machine
+5. stands for "destination", i.e. the machine for which the packet is destined
+6. IP address of destination machine
+7. port of destination machine
+8. Path to the executable which initiated the packet or for which the packet was destined
+9. Process ID of the executable
+10. Action taken by LPFW with regard to this packet
+
+
 
 
 
