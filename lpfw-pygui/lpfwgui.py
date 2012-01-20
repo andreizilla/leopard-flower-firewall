@@ -1,5 +1,4 @@
 import sys, os, thread, time, string, threading, subprocess
-sys.path.append('/sda/newrepo/lpfw-pygui/')
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator
 import resource
 from PyQt4.QtCore import pyqtSignal, Qt
@@ -169,7 +168,7 @@ def stdoutthread(stdout):
 def msgq_init(): 
     print "in msgq_init"
     global proc
-    proc = subprocess.Popen(["/sda/newrepo/lpfw-pygui/ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(["./ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
      
     stdout_thread = threading.Thread(target=stdoutthread, args=(proc.stderr,))
     #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reeading pipe
