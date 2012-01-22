@@ -126,6 +126,9 @@ char predicate = FALSE;
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+//netfilter mark number for the packet (to be added to NF_MARK_BASE)
+int nfmark_count = 0;
+
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
     //while(1){printf("DELMARK");}
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
@@ -604,8 +607,6 @@ dlist * dlist_copy()
 int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
     static int rule_ordinal_count = 0;
-    //netfilter mark number for the packet (to be added to NF_MARK_BASE)
-    static int nfmark_count = 0;
     int retnfmark;
 
     pthread_mutex_lock ( &dlist_mutex );
@@ -984,8 +985,10 @@ void* refreshthread ( void* ptr )
                     //we get here only if there was no PATH match
                     strcpy ( temp->pid, "0" );
 		    temp->is_active = FALSE;
-		    temp->nfmark_in = 0;
-		    temp->nfmark_out = 0;
+                    //assign new nfmarks to be used by the next instance of app
+                    temp->nfmark_in = NFMARKIN_BASE + nfmark_count;
+                    temp->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
+                    nfmark_count++;
                     fe_list();
                     break;
                 }
