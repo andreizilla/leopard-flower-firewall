@@ -8,7 +8,7 @@ SOURCES 	=	ipc.c \
 all: lpfwcli
 
 lpfwcli: $(SOURCES)
-	gcc $(GCCFLAGS) $(SOURCES) -lncurses -lpthread -o lpfwcli
+	gcc -g $(GCCFLAGS) $(SOURCES) -lncurses -lpthread -o lpfwcli
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfwcli
