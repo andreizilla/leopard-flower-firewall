@@ -13,7 +13,7 @@
 extern int ( *m_printf ) ( int loglevel, char *logstring);
 extern int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
 extern pthread_mutex_t dlist_mutex;
-extern dlist *first;
+extern dlist *first_rule;
 extern char logstring[PATHSIZE];
 extern pthread_mutex_t logstring_mutex;
 
@@ -77,7 +77,7 @@ int test1()
       sleep(REFRESH_INTERVAL+1);
       dlist *temp;
       pthread_mutex_lock(&dlist_mutex);
-      temp = first;
+      temp = first_rule;
       while (temp->next != NULL)
         {
           temp = temp->next;

@@ -47,7 +47,7 @@ char owndir[PATHSIZE]; //full path to the dir lpfw executable is in (with traili
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
-dlist *first;
+dlist *first_rule;
 #ifndef WITHOUT_SYSVIPC
 dlist*copy_first;
 #endif
@@ -62,7 +62,7 @@ msg_struct_creds msg_creds = {1, 0};
 extern int fe_ask_out ( char*, char*, unsigned long long* );
 extern int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
 extern int fe_list();
-extern void msgq_init();
+extern void init_msgq();
 extern int sha512_stream ( FILE *stream, void *resblock );
 extern int fe_awaiting_reply;
 extern int mqd_d2ftraffic;
@@ -108,7 +108,7 @@ int rule_ordinal_out, rule_ordinal_in;
 int out_packet_size, in_packet_size;
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
-char *tcp_smallbuf, *udp_smallbuf;
+char tcp_smallbuf[4096], udp_smallbuf[4096];
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 
@@ -116,7 +116,8 @@ struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
 struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
-int nfqfd_input, nfqfd_udp, nfqfd_rest;
+int nfqfd_input,
+nfqfd_tcp, nfqfd_udp, nfqfd_rest;
 
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -417,7 +418,7 @@ int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
   return NFCT_CB_CONTINUE;
 }
 
-void  initialize_conntrack()
+void  init_conntrack()
 {
   if ((ct_out_tcp = nfct_new()) == NULL)
     {
@@ -624,7 +625,7 @@ dlist * dlist_copy()
 {
   pthread_mutex_lock ( &dlist_mutex );
   dlist* del;
-  dlist *temp = first->next;
+  dlist *temp = first_rule->next;
   dlist *copy_temp = copy_first;
   while ( temp != 0 )
     {
@@ -671,7 +672,7 @@ int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, uns
   int retnfmark;
 
   pthread_mutex_lock ( &dlist_mutex );
-  dlist *temp = first;
+  dlist *temp = first_rule;
 
   if (!strcmp(path, KERNEL_PROCESS))  //make sure it is not a duplicate from the user
     {
@@ -686,7 +687,7 @@ int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, uns
             }
         }
     }
-  temp = first;
+  temp = first_rule;
   //find the last element in dlist i.e. the one that has .next == NULL...
   while ( temp->next != NULL )
     {
@@ -779,7 +780,7 @@ void dlist_del ( char *path, char *pid )
 {
   mbool was_active;
   pthread_mutex_lock ( &dlist_mutex );
-  dlist *temp = first->next;
+  dlist *temp = first_rule->next;
   while ( temp != NULL )
     {
       if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, pid ) )
@@ -821,7 +822,7 @@ int parsecache_in(int socket, char *path, char *pid)
   int retval;
   dlist *temp;
   pthread_mutex_lock(&dlist_mutex);
-  temp = first;
+  temp = first_rule;
   while (temp->next != NULL)
     {
       temp = temp->next;
@@ -854,7 +855,7 @@ int parsecache_out(int socket, char *path, char *pid)
   int retval;
   dlist *temp;
   pthread_mutex_lock(&dlist_mutex);
-  temp = first;
+  temp = first_rule;
   while (temp->next != NULL)
     {
       temp = temp->next;
@@ -911,7 +912,7 @@ void* cachebuildthread ( void *pid )
           continue;
         }
       pthread_mutex_lock(&dlist_mutex);
-      temp = first;
+      temp = first_rule;
       //cache only running PIDs && not kernel processes
       while (temp->next != NULL)
         {
@@ -1020,7 +1021,7 @@ dump:
 
       dlist *temp;
       pthread_mutex_lock ( &dlist_mutex );
-      temp = first->next;
+      temp = first_rule->next;
       char nfmarkstr[16];
       while ( temp != NULL )
         {
@@ -1045,75 +1046,71 @@ dump:
     }
 }
 
-//scan and remove from dlist apps that are not running(if perms == *ONCE)
+//scan procfs and remove/mark inactive from/in dlist those apps that are no longer running
 void* refreshthread ( void* ptr )
 {
-  dlist *temp, *prev, *temp2;
+  dlist *rule, *prev, *temp2;
   ptr = 0;     //to prevent gcc warnings of unused variable
-  char mypath[32] = "/proc/";
-  char buf[PATHSIZE];
+  char proc_pid_exe[32] = "/proc/";
+  char exe_path[PATHSIZE];
 
   while ( 1 )
     {
       sleep ( REFRESH_INTERVAL );
       pthread_mutex_lock ( &dlist_mutex );
-      temp = first;
-      while ( temp->next != NULL )
+      rule = first_rule;
+      while ( rule->next != NULL )
         {
-          temp = temp->next;
-          //check if we have the processes actual PID and it is not a kernel process(it doesnt have a procfs entry)
-          if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS)) continue;
-          mypath[6]=0;
-          strcat ( mypath, temp->pid );
-          strcat ( mypath, "/exe" );
-          memset ( buf, 0, PATHSIZE );
-          //readlink fails if PID isn't running
-          if ( readlink ( mypath, buf, PATHSIZE ) == -1 )
+	  rule = rule->next;
+	  //kernel processes don't have /proc/PID entries
+	  if (!rule->is_active || !strcmp(rule->path, KERNEL_PROCESS)) continue;
+	  proc_pid_exe[6]=0;
+	  strcat ( proc_pid_exe, rule->pid );
+	  strcat ( proc_pid_exe, "/exe" );
+	  memset ( exe_path, 0, PATHSIZE );
+	  //readlink doesn't fail if PID is running
+	  if ( readlink ( proc_pid_exe, exe_path, PATHSIZE ) != -1 )
             {
+	      continue;
+	    }
+	  else
+	    {
               M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              goto delete;
-            }
-          //else PID is running. Make sure the PID belongs to the same path.
-          //If not to the same, then the old path has quit and a new process has been started
-          //with the same PID - delete the old path
-          if (! strcmp ( buf, temp->path ) ) continue;
-          else
-            {
-delete:
+
               //don't delete *ALWAYS rule if it's the only rule for this PATH - just toggle the is_active flag,
               //otherwise if there are other rules for this PATH, then remove this rule
-              if ( !strcmp ( temp->perms, ALLOW_ALWAYS ) || !strcmp ( temp->perms, DENY_ALWAYS ) )
+	      if ( !strcmp ( rule->perms, ALLOW_ALWAYS ) || !strcmp ( rule->perms, DENY_ALWAYS ) )
                 {
-                  temp2 = first->next;
+		  temp2 = first_rule->next;
                   while ( temp2 != NULL ) //scan the whole dlist again
                     {
-                      if ( !strcmp ( temp2->path, temp->path ) && ( temp2 != temp ) ) //to find a rule with the same PATH but make sure we don't find our own rule :)
+		      if ( !strcmp ( temp2->path, rule->path ) && ( temp2 != rule ) ) //to find a rule with the same PATH but make sure we don't find our own rule :)
                         {
                           goto still_delete;     //and delete it
                         }
                       temp2=temp2->next;
                       continue;
-                    }
+		    }i
                   //we get here only if there was no PATH match
-                  strcpy ( temp->pid, "0" );
-                  temp->is_active = FALSE;
+		  strcpy ( rule->pid, "0" );
+		  rule->is_active = FALSE;
                   //assign new nfmarks to be used by the next instance of app
-                  temp->nfmark_in = NFMARKIN_BASE + nfmark_count;
-                  temp->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
+		  rule->nfmark_in = NFMARKIN_BASE + nfmark_count;
+		  rule->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
                   nfmark_count++;
                   fe_list();
                   break;
-                }
+		}
+	     }
 still_delete:
               // TODO dlist_del is redundant we could keep a pointer to self in each dlist element and simply free(temp->self)
               // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
               pthread_mutex_unlock ( &dlist_mutex );
-              dlist_del ( temp->path, temp->pid );
+	      dlist_del ( rule->path, rule->pid );
               break;
             }
-        }
       pthread_mutex_unlock ( &dlist_mutex );
-    }
+        }
 }
 
 //Read RULESFILE into dlist
@@ -1208,7 +1205,7 @@ void rulesfileWrite()
     }
 
   pthread_mutex_lock ( &dlist_mutex );
-  dlist* temp = first->next;
+  dlist* temp = first_rule->next;
   dlist* temp2;
 
 loop:
@@ -1295,7 +1292,7 @@ inkernel:
 int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   pthread_mutex_lock ( &dlist_mutex );
-  dlist* temp = first->next;
+  dlist* temp = first_rule->next;
   while ( temp != NULL )
     {
       if ( !strcmp ( temp->path, path ) )
@@ -1418,7 +1415,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be
 //two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
 
-              dlist * temp = first->next;
+	      dlist * temp = first_rule->next;
               while ( temp != NULL )
                 {
                   if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, ppid ) ) //we have a fork()ed child
@@ -1501,7 +1498,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 
               //See if we need to query user or silently add to dlist
               pthread_mutex_lock ( &dlist_mutex );
-              dlist * temp2 = first->next;
+	      dlist * temp2 = first_rule->next;
 
 // A1. Are there any entries in dlist with the same PATH as NP AND *ALWAYS perms? If yes, then create new entry in dlist copy parent's perms and all other attributes over to NP and continue;
 // A2. If No, i.e. there either aren't any entries in dlist with the same PATH as NP OR there are entries with the same path as NP AND *ONCE perms, then query user.
@@ -1563,7 +1560,7 @@ int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, i
   strcat ( find_socket, "]" );
 
   pthread_mutex_lock ( &dlist_mutex );
-  dlist * temp = first->next;
+  dlist * temp = first_rule->next;
 
   while ( temp != NULL )
     {
@@ -2507,7 +2504,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
           if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
             {
               pthread_mutex_lock(&dlist_mutex);
-              dlist *temp = first;
+	      dlist *temp = first_rule;
               while(temp->next != NULL)
                 {
                   temp = temp->next;
@@ -2566,7 +2563,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
           if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
             {
               pthread_mutex_lock(&dlist_mutex);
-              dlist *temp = first;
+	      dlist *temp = first_rule;
               while(temp->next != NULL)
                 {
                   temp = temp->next;
@@ -2847,7 +2844,7 @@ found2:
       if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
         {
           pthread_mutex_lock(&dlist_mutex);
-          dlist *temp = first;
+	  dlist *temp = first_rule;
           while(temp->next != NULL)
             {
               temp = temp->next;
@@ -3022,7 +3019,7 @@ found2:
         {
 
           pthread_mutex_lock(&dlist_mutex);
-          dlist *temp = first;
+	  dlist *temp = first_rule;
           while(temp->next != NULL)
             {
               temp = temp->next;
@@ -3105,7 +3102,7 @@ kernel_verdict:
 
 
 
-void loggingInit()
+void init_log()
 {
 
   if ( !strcmp ( logging_facility->sval[0], "file" ) )
@@ -3141,7 +3138,7 @@ void loggingInit()
 #endif
 }
 
-void pidFileCheck()
+void pidfile_check()
 {
   // use stat() to check if PIDFILE exists.
   //TODO The check is quick'n'dirty. Consider making more elaborate check later
@@ -3372,7 +3369,7 @@ void SIGTERM_handler ( int signal )
 }
 
 /*command line parsing contributed by Ramon Fried*/
-int parsecomlineargs(int argc, char* argv[])
+int parse_comline_args(int argc, char* argv[])
 {
   // if the parsing of the arguments was unsuccessful
   int nerrors;
@@ -3559,7 +3556,7 @@ void capabilities_setup()
 }
 
 /* Create group lpfwuser. Backend and frontend both should belong to this group to communicate over sysvmsgq */
-void create_group()
+void setgid_lpfwuser()
 {
   //First we need to create/(check existence of) lpfwuser group and add ourselves to it
   errno = 0;
@@ -3667,6 +3664,260 @@ void setuid_root()
     }
 }
 
+void setup_signal_handlers()
+{
+    //install SIGTERM handler
+    struct sigaction sa;
+    sa.sa_handler = SIGTERM_handler;
+    sigemptyset ( &sa.sa_mask );
+    if ( sigaction ( SIGTERM, &sa, NULL ) == -1 )
+      {
+	perror ( "sigaction" );
+      }
+}
+
+void save_own_path()
+{
+    int ownpid = getpid();
+    char ownpidstr[16];
+    sprintf(ownpidstr, "%d", ownpid );
+    char exepath[PATHSIZE] = "/proc/";
+    strcat(exepath, ownpidstr);
+    strcat(exepath, "/exe");
+    memset(ownpath,0,PATHSIZE);
+    if (readlink(exepath,ownpath,PATHSIZE-1) == -1)
+      {
+	printf("readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+
+    int basenamelength;
+    basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
+    strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
+}
+
+void init_iptables()
+{
+    if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+    if ( system ( "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+    if ( system ( "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+    if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+    if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+    if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      }
+
+
+
+}
+
+void init_nfq_handlers()
+{
+    //-----------------Register queue handler-------------
+    globalh_out_tcp = nfq_open();
+    if ( !globalh_out_tcp )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
+      }
+    if ( nfq_unbind_pf ( globalh_out_tcp, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
+      }
+    if ( nfq_bind_pf ( globalh_out_tcp, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
+      }
+    struct nfq_q_handle * globalqh_tcp = nfq_create_queue ( globalh_out_tcp, NFQNUM_OUTPUT_TCP, &nfq_handle_out_tcp, NULL );
+    if ( !globalqh_tcp )
+      {
+	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	exit (0);
+      }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_tcp, NFQNL_COPY_PACKET, 40 ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
+      }
+    if ( nfq_set_queue_maxlen ( globalqh_tcp, 200 ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
+      }
+    nfqfd_tcp = nfq_fd ( globalh_out_tcp);
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
+    //-----------------Register queue handler-------------
+    globalh_out_udp = nfq_open();
+    if ( !globalh_out_udp )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
+      }
+    if ( nfq_unbind_pf ( globalh_out_udp, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
+      }
+    if ( nfq_bind_pf ( globalh_out_udp, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
+      }
+    struct nfq_q_handle * globalqh_udp = nfq_create_queue ( globalh_out_udp, NFQNUM_OUTPUT_UDP, &nfq_handle_out_udp, NULL );
+    if ( !globalqh_udp )
+      {
+	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	exit (0);
+      }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_udp, NFQNL_COPY_PACKET, 40 ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
+      }
+    if ( nfq_set_queue_maxlen ( globalqh_udp, 200 ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
+      }
+    nfqfd_udp = nfq_fd ( globalh_out_udp );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
+    globalh_out_rest = nfq_open();
+    if ( !globalh_out_rest )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
+      }
+    if ( nfq_unbind_pf ( globalh_out_rest, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
+      }
+    if ( nfq_bind_pf ( globalh_out_rest, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
+      }
+    struct nfq_q_handle * globalqh_rest = nfq_create_queue ( globalh_out_rest, NFQNUM_OUTPUT_REST, &nfq_handle_out_rest, NULL );
+    if ( !globalqh_rest )
+      {
+	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	exit (0);
+      }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_rest, NFQNL_COPY_PACKET, 40 ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
+      }
+    if ( nfq_set_queue_maxlen ( globalqh_rest, 200 ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
+      }
+    nfqfd_rest = nfq_fd ( globalh_out_rest );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
+
+
+
+
+    //-----------------Register queue handler for INPUT chain-----
+    globalh_in = nfq_open();
+    if ( !globalh_in )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
+      }
+    if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
+      }
+    if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
+      }
+    struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
+    if ( !globalqh_input )
+      {
+	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	exit (0);
+      }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
+      }
+    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
+      }
+    nfqfd_input = nfq_fd ( globalh_in );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
+
+
+}
+
+void init_dlist()
+{
+    //initialze dlist first(reference) element
+    if ( ( first_rule = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	die();
+      }
+    first_rule->prev = NULL;
+    first_rule->next = NULL;
+
+  #ifndef WITHOUT_SYSVIPC
+    //initialze dlist copy's first(reference) element
+    if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	die();
+      }
+    copy_first->prev = NULL;
+    copy_first->next = NULL;
+  #endif
+}
+
+void open_proc_net_files()
+{
+    if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    if ( ( tcp6info = fopen ( TCP6INFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    if ( ( udpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    if ( ( udp6info = fopen (UDP6INFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
+    tcpinfo_fd = fileno(tcpinfo);
+    tcp6info_fd = fileno(tcp6info);
+    udpinfo_fd = fileno(udpinfo);
+    udp6info_fd = fileno(udp6info);
+}
 
 int main ( int argc, char *argv[] )
 {
@@ -3684,46 +3935,24 @@ int main ( int argc, char *argv[] )
 
   if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
     {
-      parsecomlineargs(argc, argv);
+      parse_comline_args(argc, argv);
       return 0;
     }
 
   capabilities_setup();
   setuid_root();
-  create_group();
-
-  //install SIGTERM handler
-  struct sigaction sa;
-  sa.sa_handler = SIGTERM_handler;
-  sigemptyset ( &sa.sa_mask );
-  if ( sigaction ( SIGTERM, &sa, NULL ) == -1 )
-    {
-      perror ( "sigaction" );
-    }
+  setgid_lpfwuser();
+  setup_signal_handlers();
 
 #ifndef WITHOUT_SYSVIPC
-  //save own path
-  int ownpid = getpid();
-  char ownpidstr[16];
-  sprintf(ownpidstr, "%d", ownpid );
-  char exepath[PATHSIZE] = "/proc/";
-  strcat(exepath, ownpidstr);
-  strcat(exepath, "/exe");
-  memset(ownpath,0,PATHSIZE);
-  if (readlink(exepath,ownpath,PATHSIZE-1) == -1)
-    {
-      printf("readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-
-  int basenamelength;
-  basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
-  strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
+  save_own_path();
 #endif
 
-  parsecomlineargs(argc, argv);
-  loggingInit();
-  pidFileCheck();
-  initialize_conntrack();
+  parse_comline_args(argc, argv);
+  init_log();
+  pidfile_check();
+  init_conntrack();
+  init_iptables();
 
 #ifdef DEBUG
   uid_t uid, euid;
@@ -3731,32 +3960,6 @@ int main ( int argc, char *argv[] )
   euid = geteuid();
   printf (" orig uid euid %d %d \n", uid, euid);
 #endif
-
-  if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-  if ( system ( "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-  if ( system ( "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-  if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-  if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-  if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
-
 
   //enable CAP in effective set
   cap_t cap_current;
@@ -3773,222 +3976,22 @@ int main ( int argc, char *argv[] )
     }
 
 #ifndef WITHOUT_SYSVIPC
-  msgq_init();
+  init_msgq();
 #endif
 
-  //-----------------Register queue handler-------------
-  int nfqfd_tcp;
-  globalh_out_tcp = nfq_open();
-  if ( !globalh_out_tcp )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-    }
-  if ( nfq_unbind_pf ( globalh_out_tcp, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-    }
-  if ( nfq_bind_pf ( globalh_out_tcp, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-    }
-  struct nfq_q_handle * globalqh_tcp = nfq_create_queue ( globalh_out_tcp, NFQNUM_OUTPUT_TCP, &nfq_handle_out_tcp, NULL );
-  if ( !globalqh_tcp )
-    {
-      M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-      return 0;
-    }
-  //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  if ( nfq_set_mode ( globalqh_tcp, NFQNL_COPY_PACKET, 40 ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-    }
-  if ( nfq_set_queue_maxlen ( globalqh_tcp, 200 ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-    }
-  nfqfd_tcp = nfq_fd ( globalh_out_tcp);
-  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
-  //--------Done registering------------------
-
-  //-----------------Register queue handler-------------
-  globalh_out_udp = nfq_open();
-  if ( !globalh_out_udp )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-    }
-  if ( nfq_unbind_pf ( globalh_out_udp, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-    }
-  if ( nfq_bind_pf ( globalh_out_udp, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-    }
-  struct nfq_q_handle * globalqh_udp = nfq_create_queue ( globalh_out_udp, NFQNUM_OUTPUT_UDP, &nfq_handle_out_udp, NULL );
-  if ( !globalqh_udp )
-    {
-      M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-      return 0;
-    }
-  //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  if ( nfq_set_mode ( globalqh_udp, NFQNL_COPY_PACKET, 40 ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-    }
-  if ( nfq_set_queue_maxlen ( globalqh_udp, 200 ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-    }
-  nfqfd_udp = nfq_fd ( globalh_out_udp );
-  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
-  //--------Done registering------------------
-
-  globalh_out_rest = nfq_open();
-  if ( !globalh_out_rest )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-    }
-  if ( nfq_unbind_pf ( globalh_out_rest, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-    }
-  if ( nfq_bind_pf ( globalh_out_rest, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-    }
-  struct nfq_q_handle * globalqh_rest = nfq_create_queue ( globalh_out_rest, NFQNUM_OUTPUT_REST, &nfq_handle_out_rest, NULL );
-  if ( !globalqh_rest )
-    {
-      M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-      return 0;
-    }
-  //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  if ( nfq_set_mode ( globalqh_rest, NFQNL_COPY_PACKET, 40 ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-    }
-  if ( nfq_set_queue_maxlen ( globalqh_rest, 200 ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-    }
-  nfqfd_rest = nfq_fd ( globalh_out_rest );
-  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
-  //--------Done registering------------------
-
-
-
-
-
-  //-----------------Register queue handler for INPUT chain-----
-  globalh_in = nfq_open();
-  if ( !globalh_in )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-    }
-  if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-    }
-  if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-    }
-  struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
-  if ( !globalqh_input )
-    {
-      M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-      return 0;
-    }
-  //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-    }
-  if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 )
-    {
-      M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-    }
-  nfqfd_input = nfq_fd ( globalh_in );
-  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
-  //--------Done registering------------------
-
-  //initialze dlist first(reference) element
-  if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      die();
-    }
-  first->prev = NULL;
-  first->next = NULL;
-
-#ifndef WITHOUT_SYSVIPC
-  //initialze dlist copy's first(reference) element
-  if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      die();
-    }
-  copy_first->prev = NULL;
-  copy_first->next = NULL;
-#endif
-
+  init_nfq_handlers();
+  init_dlist();
   rules_load();
+  open_proc_net_files();
+
   pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
   pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
   pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL);
   pthread_create ( &nfqout_udp_thread, NULL, nfqoutrestthread, NULL);
-
   pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
   pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
   pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
   pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
-  // pthread_create ( &read_stats_thread, NULL, readstatsthread, NULL );
-
-
-  if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  if ( ( tcp6info = fopen ( TCP6INFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  if ( ( udpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  if ( ( udp6info = fopen (UDP6INFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
-  tcpinfo_fd = fileno(tcpinfo);
-  tcp6info_fd = fileno(tcp6info);
-  udpinfo_fd = fileno(udpinfo);
-  udp6info_fd = fileno(udp6info);
-
-  if ((tcp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
-  if ((udp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
-
-  /*
-
-      if ((tcp_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-      memset(tcp_membuf,0, MEMBUF_SIZE);
-
-      if ((tcp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-      memset(tcp6_membuf,0, MEMBUF_SIZE);
-
-      if ((udp_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-      memset(udp_membuf,0, MEMBUF_SIZE);
-
-      if ((udp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-      memset(udp6_membuf,0, MEMBUF_SIZE);
-      */
-
 
 #ifdef DEBUG
   pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );

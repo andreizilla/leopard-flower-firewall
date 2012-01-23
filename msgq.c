@@ -20,7 +20,7 @@ int fe_ask_out(char*, char*, unsigned long long*);
 int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
 
 int fe_list();
-void msgq_init();
+void init_msgq();
 
 
 //These externs are initialized in lpfw.c
@@ -103,7 +103,7 @@ interrupted:
 #endif
   if (strcmp(exepath, ownpath))
     {
-      M_PRINTF(LOG_ALERT, "Red alert!!! Some application is trying to impersonate the frontend\n");
+      M_PRINTF(LOG_ALERT, "Can't start frontend because it's not located in the sane folder as lpfw\n");
       return ;
     }
   //The following checks are already performed by frontend_register(). This is redundant, but again, those hackers are unpredictable
@@ -424,7 +424,7 @@ interrupted:
     }
 }
 
-void msgq_init()
+void init_msgq()
 {
 
   msgqid_d2f = malloc(sizeof (struct msqid_ds));
