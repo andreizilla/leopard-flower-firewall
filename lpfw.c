@@ -122,7 +122,7 @@ nfqfd_tcp, nfqfd_udp, nfqfd_rest;
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
 char predicate = FALSE;
-
+//holds the time when last packet was seen
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -753,14 +753,14 @@ int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, uns
 //	cache_temp = cache_temp->next;
 //	strcpy(cache_temp->path, temp->path);
 //	strcpy(cache_temp->pid, temp->pid);
-//	cache_temp->sockets[0][0] = CACHE_EOL_MAGIC;
+//	cache_temp->sockets[0][0] = MAGIC_NO;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
   if ((temp->sockets_cache = (int*)malloc(sizeof(int)*MAX_CACHE)) == NULL)
     {
       perror("malloc");
     }
-  *temp->sockets_cache = CACHE_EOL_MAGIC;
+  *temp->sockets_cache = MAGIC_NO;
 
   pthread_mutex_unlock ( &dlist_mutex );
   return retnfmark;
@@ -819,7 +819,7 @@ int parsecache_in(int socket, char *path, char *pid)
       temp = temp->next;
       if(!temp->is_active) continue;
       i = 0;
-      while (temp->sockets_cache[i] != CACHE_EOL_MAGIC)
+      while (temp->sockets_cache[i] != MAGIC_NO)
         {
           if (i >= MAX_CACHE-1) break;
           if (temp->sockets_cache[i] == socket)  //found match
@@ -853,7 +853,7 @@ int parsecache_out(int socket, char *path, char *pid)
       temp = temp->next;
       if(!temp->is_active) continue;
       i = 0;
-      while (temp->sockets_cache[i] != CACHE_EOL_MAGIC)
+      while (temp->sockets_cache[i] != MAGIC_NO)
         {
           if (i >= MAX_CACHE-1) break;
           if (temp->sockets_cache[i] == socket)  //found match
@@ -875,72 +875,68 @@ int parsecache_out(int socket, char *path, char *pid)
   return GOTO_NEXT_STEP;
 }
 
-/* scan only active /proc entries and build a correlation of PIDs to inode numbers */
+//scan active /proc/pid entries (ignoring kernel processes) and build a correlation of PIDs to sockets
 void* cachebuildthread ( void *pid )
 {
   DIR *mdir;
-  struct dirent *mdirent;
-  int pathlen;
-  char mpath[32];
-  char buf[32];
+  struct dirent *m_dirent;
+  int proc_pid_fd_pathlen;
+  char proc_pid_fd_path[32], proc_pid_exe[32];
   struct timespec refresh_timer,dummy;
   refresh_timer.tv_sec=0;
   refresh_timer.tv_nsec=1000000000/4;
-  int i;
-  dlist *temp;
+  dlist *rule;
   struct timeval time;
-  int delta;
+  int i, delta;
 
   while(1)
     {
       nanosleep(&refresh_timer, &dummy);
-      //is there was more that a second since last packet was seen, no need to build cache
+
       gettimeofday(&time, NULL);
       pthread_mutex_lock(&lastpacket_mutex);
       delta = time.tv_sec - lastpacket.tv_sec;
       pthread_mutex_unlock(&lastpacket_mutex);
       if (delta > 1)
         {
-          //printf ("Sleeping a bit\n");
           continue;
         }
       pthread_mutex_lock(&dlist_mutex);
-      temp = first_rule;
-      //cache only running PIDs && not kernel processes
-      while (temp->next != NULL)
+      rule = first_rule;
+      while (rule->next != NULL)
         {
-          temp = temp->next;
-          if (!temp->is_active || !strcmp(temp->path, KERNEL_PROCESS)) continue;
-          pathlen = strlen(temp->pidfdpath);
-          strcpy(mpath, temp->pidfdpath);
-          rewinddir(temp->dirstream);
+	  rule = rule->next;
+	  if (!rule->is_active || !strcmp(rule->path, KERNEL_PROCESS)) continue;
+	  proc_pid_fd_pathlen = strlen(rule->pidfdpath);
+	  strcpy(proc_pid_fd_path, rule->pidfdpath);
+	  rewinddir(rule->dirstream);
           i = 0;
           errno=0;
-          while (mdirent = readdir ( temp->dirstream ))
+	  while (m_dirent = readdir ( rule->dirstream ))
             {
-              mpath[pathlen]=0;
-              strcat(mpath, mdirent->d_name);
-              memset (buf, 0 , sizeof(buf));
-              if (readlink ( mpath, buf, SOCKETBUFSIZE ) == -1)  //not a symlink but . or ..
+	      proc_pid_fd_path[proc_pid_fd_pathlen]=0;
+	      strcat(proc_pid_fd_path, m_dirent->d_name);
+	      memset (proc_pid_exe, 0 , sizeof(proc_pid_exe));
+	      if (readlink ( proc_pid_fd_path, proc_pid_exe, SOCKETBUFSIZE ) == -1)  //not a symlink but . or ..
                 {
                   errno=0;
-                  continue; //no trailing 0
+		  continue;
                 }
-              if (buf[7] != '[') continue; //not a socket
+	      if (proc_pid_exe[7] != '[') continue; //not a socket
               char *end;
-              end = strrchr(&buf[8],']'); //put 0 instead of ]
+	      end = strrchr(&proc_pid_exe[8],']'); //put 0 instead of ]
               *end = 0;
-              temp->sockets_cache[i] = atoi(&buf[8]);
+	      rule->sockets_cache[i] = atoi(&proc_pid_exe[8]);
               i++;
             }
-          temp->sockets_cache[i] = CACHE_EOL_MAGIC;
+	  rule->sockets_cache[i] = MAGIC_NO;
           if (errno==0)
             {
               continue; //readdir reached EOF, thus errno hasn't changed from 0
             }
           //else
-          perror("procdirent");
-        }
+	  M_PRINTF ( MLOG_DEBUG, "readdir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	}
       pthread_mutex_unlock(&dlist_mutex);
     }
 }

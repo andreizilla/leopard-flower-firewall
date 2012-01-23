@@ -24,8 +24,7 @@
 #define NFMARK_DELTA 10000
 //#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE
 #define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
-#define MAX_CACHE 1024*2 //maximum number of /proc/net/* sockets to put in cache
-#define CACHE_EOL_MAGIC 38
+#define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
 #define RULES_EXPORT 500
 #define REFRESH_INTERVAL 1
 #define TEST_FAILED SIGUSR1

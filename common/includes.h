@@ -15,7 +15,7 @@ typedef struct m_dlist
   char path[PATHSIZE]; //path to executable
   char pid[PIDLENGTH]; //its pid
   char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
-  mbool is_active; //TRUE if app has already been seen sending packets
+  mbool is_active; //Has process already been seen sending/receiving packets?
   u_int32_t nfmark_out;
   u_int32_t nfmark_in; //netfilter's packet mark. Is assigned to each packet and used when a user deletes a rule to tell conntrack to immediately drop any existing connections associated with the mark
   unsigned char first_instance; //TRUE for a first instance of an app or a parent process
@@ -28,7 +28,7 @@ typedef struct m_dlist
   struct m_dlist *prev; //previous element in dlist
   struct m_dlist *next; // next element in dlist
   int *sockets_cache;//pointer to 2D array of cache
-  DIR *dirstream;
+  DIR *dirstream; //a constantly open stream to /proc/PID/fd
   char pidfdpath[32];
   int ordinal_number; //each rule gets assigned a consecutive number
   //traffic counters
