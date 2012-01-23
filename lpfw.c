@@ -828,6 +828,7 @@ int parsecache_in(int socket, char *path, char *pid)
               else retval = CACHE_TRIGGERED_DENY;
               strcpy(path, temp->path);
               strcpy(pid, temp->pid);
+	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
               nfmark_to_set_in = temp->nfmark_out;
               rule_ordinal_in = temp->ordinal_number;
               pthread_mutex_unlock(&dlist_mutex);
@@ -858,9 +859,10 @@ int parsecache_out(int socket, char *path, char *pid)
           if (temp->sockets_cache[i] == socket)  //found match
             {
               if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
-              else retval = CACHE_TRIGGERED_DENY;
+	      else {retval = CACHE_TRIGGERED_DENY;}
               strcpy(path, temp->path);
               strcpy(pid, temp->pid);
+	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
               nfmark_to_set_out = temp->nfmark_out;
               rule_ordinal_out = temp->ordinal_number;
               pthread_mutex_unlock(&dlist_mutex);
@@ -1596,12 +1598,12 @@ int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, i
               strcpy (m_pid, temp->pid);
               closedir ( m_dir );
 
-              unsigned long long stime;
+	      unsigned long long stime;
               stime = starttimeGet ( atoi ( temp->pid ) );
               if ( temp->stime != stime )
                 {
-                  M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
-                  return STIME_DONT_MATCH;
+		  M_PRINTF ( MLOG_INFO, "SPOOFED_PID in %s %s %d", temp->path,  __FILE__, __LINE__ );
+		  return SPOOFED_PID;
                 }
 
               if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
@@ -2420,8 +2422,8 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
     case SHA_DONT_MATCH:
       strcat (m_logstring, "Red alert. Some app is trying to impersonate another\n" );
       break;
-    case STIME_DONT_MATCH:
-      strcat (m_logstring, "Red alert. Some app is trying to impersonate another\n" );
+    case SPOOFED_PID:
+      strcat (m_logstring, "Attempt to spoof PID detected\n" );
       break;
     case EXESIZE_DONT_MATCH:
       strcat (m_logstring, "Red alert. Executable's size don't match the records\n" );
