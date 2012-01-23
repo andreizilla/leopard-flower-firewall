@@ -94,7 +94,7 @@ static PyObject * ipc_wrapper_msgrcv(PyObject *self, PyObject *args)
 typedef struct
 {
   long type;
-  int rulesexp[RULES_EXPORT][3];
+  int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3];
 } mymsg;
 
 static PyObject * ipc_wrapper_msgrcv_traffic(PyObject *self, PyObject *args)
@@ -105,7 +105,7 @@ static PyObject * ipc_wrapper_msgrcv_traffic(PyObject *self, PyObject *args)
 #ifdef DEBUG
   printf("before msgrcv\n");
 #endif
-  int retval = msgrcv(msqid, &msg, sizeof(msg.rulesexp), 0, 0);
+  int retval = msgrcv(msqid, &msg, sizeof(msg.ct_entries_export), 0, 0);
 #ifdef DEBUG
   printf("after msgrcv %d\n", retval);
 #endif
@@ -114,13 +114,13 @@ static PyObject * ipc_wrapper_msgrcv_traffic(PyObject *self, PyObject *args)
       return (PyObject*)Py_BuildValue("s",strerror(errno));
     }
   PyObject *tuple;
-  tuple = PyTuple_New( RULES_EXPORT * 3 * sizeof(u_int32_t));
+  tuple = PyTuple_New( CT_ENTRIES_EXPORT_MAX * 3 * sizeof(u_int32_t));
   int i = 0;
-  for (i = 0; msg.rulesexp[i]; ++i)
+  for (i = 0; msg.ct_entries_export[i]; ++i)
     {
-      PyTuple_SetItem(tuple, i*3, PyInt_FromLong(msg.rulesexp[i][0]));
-      PyTuple_SetItem(tuple, i*3+1, PyInt_FromLong(msg.rulesexp[i][1]));
-      PyTuple_SetItem(tuple, i*3+2, PyInt_FromLong(msg.rulesexp[i][2]));
+      PyTuple_SetItem(tuple, i*3, PyInt_FromLong(msg.ct_entries_export[i][0]));
+      PyTuple_SetItem(tuple, i*3+1, PyInt_FromLong(msg.ct_entries_export[i][1]));
+      PyTuple_SetItem(tuple, i*3+2, PyInt_FromLong(msg.ct_entries_export[i][2]));
     }
   return tuple;
 }

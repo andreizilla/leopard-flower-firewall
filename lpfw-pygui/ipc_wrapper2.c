@@ -210,7 +210,7 @@ void* d2flistthread(void * ptr) {
 typedef struct
 {
     long type;
-    int rulesexp[RULES_EXPORT][3];
+    int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3];
 } mymsg;
 
 void* d2ftrafficthread(void * ptr) {
@@ -242,15 +242,15 @@ void* d2ftrafficthread(void * ptr) {
 
 	int i;
 	char int2str[16];
-	for (i=0; msg_d2ftraffic.rulesexp[i][0] != 0; ++i)
+	for (i=0; msg_d2ftraffic.ct_entries_export[i][0] != 0; ++i)
 	{
-	    sprintf(int2str, "%d", msg_d2ftraffic.rulesexp[i][0]);
+	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][0]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.rulesexp[i][1]);
+	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][1]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.rulesexp[i][2]);
+	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][2]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
 	}

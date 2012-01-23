@@ -85,7 +85,7 @@ pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread;
-pthread_t traffic_thread, trafficdestroy_thread, read_stats_thread, ct_del_thread;
+pthread_t conntrack_export_thread, trafficdestroy_thread, read_stats_thread, ct_del_thread;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
@@ -184,16 +184,19 @@ int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
   return NFCT_CB_CONTINUE;
 }
 
-int rules[RULES_EXPORT][9] = {};
-int rulesexp[RULES_EXPORT][3] = {};
+//this array is used inside lpfw for debug purposes
+int ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
+//this array is built for export to frontend based on ct_entries
+int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3] = {};
 /*
   [0] nfmark
   [1] bytes in
   [2] bytes out
-  [3] bytes in destroyed
-  [4] bytes out destroyed
+  [3] bytes in from all previously destroyed conntracks which had this nfmark
+  [4] bytes out from all previously destroyed conntracks which had this nfmark
   [5] [1] + [3]
   [6] [2] + [4]
+  For debug purposes:
   [7] how many times previous [5] was larger than the present [5]
   [8] how many times previous [6] was larger than the present [6]
 */
@@ -212,17 +215,17 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
   in_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
 
   int i;
-  for (i = 0; rules[i][0] != 0; ++i)
+  for (i = 0; ct_entries[i][0] != 0; ++i)
     {
-      if (rules[i][0] != mark) continue;
-      rules[i][1] += in_bytes;
-      rules[i][2] += out_bytes;
+      if (ct_entries[i][0] != mark) continue;
+      ct_entries[i][1] += in_bytes;
+      ct_entries[i][2] += out_bytes;
       return NFCT_CB_CONTINUE;
     }
   //the entry is not yet in array, adding now
-  rules[i][0] = mark;
-  rules[i][1] = in_bytes;
-  rules[i][2] = out_bytes;
+  ct_entries[i][0] = mark;
+  ct_entries[i][1] = in_bytes;
+  ct_entries[i][2] = out_bytes;
   return NFCT_CB_CONTINUE;
 }
 
@@ -240,11 +243,11 @@ int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_co
   in_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
 
   int i;
-  for (i = 0; rules[i][0] != 0; ++i)
+  for (i = 0; ct_entries[i][0] != 0; ++i)
     {
-      if (rules[i][0] != mark) continue;
-      rules[i][3] += in_bytes;
-      rules[i][4] += out_bytes;
+      if (ct_entries[i][0] != mark) continue;
+      ct_entries[i][3] += in_bytes;
+      ct_entries[i][4] += out_bytes;
       return NFCT_CB_CONTINUE;
     }
   printf ("Error: there was a request to destroy nfmark which is not in the list \n");
@@ -254,14 +257,14 @@ int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_co
 typedef struct
 {
   long type;
-  int rulesexp[RULES_EXPORT][3];
+  int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3];
 } mymsg;
 
 
-//dump all ct rules every second and send them to frontend
-void * trafficthread( void *ptr)
+//dump all conntrack entries every second and send them to frontend
+void * conntrackexporthread( void *ptr)
 {
-  u_int8_t family = AF_INET; //used by conntrack
+  u_int8_t family = AF_INET;
   struct nfct_handle *traffic_handle;
   if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
@@ -275,21 +278,22 @@ void * trafficthread( void *ptr)
     {
       //zero out from previous iteration
       int i;
-      for (i=0; i<RULES_EXPORT; ++i)
+      for (i=0; i<CT_ENTRIES_EXPORT_MAX; ++i)
         {
-          rules[i][1] = rules[i][2] = rulesexp[i][0] = rulesexp[i][1] = rulesexp[i][2] = 0;
+	  ct_entries[i][1] = ct_entries[i][2] = ct_entries_export[i][0] = ct_entries_export[i][1] = ct_entries_export[i][2] = 0;
         }
       if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1)
         {
           perror("query-DELETE");
         }
-      //printf("done in query, here's what we got\n");
-      for (i = 0; rules[i][0] != 0; ++i)
+//we get here only when dumping operation finishes and traffic_callback has created a new array of
+//conntrack entries
+      for (i = 0; ct_entries[i][0] != 0; ++i)
         {
-          if (rules[i][5] > rules[i][1]+rules[i][3]) ++rules[i][7];
-          if (rules[i][6] > rules[i][2]+rules[i][4]) ++rules[i][8];
-          rules[i][5] = rules[i][1]+rules[i][3];
-          rules[i][6] = rules[i][2]+rules[i][4];
+	  if (ct_entries[i][5] > ct_entries[i][1]+ct_entries[i][3]) ++ct_entries[i][7];
+	  if (ct_entries[i][6] > ct_entries[i][2]+ct_entries[i][4]) ++ct_entries[i][8];
+	  ct_entries[i][5] = ct_entries[i][1]+ct_entries[i][3];
+	  ct_entries[i][6] = ct_entries[i][2]+ct_entries[i][4];
 
           // printf ("%d >%d <%d >%d <%d >%d <%d errin:%d errout:%d \n", rules[i][0],
           //    rules[i][1], rules[i][2], rules[i][3], rules[i][4], rules[i][5], rules[i][6],
@@ -298,56 +302,57 @@ void * trafficthread( void *ptr)
 
       //rearrange array for export
       int j;
-      for (i=0; rules[i][0] != 0; ++i)
+      for (i=0; ct_entries[i][0] != 0; ++i)
         {
-          for (j=0; rulesexp[j][0] !=0; ++j)
+	  for (j=0; ct_entries_export[j][0] !=0; ++j)
             {
-              if (rules[i][0] >= NFMARKIN_BASE)
+	      if (ct_entries[i][0] >= NFMARKIN_BASE)
                 {
-                  int nfd = NFMARK_DELTA;
-                  int delta = rules[i][0] - NFMARK_DELTA;
-                  if (delta == rulesexp[j][0])
+		  int delta = ct_entries[i][0] - NFMARK_DELTA;
+		  if (delta == ct_entries_export[j][0])
                     {
-                      rulesexp[j][1] += rules[i][6];
-                      rulesexp[j][2] += rules[i][5];
+		      ct_entries_export[j][1] += ct_entries[i][6];
+		      ct_entries_export[j][2] += ct_entries[i][5];
                       goto next;
                     }
                 }
-              if (rules[i][0] == rulesexp[j][0])
+	      if (ct_entries[i][0] == ct_entries_export[j][0])
                 {
-                  rulesexp[j][1] += rules[i][5];
-                  rulesexp[j][2] += rules[i][6];
+		  ct_entries_export[j][1] += ct_entries[i][5];
+		  ct_entries_export[j][2] += ct_entries[i][6];
                   goto next;
                 }
             }
-          if (rules[i][0] >= NFMARKIN_BASE)
+	  if (ct_entries[i][0] >= NFMARKIN_BASE)
             {
-              rulesexp[j][0] = rules[i][0] - NFMARK_DELTA;
-              rulesexp[j][1] = rules[i][6];
-              rulesexp[j][2] = rules[i][5];
+	      ct_entries_export[j][0] = ct_entries[i][0] - NFMARK_DELTA;
+	      ct_entries_export[j][1] = ct_entries[i][6];
+	      ct_entries_export[j][2] = ct_entries[i][5];
             }
           else
             {
-              rulesexp[j][0] = rules[i][0];
-              rulesexp[j][1] = rules[i][5];
-              rulesexp[j][2] = rules[i][6];
+	      ct_entries_export[j][0] = ct_entries[i][0];
+	      ct_entries_export[j][1] = ct_entries[i][5];
+	      ct_entries_export[j][2] = ct_entries[i][6];
             }
 next:
-          ;
         }
-      for (i = 0; rulesexp[i][0] != 0; ++i)
+#ifdef DEBUG
+      for (i = 0; ct_entries_export[i][0] != 0; ++i)
         {
           //printf("rulesexp: %d: >%d <%d \n", rulesexp[i][0], rulesexp[i][1], rulesexp[i][2]);
         }
+#endif
 
       mymsg msg;
       msg.type = 1;
-      memcpy (msg.rulesexp, rulesexp, sizeof(msg.rulesexp));
+      memcpy (msg.ct_entries_export, ct_entries_export, sizeof(msg.ct_entries_export));
 
       msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
+      //don't send if there is already some data down the queue that frontend hasn't yet received
       if (msgqid_d2ftraffic->msg_qnum == 0)
         {
-          if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.rulesexp ), IPC_NOWAIT ) == -1 )
+	  if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.ct_entries_export ), IPC_NOWAIT ) == -1 )
             {
               M_PRINTF (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
             }
@@ -3978,7 +3983,7 @@ int main ( int argc, char *argv[] )
 
   if (pthread_create ( &refresh_thread, NULL, refreshthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &traffic_thread, NULL, trafficthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &conntrack_export_thread, NULL, conntrackexporthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 

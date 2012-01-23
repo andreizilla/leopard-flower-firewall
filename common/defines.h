@@ -21,11 +21,11 @@
 #define DISPLAYNAME 32
 #define NFMARKOUT_BASE 11331 //netfilter marks to be put on packets start with this base number (to avoid possible collision with other programs that use netfilter's marks
 #define NFMARKIN_BASE  21331
-#define NFMARK_DELTA 10000
-//#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE
+#define NFMARK_DELTA 10000 //fixed number NFMARKIN_BASE - NFMARKOUT_BASE. N.B. use a number here, see below
+//#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE //This doesn't work
 #define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
-#define RULES_EXPORT 500
+#define CT_ENTRIES_EXPORT_MAX 500
 #define REFRESH_INTERVAL 1
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
