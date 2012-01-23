@@ -74,7 +74,7 @@ extern void* run_tests(void *);
 int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 int ( *m_printf ) ( int loglevel, char *logstring );
 
-//mutex to access dlist
+//mutex to protect dlist AND nfmark_count
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to avoid fe_ask_* to send data simultaneously
 pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -1046,17 +1046,17 @@ dump:
     }
 }
 
-//scan procfs and remove/mark inactive from/in dlist those apps that are no longer running
+//scan procfs and remove/mark inactive in dlist those apps that are no longer running
 void* refreshthread ( void* ptr )
 {
-  dlist *rule, *prev, *temp2;
+  dlist *rule, *prev, *temp_rule;
   ptr = 0;     //to prevent gcc warnings of unused variable
   char proc_pid_exe[32] = "/proc/";
   char exe_path[PATHSIZE];
 
   while ( 1 )
     {
-      sleep ( REFRESH_INTERVAL );
+      loop:
       pthread_mutex_lock ( &dlist_mutex );
       rule = first_rule;
       while ( rule->next != NULL )
@@ -1077,40 +1077,43 @@ void* refreshthread ( void* ptr )
 	    {
               M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
-              //don't delete *ALWAYS rule if it's the only rule for this PATH - just toggle the is_active flag,
-              //otherwise if there are other rules for this PATH, then remove this rule
+	      //Only delete *ALWAYS rule if there is at least one more rule in dlist with the same PATH
+	      //If the rule is the only one in dlist with such PATH, simply toggle its_active flag
 	      if ( !strcmp ( rule->perms, ALLOW_ALWAYS ) || !strcmp ( rule->perms, DENY_ALWAYS ) )
                 {
-		  temp2 = first_rule->next;
-                  while ( temp2 != NULL ) //scan the whole dlist again
+		  temp_rule = first_rule->next;
+		  while ( temp_rule != NULL ) //scan the whole dlist again
                     {
-		      if ( !strcmp ( temp2->path, rule->path ) && ( temp2 != rule ) ) //to find a rule with the same PATH but make sure we don't find our own rule :)
+		      if ( !strcmp ( temp_rule->path, rule->path ) && ( temp_rule != rule ) ) //Make sure we don't find our own rule :)
                         {
-                          goto still_delete;     //and delete it
-                        }
-                      temp2=temp2->next;
-                      continue;
-		    }i
-                  //we get here only if there was no PATH match
+			  // TODO dlist_del is redundant we could keep a pointer to self in each dlist element and simply free(temp->self)
+			  // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
+			  char path[PATHSIZE];
+			  char pid[PIDLENGTH];
+			  strcpy (path, rule->path);
+			  strcpy (pid, rule->pid);
+			  pthread_mutex_unlock ( &dlist_mutex );
+			  dlist_del ( path, pid );
+			  goto loop;
+			}
+		      temp_rule=temp_rule->next;
+		      continue;
+		    }
+		  //no PATH match
 		  strcpy ( rule->pid, "0" );
 		  rule->is_active = FALSE;
-                  //assign new nfmarks to be used by the next instance of app
+		  //nfmarks will be used by the next instance of app
 		  rule->nfmark_in = NFMARKIN_BASE + nfmark_count;
 		  rule->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
                   nfmark_count++;
                   fe_list();
-                  break;
+		  continue;
 		}
-	     }
-still_delete:
-              // TODO dlist_del is redundant we could keep a pointer to self in each dlist element and simply free(temp->self)
-              // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
-              pthread_mutex_unlock ( &dlist_mutex );
-	      dlist_del ( rule->path, rule->pid );
-              break;
-            }
+	    }
+	}
       pthread_mutex_unlock ( &dlist_mutex );
-        }
+      sleep ( REFRESH_INTERVAL );
+    }
 }
 
 //Read RULESFILE into dlist
