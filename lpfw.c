@@ -3980,14 +3980,15 @@ int main ( int argc, char *argv[] )
   rules_load();
   open_proc_net_files();
 
-  pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
-  pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
-  pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL);
-  pthread_create ( &nfqout_udp_thread, NULL, nfqoutrestthread, NULL);
-  pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
-  pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
-  pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
-  pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
+  if (pthread_create ( &refresh_thread, NULL, refreshthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &traffic_thread, NULL, trafficthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+
+  if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfqout_rest_thread, NULL, nfqoutrestthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 
 #ifdef DEBUG
   pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
