@@ -126,7 +126,7 @@ int test2 ()
     char path[PATHSIZE];
     char pid[PIDLENGTH];
     char perms[PERMSLENGTH];
-    if (socket_find_in_proc_out(&socket, path, pid, perms) != GOTO_NEXT_STEP)
+    if (socket_find_in_proc(&socket, path, pid, perms) != GOTO_NEXT_STEP)
     {
 	return -1;
     }
