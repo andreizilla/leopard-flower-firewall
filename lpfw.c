@@ -100,7 +100,8 @@ int fe_active_flag = 0;
 int fe_was_busy_in, fe_was_busy_out;
 
 //netfilter mark to be put on an ALLOWed packet
-int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete_in, nfmark_to_delete_out;
+int nfmark_to_set_out, nfmark_to_set_in;
+int nfmark_to_delete_in, nfmark_to_delete_out;
 //numbers of rules to which current process belongs
 int rule_ordinal_out, rule_ordinal_in;
 
@@ -165,11 +166,9 @@ void * readstatsthread( void *ptr)
 
 }
 
-
-
-int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+//Both in and out conntrack entrien get deleted when process exits
+int conntrack_delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  //while(1){printf("DELMARK");}
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
   if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out)
     {
@@ -377,8 +376,8 @@ void * conntrackdestroythread( void *ptr)
   res = nfct_catch(traffic_handle); //the thread should block here
 }
 
-
-void* ct_delthread ( void* ptr )
+//Register callback to delete nfmark and wait on condition to be triggered.
+void* conntrack_delete_thread ( void* ptr )
 {
   u_int8_t family = AF_INET; //used by conntrack
   struct nfct_handle *deletemark_handle;
@@ -386,7 +385,7 @@ void* ct_delthread ( void* ptr )
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, delete_mark, NULL) == -1))
+  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, conntrack_delete_mark, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -3986,7 +3985,7 @@ int main ( int argc, char *argv[] )
   if (pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &conntrack_export_thread, NULL, conntrackexporthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &conntrackdestroy_thread, NULL, conntrackdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_del_thread, NULL, conntrack_delete_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
   if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
