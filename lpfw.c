@@ -595,14 +595,6 @@ unsigned long long starttimeGet ( int mypid )
   strcat ( path, pidstring );
   strcat ( path, "/stat" );
 
-  int pid;
-  char comm[1000];
-  char state;
-  int ppid, pgrd, session, tty_nr, tpgid;
-  unsigned flags;
-  unsigned long minflt, majflt, cmajflt, utime, stime;
-  long int cutime, cstime, priority, nice;
-  int unknown1, unknown2, unknown3;
   unsigned long long starttime;
   FILE *stream;
 
@@ -612,9 +604,8 @@ unsigned long long starttimeGet ( int mypid )
       return 1;
     };
 
-  fscanf ( stream, "%d %s %c %d %d %d %d %d %u %lu %lu %lu %lu %lu %ld %ld %ld %ld %d %d %d %llu",
-           &pid, comm, &state, &ppid, &pgrd, &session, &tty_nr, &tpgid, &flags, &minflt, &majflt, &cmajflt, &utime,
-           &stime, &cutime, &cstime, &priority, &nice, &unknown1, &unknown2, &unknown3, &starttime );
+  fscanf ( stream, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %llu",
+	   &starttime );
 
   fclose ( stream );
   return starttime;
