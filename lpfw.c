@@ -85,7 +85,7 @@ pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread;
-pthread_t conntrack_export_thread, trafficdestroy_thread, read_stats_thread, ct_del_thread;
+pthread_t conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
@@ -229,8 +229,8 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
   return NFCT_CB_CONTINUE;
 }
 
-//process rules that trafficthread dumps every second to extract traffic statistics
-int traffic_destroyfilter_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+//When conntrack deletes an entry, we get called. Bump up the in/out bytes statistics
+int conntrack_destroy_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   int mark;
   ulong in_bytes, out_bytes;
@@ -261,7 +261,7 @@ typedef struct
 } mymsg;
 
 
-//dump all conntrack entries every second and send them to frontend
+//dump all conntrack entries every second, extract the traffic statistics and send it to frontend
 void * conntrackexporthread( void *ptr)
 {
   u_int8_t family = AF_INET;
@@ -361,14 +361,15 @@ next:
     }
 }
 
-void * trafficdestroythread( void *ptr)
+//Register callback that gets triggered when conntrack deletes entry. Then listen forever.
+void * conntrackdestroythread( void *ptr)
 {
   struct nfct_handle *traffic_handle;
   if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL)
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_destroyfilter_callback, NULL) == -1))
+  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, conntrack_destroy_callback, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -788,7 +789,7 @@ void dlist_del ( char *path, char *pid )
           //remove the item
           temp->prev->next = temp->next;
           if ( temp->next != NULL )
-            temp->next->prev = temp->prev;
+	    {temp->next->prev = temp->prev;}
           nfmark_to_delete_in = temp->nfmark_in;
           nfmark_to_delete_out = temp->nfmark_out;
           was_active = temp->is_active;
@@ -3984,7 +3985,7 @@ int main ( int argc, char *argv[] )
   if (pthread_create ( &refresh_thread, NULL, refreshthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &conntrack_export_thread, NULL, conntrackexporthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &conntrackdestroy_thread, NULL, conntrackdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
   if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
