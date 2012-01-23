@@ -10,8 +10,9 @@
 #define PATHSIZE 1024 //length of IPC message. It is usually the path to the program that is sent in IPC messages.
 #define PIDLENGTH 16
 #define PERMSLENGTH 16
-#define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567] - max length 16 chars
-#define NFQNUM_OUTPUT 11220 //arbitrary number used for iptables rule
+#define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567]
+#define NFQNUM_OUTPUT_TCP 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUTPUT_UDP 11222 //arbitrary number used for iptables rule
 #define NFQNUM_INPUT 11221
 #define MAX_LINE_LENGTH 1024 //max lc ength of a line in configfile/rulesfile
 #define DIGEST_SIZE 64
@@ -28,6 +29,11 @@
 #define REFRESH_INTERVAL 2
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
+#define MAGIC_NO -1
+#define DIRECTION_IN 1
+#define DIRECTION_OUT 2
+#define PROTO_TCP 3
+#define PROTO_UDP 4
 
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"

@@ -34,7 +34,7 @@
 gid_t lpfwuser_gid;
 
 //should be available globally to call nfq_close from sigterm handler
-struct nfq_handle *globalh_out, *globalh_in;
+struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_in;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
@@ -72,7 +72,7 @@ extern void* run_tests(void *);
 
 //Forward declarations to make code parser happy
 int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
-int ( *m_printf ) ( int loglevel, char *format, ... );
+int ( *m_printf ) ( int loglevel, char *logstring );
 
 //mutex to access dlist
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -81,15 +81,15 @@ pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to lock fe_active_flag
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, nfqinput_thread, cachebuild_thread;
-pthread_t traffic_thread, trafficdestroy_thread;
+pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread;
+pthread_t traffic_thread, trafficdestroy_thread, read_stats_thread, ct_del_thread;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
 #endif
-pthread_t ct_del_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
@@ -101,9 +101,6 @@ int fe_was_busy_in, fe_was_busy_out;
 
 //netfilter mark to be put on an ALLOWed packet
 int nfmark_to_set_out, nfmark_to_set_in, nfmark_to_delete_in, nfmark_to_delete_out;
-// path of pid of rule being processed to which the packet belongs
-char pid_out[PIDLENGTH], pid_in[PIDLENGTH];
-char path_out[PATHSIZE], path_in[PATHSIZE];
 //numbers of rules to which current process belongs
 int rule_ordinal_out, rule_ordinal_in;
 
@@ -111,13 +108,15 @@ int rule_ordinal_out, rule_ordinal_in;
 int out_packet_size, in_packet_size;
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
+char *tcp_smallbuf, *udp_smallbuf;
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
-int procnetrawfd;
+int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
+
 struct nf_conntrack *ct_out, *ct_in;
 struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
-int nfqfd_input;
+int nfqfd_input, nfqfd_udp;
 
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -129,15 +128,53 @@ pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 //netfilter mark number for the packet (to be added to NF_MARK_BASE)
 int nfmark_count = 0;
 
+int tcp_stats, udp_stats;
+int tcp_table[MEMBUF_SIZE], udp_table[MEMBUF_SIZE], tcp6_table[MEMBUF_SIZE], udp6_table[MEMBUF_SIZE];
+
+char logstring[PATHSIZE];
+
+
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex); \
+
+
+
+
+void * readstatsthread( void *ptr)
+{
+static int old_tcp_stats;
+static int old_udp_stats;
+
+old_tcp_stats = 0;
+old_udp_stats = 0;
+int new_tcp_stats, new_udp_stats;
+
+while(1)
+{
+    sleep(1);
+    new_tcp_stats = tcp_stats - old_tcp_stats;
+    new_udp_stats = udp_stats - old_udp_stats;
+    printf (" %d %d \n", new_tcp_stats, new_udp_stats);
+    old_tcp_stats = tcp_stats;
+    old_udp_stats = udp_stats;
+}
+
+}
+
+
+
 int delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data){
     //while(1){printf("DELMARK");}
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
   if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out){
       if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1){
-	m_printf ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return NFCT_CB_CONTINUE;
       }
-      m_printf ( MLOG_DEBUG, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      M_PRINTF ( MLOG_DEBUG, "deleted entry %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return NFCT_CB_CONTINUE;
   }
   return NFCT_CB_CONTINUE;
@@ -298,7 +335,7 @@ void * trafficthread( void *ptr)
 	{
 	    if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.rulesexp ), IPC_NOWAIT ) == -1 )
 	    {
-		m_printf (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
 	    }
 	}
 	sleep(1);
@@ -361,9 +398,14 @@ void  initialize_conntrack(){
 
 void child_close_nfqueue()
 {
-    nfq_close( globalh_out )?
-    m_printf ( MLOG_INFO,"error in nfq_close\n" ):
-    m_printf ( MLOG_DEBUG, "Done closing nfqueue\n" );
+    if (nfq_close( globalh_out_tcp )){
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );}
+    else
+        M_PRINTF ( MLOG_DEBUG, "Done closing nfqueue\n" );
+    if (nfq_close( globalh_out_udp )){
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );}
+    else
+        M_PRINTF ( MLOG_DEBUG, "Done closing nfqueue\n" );
     return;
 }
 
@@ -388,138 +430,91 @@ void die()
     exit ( 0 );
 }
 
-int m_printf_stdout ( int loglevel, char * format, ... )
+int  m_printf_stdout ( int loglevel, char * logstring )
 {
-    va_list args;
     switch ( loglevel )
     {
     case MLOG_INFO:
         // check if INFO logging enabled
         if ( !* ( log_info->ival ) ) return 0;
-        va_start ( args, format );
-        vprintf ( format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        printf ( "%s", logstring );
         return 0;
     case MLOG_TRAFFIC:
         // check if  logging enabled
         if ( !* ( log_traffic->ival ) ) return 0;
-        va_start ( args, format );
-        vprintf ( format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        printf ( "%s", logstring );
         return 0;
     case MLOG_DEBUG:
         // check if  logging enabled
         if ( !* ( log_debug->ival ) ) return 0;
-        va_start ( args, format );
-        vprintf ( format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        printf ( "%s", logstring );
         return 0;
     case MLOG_DEBUG2:
 #ifdef DEBUG2
 	// check if  logging enabled
-	va_start ( args, format );
-	vprintf ( format, args );
-	va_end (args);
-	//fsync(filelogfd);
+        if ( !* ( log_debug->ival ) ) return 0;
+        printf ( "%s", logstring );
 #endif
 	return 0;
     case MLOG_DEBUG3:
 #ifdef DEBUG3
 	// check if  logging enabled
-	va_start ( args, format );
-	vprintf ( format, args );
-	va_end (args);
-	//fsync(filelogfd);
+        if ( !* ( log_debug->ival ) ) return 0;
+        printf ( "%s", logstring );
 #endif
 	return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
-        va_start ( args, format );
         printf ( "ALERT: " );
-        vprintf ( format, args );
-	va_end (args);
+        printf ( "%s", logstring );
         return 0;
     }
 }
 
 //technically vfprintf followed by fsync should be enough, but for some reason on my system it can take more than 1 minute before data gets actually written to disk. So until the mystery of such a huge delay is solved, we use write() so data gets written to dist immediately
-int m_printf_file ( int loglevel, char * format, ... )
+int m_printf_file ( int loglevel, char * logstring )
 {
-    va_list args;
-    char logstring[PATHSIZE*2]; //shaould be enough for the longest line in log
     switch ( loglevel )
     {
     case MLOG_INFO:
         // check if INFO logging enabled
         if ( !* ( log_info->ival ) ) return 0;
-        va_start ( args, format );
-        vsprintf ( logstring, format, args );
-	va_end (args);
         write ( fileno ( fileloginfo_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_TRAFFIC:
         if ( !* ( log_traffic->ival ) ) return 0;
-        va_start ( args, format );
-        vsprintf ( logstring, format, args );
-	va_end (args);
         write ( fileno ( filelogtraffic_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_DEBUG:
         if ( !* ( log_debug->ival ) ) return 0;
-        va_start ( args, format );
-        vsprintf ( logstring, format, args );
-	va_end (args);
         write ( fileno ( filelogdebug_stream ), logstring, strlen ( logstring ) );
         return 0;
     case MLOG_ALERT: //Alerts get logged unconditionally to all log channels
-        va_start ( args, format );
         write ( fileno ( filelogdebug_stream ), "ALERT: ", strlen ( logstring ) );
-	va_end (args);
-
-//         vfprintf ( fileloginfofd, format, args );
-//         fprintf ( filelogtrafficfd, "ALERT: " );
-//         vfprintf ( filelogtrafficfd, format, args );
-//         fprintf ( filelogdebugfd, "ALERT: " );
-//         vfprintf ( filelogdebugfd, format, args );
         return 0;
     }
 }
 
 #ifndef WITHOUT_SYSLOG
-int m_printf_syslog ( int loglevel, char *format, ... )
+int m_printf_syslog ( int loglevel, char * logstring)
 {
-    va_list args;
     switch ( loglevel )
     {
     case MLOG_INFO:
         // check if INFO logging enabled
         if ( !* ( log_info->ival ) ) return 0;
-        va_start ( args, format );
-        vsyslog ( LOG_INFO, format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        syslog ( LOG_INFO, logstring );
         return 0;
     case MLOG_TRAFFIC:
         if ( !* ( log_traffic->ival ) ) return 0;
-        va_start ( args, format );
-        vsyslog ( LOG_INFO, format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        syslog ( LOG_INFO, logstring );
         return 0;
     case MLOG_DEBUG:
         if ( !* ( log_debug->ival ) ) return 0;
-        va_start ( args, format );
-        vsyslog ( LOG_INFO, format, args );
-	va_end (args);
-        //fsync(filelogfd);
+        syslog ( LOG_INFO, logstring );
         return 0;
     case MLOG_ALERT: //Alerts get logget unconditionally to all log channels
-        va_start ( args, format );
         syslog ( LOG_INFO, "ALERT: " );
-        vsyslog ( LOG_INFO, format, args );
-	va_end (args);
+        syslog ( LOG_INFO, logstring );
         return 0;
     }
 }
@@ -546,7 +541,7 @@ unsigned long long starttimeGet ( int mypid )
 
     if ( ( stream = fopen ( path, "r" ) ) == 0 )
     {
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return 1;
     };
 
@@ -573,7 +568,7 @@ dlist * dlist_copy()
             //grow copy of dlist
             if ( ( copy_temp->next = malloc ( sizeof ( dlist ) ) ) == NULL )
             {
-                m_printf ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 die();
             }
             copy_temp->next->prev = copy_temp;
@@ -632,7 +627,7 @@ int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, uns
     //last element's .next should point now to our newly created one
     if ( ( temp->next = malloc ( sizeof ( dlist ) ) ) == NULL )
     {
-        m_printf ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
         die();
     }
     // new element's prev field should point to the former last element...
@@ -677,7 +672,7 @@ int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, uns
 	strcat(temp->pidfdpath, temp->pid);
 	strcat(temp->pidfdpath, "/fd/");
 	if ((temp->dirstream = opendir ( temp->pidfdpath )) == NULL){
-	    m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+            M_PRINTF ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	    exit(0);
 	}
     }
@@ -742,7 +737,7 @@ void dlist_del ( char *path, char *pid )
         }
         temp = temp->next;
     }
-    m_printf ( MLOG_INFO, "%s with PID %s was not found in dlist\n", path, pid );
+    M_PRINTF ( MLOG_INFO, "%s with PID %s was not found in dlist\n", path, pid );
     pthread_mutex_unlock ( &dlist_mutex );
 }
 
@@ -867,6 +862,21 @@ void* cachebuildthread ( void *pid ){
     }
 }
 
+void* nfqoutudpthread ( void *ptr )
+{
+    ptr = 0;
+    //endless loop of receiving packets and calling a handler on each packet
+    int rv;
+    char buf[4096] __attribute__ ( ( aligned ) );
+    while ( ( rv = recv ( nfqfd_udp, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
+    {
+        nfq_handle_packet ( globalh_out_udp, buf, rv );
+    }
+
+
+}
+
+
 
 void* nfqinputthread ( void *ptr )
 {
@@ -958,7 +968,7 @@ void* refreshthread ( void* ptr )
 	    //readlink fails if PID isn't running
 	    if ( readlink ( mypath, buf, PATHSIZE ) == -1 )
 	    {
-		m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		goto delete;
 	    }
 	    //else PID is running. Make sure the PID belongs to the same path.
@@ -1024,16 +1034,16 @@ void rules_load()
 
     if ( stat ( rules_file->filename[0], &m_stat ) == -1 )
     {
-        m_printf ( MLOG_INFO, "CONFIG doesnt exist..creating" );
+        M_PRINTF ( MLOG_INFO, "CONFIG doesnt exist..creating" );
         if ( ( stream = fopen ( rules_file->filename[0], "w+" ) ) == NULL )
         {
-	    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+            M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
             return;
         }
     }
     if ( ( stream = fopen ( rules_file->filename[0], "r" ) ) == NULL )
     {
-        m_printf ( MLOG_INFO, "fopen RULESFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen RULESFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return;
     }
 
@@ -1071,7 +1081,7 @@ void rules_load()
 	dlist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
     if ( fclose ( stream ) == EOF )
-        m_printf ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    {M_PRINTF ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 }
 
 //Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions
@@ -1088,7 +1098,7 @@ void rulesfileWrite()
     //rewrite/create the file regardless of whether it already exists
     if ( ( fd = fopen ( rules_file->filename[0], "w" ) ) == NULL )
     {
-        m_printf ( MLOG_INFO, "open: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "open: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return;
     }
 
@@ -1120,13 +1130,13 @@ loop:
 	    inkernel:
 	    if (!strcmp(temp->path, KERNEL_PROCESS)){
 		if ( fputs ( temp->path, fd ) == EOF )
-		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                {M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 		fputc ( '\n', fd );
 		if ( fputs ( temp->pid, fd ) == EOF )
-		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                {M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 		fputc ( '\n', fd );
 		if ( fputs ( temp->perms, fd ) == EOF )
-		    m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                {M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 		fputc ( '\n', fd );
 		fputc ( '\n', fd );
 		fsync ( fileno ( fd ) );
@@ -1135,7 +1145,7 @@ loop:
 	    }
 
             if ( fputs ( temp->path, fd ) == EOF )
-                m_printf ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+            {M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
             fputc ( '\n', fd );
             fputs ( temp->perms, fd );
             fputc ( '\n', fd );
@@ -1182,13 +1192,13 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 struct stat exestat;
 		if ( stat ( path, &exestat ) == -1 )
                 {
-		    m_printf ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		    pthread_mutex_unlock ( &dlist_mutex );
 		    return DROP;
                 }
                 if ( temp->exesize != exestat.st_size )
                 {
-		    m_printf ( MLOG_INFO, "Exe sizes dont match.  %s in %s, %d\n", path, __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "Exe sizes dont match.  %s in %s, %d\n", path, __FILE__, __LINE__ );
                     pthread_mutex_unlock ( &dlist_mutex );
                     return EXESIZE_DONT_MATCH;
                 }
@@ -1198,7 +1208,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 FILE *stream;
 		if ((stream = fopen ( path, "r" )) == NULL)
 		{
-		    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		    pthread_mutex_unlock ( &dlist_mutex );
 		    return DROP;
 		}
@@ -1206,7 +1216,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 fclose ( stream );
                 if ( memcmp ( temp->sha, sha, DIGEST_SIZE ) )
                 {
-                    m_printf ( MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", temp->path, __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", temp->path, __FILE__, __LINE__ );
                     pthread_mutex_unlock ( &dlist_mutex );
                     return SHA_DONT_MATCH;
                 }
@@ -1218,7 +1228,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 		strcat(temp->pidfdpath, temp->pid);
 		strcat(temp->pidfdpath, "/fd/");
 		if ((temp->dirstream = opendir ( temp->pidfdpath )) == NULL){
-		    m_printf ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		    exit(0);
 		}
 
@@ -1232,7 +1242,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 }
                 else
                 {
-                    m_printf ( MLOG_INFO, "should never get here. Please report %s,%d\n", __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "should never get here. Please report %s,%d\n", __FILE__, __LINE__ );
                 }
                 pthread_mutex_unlock ( &dlist_mutex );
                 //notify fe that the rule has an active PID now
@@ -1265,7 +1275,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 
                 if ( ( stream = fopen ( proc_stat_path, "r" ) ) == 0 )
                 {
-                    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                     return PROCFS_ERROR;
                 };
 
@@ -1341,7 +1351,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                             sha512_stream(stream2, (void *) sha2);
                             fclose(stream2);
                             if (strcmp(tempsha, sha2)){
-                                m_printf(MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", path, __FILE__, __LINE__);
+                                M_PRINTF(MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", path, __FILE__, __LINE__);
                                 return SHA_DONT_MATCH;
                             }
                 */
@@ -1364,14 +1374,14 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 ssize = strlen ( exepathbuf );
                 if ( !strcmp ( &exepathbuf[ssize-10], " (deleted)" ) )
                 {
-                    m_printf ( MLOG_ALERT, "Red alert!!!! Executable has been changed...  %s,%d\n",exepath, __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_ALERT, "Red alert!!!! Executable has been changed...  %s, %s, %d\n",exepath, __FILE__, __LINE__ );
                     return EXE_HAS_BEEN_CHANGED;
 
                 }
 
                 //If exe hasnt been modified/deleted than taking its size is redundant, just use parent's size
 
-                m_printf ( MLOG_DEBUG, "Adding to dlist: %s, %s, %s\n", path, pid, tempperms );
+                M_PRINTF ( MLOG_DEBUG, "Adding to dlist: %s, %s, %s\n", path, pid, tempperms );
 
                 //See if we need to query user or silently add to dlist
                 pthread_mutex_lock ( &dlist_mutex );
@@ -1419,7 +1429,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set)
+int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
     char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
     char path[32];
@@ -1454,7 +1464,7 @@ int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set)
         if ( ! ( m_dir = opendir ( path ) ) )
         {
             //This condition can happen if the PID is still in the dlist, the process exited and refresh_thread hasn't yet purged it out of the dlist
-            m_printf ( MLOG_DEBUG, "opendir for %s %s: %s,%s,%d\n", temp->path, path, strerror ( errno ), __FILE__, __LINE__ );
+            M_PRINTF ( MLOG_DEBUG, "opendir for %s %s: %s,%s,%d\n", temp->path, path, strerror ( errno ), __FILE__, __LINE__ );
             temp = temp->next;
             closedir ( m_dir );
             continue;
@@ -1475,14 +1485,15 @@ int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set)
                 memset ( exepathbuf, 0, PATHSIZE );
                 readlink ( path, exepathbuf, PATHSIZE );
                 //TODO exepathbuf[readlink's retval] = 0 instead of memset
-                m_printf ( MLOG_TRAFFIC, "%s %s ", exepathbuf, temp->pid );
+                strcpy(m_path, exepathbuf);
+                strcpy (m_pid, temp->pid);
                 closedir ( m_dir );
 
                 unsigned long long stime;
                 stime = starttimeGet ( atoi ( temp->pid ) );
                 if ( temp->stime != stime )
                 {
-                    m_printf ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
                     return STIME_DONT_MATCH;
                 }
 
@@ -1550,7 +1561,7 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
 		printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
 		cap_free(cap);
 		//PID quit while scanning /proc
-		m_printf ( MLOG_INFO, "opendir(%s):%s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_INFO, "opendir(%s):%s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
                 continue;
 
             } // permission denied or some other error
@@ -1590,7 +1601,6 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
                         closedir ( proc_DIR );
                         strcpy ( m_path, exepathbuf );
                         strcpy ( m_pid, proc_dirent->d_name );
-                        m_printf ( MLOG_TRAFFIC, "%s %s ", m_path, m_pid );
                         return GOTO_NEXT_STEP;
                     }
                 }
@@ -1619,7 +1629,7 @@ int icmp_check_only_one_inode ( int *m_inodeint )
         //in case there was icmp packet but no /proc/net/raw entry - report
         if ( ( loop == 0 ) && ( readbytes == 0 ) )
         {
-            m_printf ( MLOG_INFO, "ICMP packet without /proc/net/raw entry" );
+            M_PRINTF ( MLOG_INFO, "ICMP packet without /proc/net/raw entry" );
             return ICMP_NO_ENTRY;
         }
         //if there are two lines in the file, we drop the packet
@@ -1641,7 +1651,7 @@ int icmp_check_only_one_inode ( int *m_inodeint )
         *m_inodeint = atoi ( inode );
         ++loop;
     }
-    m_printf ( MLOG_DEBUG, "(icmp)inode %d", inodeint );
+    M_PRINTF ( MLOG_DEBUG, "(icmp)inode %d", inodeint );
     return 0;
 }
 
@@ -1667,7 +1677,7 @@ int socket_check_kernel_udp(int *socket){
     if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(membuf,0, MEMBUF_SIZE);
     if ( ( mudpinfo = fopen ( UDPINFO, "r" ) ) == NULL ){
-	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return PROCFS_ERROR;
     }
     fseek(mudpinfo,0,SEEK_SET);
@@ -1698,7 +1708,7 @@ int socket_check_kernel_udp(int *socket){
 
     memset(membuf,0, MEMBUF_SIZE);
     if ( ( mudp6info = fopen ( UDP6INFO, "r" ) ) == NULL ){
-	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return PROCFS_ERROR;
     }
     fseek(mudp6info,0,SEEK_SET);
@@ -1749,7 +1759,7 @@ int socket_check_kernel_tcp(int *socket){
     if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(membuf,0, MEMBUF_SIZE);
     if ( ( mtcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
-	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return PROCFS_ERROR;
     }
     fseek(mtcpinfo,0,SEEK_SET);
@@ -1780,7 +1790,7 @@ int socket_check_kernel_tcp(int *socket){
 
     memset(membuf,0, MEMBUF_SIZE);
     if ( ( mtcp6info = fopen ( TCP6INFO, "r" ) ) == NULL ){
-	m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return PROCFS_ERROR;
     }
     fseek(mtcp6info,0,SEEK_SET);
@@ -1837,7 +1847,7 @@ int port2socket_udp ( int *portint, int *socketint )
     if (bytesread_udp = fread(udp_membuf, sizeof(char), MEMBUF_SIZE , udpinfo)){
             if (errno != 0) perror("READERORRRRRRR");
     }
-    m_printf (MLOG_DEBUG2, "udp bytes read: %d\n", bytesread_udp);
+    M_PRINTF (MLOG_DEBUG2, "udp bytes read: %d\n", bytesread_udp);
 
     memset(udp6_membuf, 0, MEMBUF_SIZE);
     fseek(udp6info,0,SEEK_SET);
@@ -1845,7 +1855,7 @@ int port2socket_udp ( int *portint, int *socketint )
     if (bytesread_udp6 = fread(udp6_membuf, sizeof(char), MEMBUF_SIZE , udp6info)){
             if (errno != 0) perror("6READERORRRRRRR");
     }
-    m_printf (MLOG_DEBUG2, "udp6 bytes read: %d\n", bytesread_udp6);
+    M_PRINTF (MLOG_DEBUG2, "udp6 bytes read: %d\n", bytesread_udp6);
 
     dont_fread:
     ;
@@ -1912,7 +1922,7 @@ int  port2socket_tcp ( int *portint, int *socketint )
     if (bytesread_tcp = fread(tcp_membuf, sizeof(char), MEMBUF_SIZE , tcpinfo)){
 	    if (errno != 0) perror("fread tcpinfo");
     }
-    m_printf (MLOG_DEBUG2, "tcp bytes read: %d\n", bytesread_tcp);
+    M_PRINTF (MLOG_DEBUG2, "tcp bytes read: %d\n", bytesread_tcp);
 
     memset(tcp6_membuf, 0, MEMBUF_SIZE);
     fseek(tcp6info,0,SEEK_SET);
@@ -1920,7 +1930,7 @@ int  port2socket_tcp ( int *portint, int *socketint )
     if (bytesread_tcp6 = fread(tcp6_membuf, sizeof(char), MEMBUF_SIZE , tcp6info)){
 	    if (errno != 0) perror("fread tcp6info");
     }
-    m_printf (MLOG_DEBUG2, "tcp6 bytes read: %d\n", bytesread_tcp6);
+    M_PRINTF (MLOG_DEBUG2, "tcp6 bytes read: %d\n", bytesread_tcp6);
 
     dont_fread:
     ;
@@ -1958,18 +1968,14 @@ int  port2socket_tcp ( int *portint, int *socketint )
 }
 
 //Handler for TCP packets for INPUT NFQUEUE
-int packet_handle_tcp_in ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+int packet_handle_tcp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
-	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+    if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP){
+        M_PRINTF (MLOG_DEBUG2, "(cache)");
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_tcp(&socketint);
@@ -1983,21 +1989,17 @@ out:
 }
 
 //Handler for TCP packets for OUTPUT NFQUEUE
-int packet_handle_tcp_out ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+int packet_handle_tcp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ((retval = parsecache_out(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
-	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+    if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP){
+        M_PRINTF (MLOG_DEBUG2, "(cache)");
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
-    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    retval = socket_find_in_proc ( &socket, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
-	retval = socket_check_kernel_tcp(&socketint);
+        retval = socket_check_kernel_tcp(&socket);
 	goto out;
     }
     else if (retval != GOTO_NEXT_STEP) goto out;
@@ -2008,19 +2010,15 @@ out:
 }
 
 //Handler for UDP packets
-int packet_handle_udp_in ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
-    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
-	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+    if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP){
+        M_PRINTF (MLOG_DEBUG2, "(cache)");
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_udp(&socketint);
@@ -2036,22 +2034,18 @@ out:
 }
 
 //Handler for UDP packets
-int packet_handle_udp_out ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
-    if ((retval = parsecache_out(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
-	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
+    if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP){
+        M_PRINTF (MLOG_DEBUG2, "(cache)");
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
-    retval = socket_find_in_proc ( &socketint, path, pid, stime );
+    if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    retval = socket_find_in_proc ( &socket, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
-	retval = socket_check_kernel_udp(&socketint);
+        retval = socket_check_kernel_udp(&socket);
 	goto out;
     }
     else if (retval != GOTO_NEXT_STEP) goto out;
@@ -2082,12 +2076,189 @@ void increase_allowed_traffic_out(int out_packet_size)
 }
 */
 
+int is_tcp_port_in_table (int port)
+{
+    int i = 0;
+
+    while (tcp_table[i*2] != MAGIC_NO)
+    {
+        if (i >= (MEMBUF_SIZE / (sizeof(int)*2)) - 1) break;
+        if (tcp_table[i*2] != port)
+        {
+            i++;
+            continue;
+        }
+        else
+        {
+            int retval;
+            retval = tcp_table[i*2+1];
+            return retval;
+        }
+    }
+    //it wasn't found reinject it into the NFQUEUE again
+    return -1;
+
+    i = 0;
+    while (tcp6_table[i*2] != MAGIC_NO)
+    {
+        if (i >= (MEMBUF_SIZE / (sizeof(int)*2)) - 1) break;
+        if (tcp6_table[i*2] != port)
+        {
+            i++;
+            continue;
+        }
+        else
+        {
+            int retval2;
+            retval2 = tcp6_table[i*2+1];
+            return retval2;
+        }
+    }
+    //it wasn't found reinject it into the NFQUEUE again
+    return -1;
+}
+
+
+int is_udp_port_in_table (int port)
+{
+    int i = 0;
+    while (udp_table[i*2] != MAGIC_NO)
+    {
+        if (i >= (MEMBUF_SIZE / (sizeof(int)*2)) - 1) break;
+        if (udp_table[i*2] != port)
+        {
+            i++;
+            continue;
+        }
+        else
+        {
+            return udp_table[i*2+1];
+        }
+    }
+    //it wasn't found reinject it into the NFQUEUE again
+    return -1;
+
+    i = 0;
+    while (udp6_table[i*2] != MAGIC_NO)
+    {
+        if (i >= (MEMBUF_SIZE / (sizeof(int)*2)) - 1) break;
+        if (udp6_table[i*2] != port)
+        {
+            i++;
+            continue;
+        }
+        else
+        {
+
+            int retval2;
+            retval2 = udp6_table[i*2+1];
+            return retval2;
+        }
+    }
+    //it wasn't found reinject it into the NFQUEUE again
+    return -1;
+}
+
+void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstport, char *path, char *pid, int verdict)
+{
+    char m_logstring[PATHSIZE];
+    if (direction == DIRECTION_IN)
+    {
+        strcpy(m_logstring,">");
+        if (proto == PROTO_TCP) strcat(m_logstring,"TCP ");
+        else if (proto == PROTO_UDP) strcat (m_logstring, "UDP ");
+        char port[8];
+        sprintf (port,"%d",dstport);
+        strcat (m_logstring, "dst ");
+        strcat (m_logstring, port);
+        strcat (m_logstring, " src ");
+        strcat (m_logstring, ip);
+        strcat (m_logstring,":");
+        sprintf(port, "%d", srcport);
+        strcat (m_logstring, port);
+        strcat (m_logstring, " ");
+    }
+    else if (direction == DIRECTION_OUT)
+    {
+        strcpy(m_logstring,"<");
+        if (proto == PROTO_TCP) strcat(m_logstring,"TCP ");
+        else if (proto == PROTO_UDP) strcat (m_logstring, "UDP ");
+        char port[8];
+        sprintf (port,"%d",srcport);
+        strcat (m_logstring, "src ");
+        strcat (m_logstring, port);
+        strcat (m_logstring, " dst ");
+        strcat (m_logstring, ip);
+        strcat (m_logstring,":");
+        sprintf(port, "%d", dstport);
+        strcat (m_logstring, port);
+        strcat (m_logstring, " ");
+    }
+    strcat (m_logstring, path);
+    strcat (m_logstring, " ");
+    strcat (m_logstring, pid);
+    strcat (m_logstring, " ");
+
+    switch ( verdict )
+       {
+       case ACCEPT:
+       case SOCKET_FOUND_IN_DLIST_ALLOW:
+       case PATH_FOUND_IN_DLIST_ALLOW:
+       case NEW_INSTANCE_ALLOW:
+       case FORKED_CHILD_ALLOW:
+       case CACHE_TRIGGERED_ALLOW:
+       case INKERNEL_RULE_ALLOW:
+
+        strcat (m_logstring, "allow\n"); break;
+
+
+       case DROP:
+        strcat (m_logstring, "drop\n"); break;
+       case PORT_NOT_FOUND:
+           strcat (m_logstring, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); break;
+       case SENT_TO_FRONTEND:
+           strcat (m_logstring,  "(asking frontend) drop\n" ); break;
+       case SOCKET_FOUND_IN_DLIST_DENY:
+       case PATH_FOUND_IN_DLIST_DENY:
+       case NEW_INSTANCE_DENY:
+       case FORKED_CHILD_DENY:
+       case CACHE_TRIGGERED_DENY:
+       case INKERNEL_RULE_DENY:
+           strcat (m_logstring,  "deny\n" ); break;
+        case SOCKET_NONE_PIDFD:
+            strcat (m_logstring,  "(no process associated with packet) drop\n" ); break;
+       case FRONTEND_NOT_LAUNCHED:
+           strcat (m_logstring, "(frontend not active) drop\n" ); break;
+       case FRONTEND_BUSY:
+           strcat (m_logstring, "(frontend busy) drop\n" ); break;
+       case UNSUPPORTED_PROTOCOL:
+           strcat (m_logstring, "(unsupported protocol) drop\n" ); break;
+       case ICMP_MORE_THAN_ONE_ENTRY:
+           strcat (m_logstring, "More than one program is using icmp, dropping\n" ); break;
+       case ICMP_NO_ENTRY:
+           strcat (m_logstring, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); break;
+       case SHA_DONT_MATCH:
+           strcat (m_logstring, "Red alert. Some app is trying to impersonate another\n" ); break;
+       case STIME_DONT_MATCH:
+           strcat (m_logstring, "Red alert. Some app is trying to impersonate another\n" ); break;
+       case EXESIZE_DONT_MATCH:
+           strcat (m_logstring, "Red alert. Executable's size don't match the records\n" ); break;
+       case INODE_HAS_CHANGED:
+           strcat (m_logstring, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); break;
+       case EXE_HAS_BEEN_CHANGED:
+           strcat (m_logstring, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); break;
+       case SRCPORT_NOT_FOUND_IN_PROC:
+           strcat (m_logstring, "source port not found in procfs\n" ); break;
+       }
+    M_PRINTF(MLOG_TRAFFIC, "%s", m_logstring);
+}
+
 int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval, socketint;
 
     if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
-    if (( retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
+    if (( retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
     if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
     if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime) )!= GOTO_NEXT_STEP) goto out;
     if ( !fe_active_flag_get() )
@@ -2101,10 +2272,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     gettimeofday(&lastpacket, NULL);
     pthread_mutex_unlock(&lastpacket_mutex);
 
-#ifdef DEBUG
-    static int is_strange_daddr = 0;
-    static char strange_daddr[INET_ADDRSTRLEN];
-#endif
     struct iphdr *ip;
     int id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
@@ -2115,35 +2282,32 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
 
-#ifdef DEBUG
-    //works only on my machine :))
-    if (strcmp(daddr, "192.168.0.2")){
-        is_strange_daddr = 1;
-        strcpy(strange_daddr, daddr);
-    }
-    m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
-# endif
-
-    in_packet_size = ntohs(ip->tot_len);
     int verdict;
     u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
     char path[PATHSIZE], pid[PIDLENGTH];
     unsigned long long stime;
+    int proto;
+    int m_socketint;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
-        ;
-        // ihl field is IP header length in 32-bit words, multiply a word by 4 to get length in bytes
+        proto = PROTO_TCP;
+        // ihl is IP header length in 32bit words, multiply a word by 4 to get length in bytes
         struct tcphdr *tcp;
         tcp = ( struct tcphdr* ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbo = tcp->source;
         dport_netbo = tcp->dest;
         sport_hostbo = ntohs ( tcp->source );
         dport_hostbo = ntohs ( tcp->dest );
-	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
+
+        if ((m_socketint = is_tcp_port_in_table(dport_hostbo)) == -1) //not found in cache
+        {
+            verdict = PORT_NOT_FOUND;
+            goto kernel_verdict;
+        }
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_tcp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_tcp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -2177,17 +2341,22 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         break;
         
     case IPPROTO_UDP:
-        ;
+        proto = PROTO_UDP;
         struct udphdr *udp;
         udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbo = udp->source;
         dport_netbo = udp->dest;
         sport_hostbo = ntohs ( udp->source );
         dport_hostbo = ntohs ( udp->dest );     
-	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
+
+        if ((m_socketint = is_udp_port_in_table(dport_hostbo)) == -1) //not found in cache
+        {
+            verdict = PORT_NOT_FOUND;
+            goto kernel_verdict;
+        }
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;            
-	    if ((verdict = packet_handle_udp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_udp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -2222,32 +2391,25 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         break;
     case IPPROTO_ICMP:
         ;
-	m_printf ( MLOG_TRAFFIC, ">ICMP src %s ", saddr);
+        M_PRINTF ( MLOG_TRAFFIC, ">ICMP src %s ", saddr);
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP){
             if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
 	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
-        break;
+      break;
     default:
-        m_printf ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
-        m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
+        M_PRINTF ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
+        M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
         verdict = UNSUPPORTED_PROTOCOL;
     }
 
     kernel_verdict:
- switch ( verdict )
-    {
-    case ACCEPT:
-    case SOCKET_FOUND_IN_DLIST_ALLOW:
-    case PATH_FOUND_IN_DLIST_ALLOW:
-    case NEW_INSTANCE_ALLOW:
-    case FORKED_CHILD_ALLOW:
-    case CACHE_TRIGGERED_ALLOW:
-    case INKERNEL_RULE_ALLOW:
+        print_traffic_log(proto, DIRECTION_IN, daddr, sport_hostbo, dport_hostbo, path, pid, verdict);
 
+    if (verdict < ALLOW_VERDICT_MAX)
+    {
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
         
      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -2260,72 +2422,29 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
      //EBUSY returned, when there's too much activity in conntrack. Requery the packet
      while (nfct_query(setmark_handle_in, NFCT_Q_GET, ct_in) == -1){
          if (errno == EBUSY){
-             m_printf ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             M_PRINTF ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
              continue;
          }
          if (errno == EILSEQ){
-             m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
              continue;
          }
          else {
-             m_printf ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+             M_PRINTF ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
              break;
      }
      }
         return 0;
-
-    case DROP:
-        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
-    case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
-    case SENT_TO_FRONTEND:
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case PATH_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case NEW_INSTANCE_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_LAUNCHED:
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
-    case FRONTEND_BUSY:
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
-    case UNSUPPORTED_PROTOCOL:
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
-    case ICMP_MORE_THAN_ONE_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
-    case ICMP_NO_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
-    case SHA_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case STIME_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case EXESIZE_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
-    case INODE_HAS_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
-    case EXE_HAS_BEEN_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
-    case FORKED_CHILD_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case CACHE_TRIGGERED_DENY:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SRCPORT_NOT_FOUND_IN_PROC:
-	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
-    case INKERNEL_RULE_DENY:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
-    DROPverdict:
+
+    // else
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
         return 0;
 
 }
 
-
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
-int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
+int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
     pthread_mutex_lock(&lastpacket_mutex);
     gettimeofday(&lastpacket, NULL);
@@ -2342,24 +2461,238 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
     out_packet_size = ntohs(ip->tot_len);
     int verdict;
     u_int16_t sport_netbyteorder, dport_netbyteorder;
-      char path[PATHSIZE], pid[PIDLENGTH];
-        unsigned long long stime;
-    switch ( ip->protocol )
-    {
-    case IPPROTO_TCP:
-        ;
-        // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
-        struct tcphdr *tcp;
-                
-        tcp = ( struct tcphdr* ) ((char*)ip + ( 4 * ip->ihl ) );
-        sport_netbyteorder = tcp->source;
-        dport_netbyteorder = tcp->dest;
-        int srctcp = ntohs ( tcp->source );     
-	m_printf ( MLOG_TRAFFIC, "<TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
+    char path[PATHSIZE], pid[PIDLENGTH];
+    unsigned long long stime;
 
-	//remember f/e's state before we process
+    int bytesread_udp, bytesread_udp6;
+    char newline[2] = {'\n','\0'};
+    int pause = 2;
+    char *token;
+    int port, m_socketint, found_flag;
+    int i = 0;
+
+        struct udphdr *udp;
+        udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
+        sport_netbyteorder = udp->source;
+        dport_netbyteorder = udp->dest;
+        int srcudp = ntohs ( udp->source );
+
+        if ((m_socketint = is_udp_port_in_table(srcudp)) != -1) //found in cache
+        {
+         //   printf("udptable cache hit \n");
+            goto found2;
+        }
+
+        struct timespec timer2,dummy2;
+        timer2.tv_sec=0;
+        timer2.tv_nsec=1000000000/pause;
+        nanosleep(&timer2, &dummy2);
+
+        memset(udp_smallbuf,0, 4096);
+        fseek(udpinfo,0,SEEK_SET);
+        found_flag = 0;
+        while ((bytesread_udp = read(udpinfo_fd, udp_smallbuf,  4060)) > 0)
+         {
+            udp_stats++;
+                 if (bytesread_udp == -1)
+                 {
+                         perror ("read");
+                         break;
+                 }
+                 token = strtok(udp_smallbuf, newline); //skip the first line (column headers)
+                 while ((token = strtok(NULL, newline)) != NULL)
+                    { //take a line until EOF
+                     sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &m_socketint);
+                     udp_table[i*2] = port;
+                     udp_table[i*2+1] = m_socketint;
+                    if (srcudp != port){
+                        i++;
+                        continue;
+                    }
+                    //else
+                    found_flag = 1;
+                    i++;
+                    }
+        }
+        udp_table[i*2] = MAGIC_NO;
+        if (found_flag) goto found2;
+
+        nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+        return 0;
+
+found2:
+        ;
+
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	if ((verdict = packet_handle_tcp_out ( srctcp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_udp_out ( m_socketint, &nfmark_to_set_out, path, pid, &stime ))
+                    == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+                if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
+                    pthread_mutex_lock(&dlist_mutex);
+                    dlist *temp = first;
+                    while(temp->next != NULL){
+                        temp = temp->next;
+                        if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+                        //else
+                        if (!strcmp(temp->pid, daddr)){
+                            if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
+                                temp->is_active = TRUE;
+                                nfmark_to_set_out = temp->nfmark_out;
+                                verdict = INKERNEL_RULE_ALLOW;
+                                pthread_mutex_unlock(&dlist_mutex);
+                                goto kernel_verdict;
+                            }
+                            else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
+                                verdict = INKERNEL_RULE_DENY;
+                                pthread_mutex_unlock(&dlist_mutex);
+                                goto kernel_verdict;
+                            }
+                        }
+                    }
+                    pthread_mutex_unlock(&dlist_mutex);
+                    //not found in in-kernel list, ask user
+                    strcpy(path, KERNEL_PROCESS);
+                    strcpy(pid, daddr);
+                    stime = ntohs (udp->dest);
+                }
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY;}
+            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
+        }
+ /*   case IPPROTO_ICMP:
+        ;
+        M_PRINTF ( MLOG_TRAFFIC, "<ICMP dst %d ", daddr);
+        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
+        }
+        break;
+        */
+
+
+    kernel_verdict:
+    print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, ntohs ( udp->dest ), path, pid, verdict);
+    if (verdict < ALLOW_VERDICT_MAX)
+    {
+     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
+
+     nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
+     nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
+     nfct_set_attr_u8 (ct_out, ATTR_L4PROTO, ip->protocol);
+     nfct_set_attr_u8 (ct_out, ATTR_L3PROTO, AF_INET);
+     nfct_set_attr_u16(ct_out, ATTR_PORT_SRC, sport_netbyteorder);
+     nfct_set_attr_u16(ct_out, ATTR_PORT_DST, dport_netbyteorder) ;
+
+        //EBUSY returned, when there's too much activity in conntrack. Requery the packet
+        while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out) == -1){
+#ifdef DEBUG2
+            M_PRINTF ( MLOG_DEBUG2, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+#endif
+            if (errno == EBUSY){
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                continue;
+            }
+            if (errno == EILSEQ){
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                continue;
+            }
+            else {
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                break;
+        }
+        }
+
+return 0;
+    }
+    //else if verdict > ALLOW_VERDICT_MAX
+    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+    return 0;
+}
+
+
+//this function is invoked each time a packet arrives to OUTPUT NFQUEUE
+int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
+{
+    pthread_mutex_lock(&lastpacket_mutex);
+    gettimeofday(&lastpacket, NULL);
+    pthread_mutex_unlock(&lastpacket_mutex);
+
+    struct iphdr *ip;
+    u_int32_t id;
+    struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
+    if ( !ph ) {printf ("ph == NULL, should never happen, please report"); return 0;}
+    id = ntohl ( ph->packet_id );
+    nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
+    char daddr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
+    int verdict;
+    u_int16_t sport_netbyteorder, dport_netbyteorder;
+    char path[PATHSIZE]={0};
+    char pid[PIDLENGTH]={0};
+    unsigned long long stime;
+
+    int bytesread_tcp, bytesread_tcp6;
+    char newline[2] = {'\n','\0'};
+    char *token;
+    int port, socket, found_flag;
+    int i = 0;
+
+    // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
+    struct tcphdr *tcp;
+    tcp = ( struct tcphdr* ) ((char*)ip + ( 4 * ip->ihl ) );
+    sport_netbyteorder = tcp->source;
+    dport_netbyteorder = tcp->dest;
+    int srctcp = ntohs ( tcp->source );
+
+    if ((socket = is_tcp_port_in_table(srctcp)) != -1) //found in cache
+    {
+       // printf("tcptable cache hit \n");
+        goto found2;
+    }
+
+    struct timespec timer2,dummy2;
+    timer2.tv_sec=0;
+    timer2.tv_nsec=1000000000/2;
+    nanosleep(&timer2, &dummy2);
+
+    memset(tcp_smallbuf,0, 4096);
+    fseek(tcpinfo,0,SEEK_SET);
+    found_flag = 0;
+    while ((bytesread_tcp = read(tcpinfo_fd, tcp_smallbuf, 4060)) > 0)
+    {
+        tcp_stats++;
+        if (bytesread_tcp == -1)
+         {
+                 perror ("read");
+                 break;
+         }
+         token = strtok(tcp_smallbuf, newline); //skip the first line (column headers)
+         while ((token = strtok(NULL, newline)) != NULL)
+        { //take a line until EOF
+             sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
+             tcp_table[i*2] = port;
+             tcp_table[i*2+1] = socket;
+            if (srctcp != port)
+            {
+                i++;
+                continue;
+            }
+            //else
+            found_flag = 1;
+            i++;
+        }
+    }
+    tcp_table[i*2] = MAGIC_NO;
+    if (found_flag) goto found2;
+
+    //the packet has no inode associated with it
+    nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+    return 0;
+
+    found2:
+        //remember f/e's state before we process
+        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+        if ((verdict = packet_handle_tcp_out ( socket, &nfmark_to_set_out, path, pid, &stime ))
+                == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 	    if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 
 		pthread_mutex_lock(&dlist_mutex);
@@ -2389,81 +2722,16 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 		goto kernel_verdict;
 	    }
 	    //drop if f/e was busy before we started processing
-	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY;}
 	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
-        break;
-    case IPPROTO_UDP:
-        ;
-        struct udphdr *udp;
-        udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
-        sport_netbyteorder = udp->source;
-        dport_netbyteorder = udp->dest;
-        int srcudp = ntohs ( udp->source );
-	m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
-        
-	fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_udp_out ( srcudp, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
-		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
-		    pthread_mutex_lock(&dlist_mutex);
-		    dlist *temp = first;
-		    while(temp->next != NULL){
-			temp = temp->next;
-			if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-			//else
-			if (!strcmp(temp->pid, daddr)){
-			    if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE)){
-				temp->is_active = TRUE;
-				nfmark_to_set_out = temp->nfmark_out;
-				verdict = INKERNEL_RULE_ALLOW;
-				pthread_mutex_unlock(&dlist_mutex);
-				goto kernel_verdict;
-			    }
-			    else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE)){
-				verdict = INKERNEL_RULE_DENY;
-				pthread_mutex_unlock(&dlist_mutex);
-				goto kernel_verdict;
-			    }
-			}
-		    }
-		    pthread_mutex_unlock(&dlist_mutex);
-		    //not found in in-kernel list, ask user
-		    strcpy(path, KERNEL_PROCESS);
-		    strcpy(pid, daddr);
-		    stime = ntohs (udp->dest);
-		}
-	    if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
-	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
-        }
-        break;
-    case IPPROTO_ICMP:
-        ;
-	m_printf ( MLOG_TRAFFIC, "<ICMP dst %d ", daddr);
-        fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-        if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP){
-            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
-	    else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
-        }
-        break;
-    default:
-        m_printf ( MLOG_INFO, "unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
-        m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
-        verdict = UNSUPPORTED_PROTOCOL;
-    }
 
     kernel_verdict:
-    switch ( verdict )
-    {
-    case ACCEPT:
-    case SOCKET_FOUND_IN_DLIST_ALLOW:
-    case PATH_FOUND_IN_DLIST_ALLOW:
-    case NEW_INSTANCE_ALLOW:
-    case FORKED_CHILD_ALLOW:
-    case CACHE_TRIGGERED_ALLOW:
-    case INKERNEL_RULE_ALLOW:
+    print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, ntohs ( tcp->dest ), path, pid, verdict);
 
+        if (verdict < ALLOW_VERDICT_MAX)
+    {
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-     m_printf ( MLOG_TRAFFIC, "allow\n" );
         
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -2474,73 +2742,31 @@ int  nfq_handle_out ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nf
 
 	//EBUSY returned, when there's too much activity in conntrack. Requery the packet
         while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out) == -1){
-#ifdef DEBUG2
-	    m_printf ( MLOG_DEBUG2, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-#endif
             if (errno == EBUSY){
-                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 continue;
             }
             if (errno == EILSEQ){
-                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 continue;
             }
             else {
-                m_printf ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                 break;
         }
         }
 
 return 0;
+        }
 
-
-    case DROP:
-        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
-    case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
-    case SENT_TO_FRONTEND:
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case PATH_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case NEW_INSTANCE_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_LAUNCHED:
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
-    case FRONTEND_BUSY:
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
-    case UNSUPPORTED_PROTOCOL:
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
-    case ICMP_MORE_THAN_ONE_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
-    case ICMP_NO_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
-    case SHA_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case STIME_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case EXESIZE_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
-    case INODE_HAS_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
-    case EXE_HAS_BEEN_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
-    case FORKED_CHILD_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case CACHE_TRIGGERED_DENY:
-	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SRCPORT_NOT_FOUND_IN_PROC:
-	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
-    case INKERNEL_RULE_DENY:
-	m_printf ( MLOG_TRAFFIC, "in-kernel rule, deny\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    }
-    DROPverdict:
+//else if verdict > ALLOW_VERDICT_MAX
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
         return 0;
 }
+
+
+
+
 
 void loggingInit()
 {
@@ -2598,7 +2824,7 @@ void pidFileCheck() {
     {
         if ( ( pidfd = fopen ( pid_file->filename[0], "r" ) ) == NULL )
         {
-            m_printf ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+            M_PRINTF ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	    exit(0);
         };
         fgets ( pidbuf, 8, pidfd );
@@ -2615,7 +2841,7 @@ void pidFileCheck() {
                 strcat ( procstring, "/comm" );
 		if ( ( procfd = fopen ( procstring, "r" )) == NULL)
 		{
-		    m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		    exit(0);
 		}
                 //let's replace 0x0A with 0x00
@@ -2630,7 +2856,7 @@ void pidFileCheck() {
                     //(can happen when PID of previously crashed lpfw coincides with ours)
 		    if ( ( pid_t ) pid != getpid() )
                     {
-                        m_printf ( MLOG_INFO, "lpfw is already running\n" );
+                        M_PRINTF ( MLOG_INFO, "lpfw is already running\n" );
                         die();
                     }
 		}
@@ -2638,13 +2864,13 @@ void pidFileCheck() {
         }
     }
     else 
-        m_printf ( MLOG_DEBUG, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    {M_PRINTF ( MLOG_DEBUG, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 
 
     //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
     if ( ( newpid = fopen ( pid_file->filename[0], "w" ) ) == NULL )
     {
-	m_printf ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return;
     }
     sprintf ( pid2str, "%d", ( int ) getpid() );
@@ -2652,7 +2878,7 @@ void pidFileCheck() {
     newpidfd = fileno(newpid);
     if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
     {
-        m_printf ( MLOG_INFO, "write: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "write: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return;
     }
     //close(newpidfd);
@@ -2745,12 +2971,16 @@ void TEST_FAILED_handler (int signal)
 {
 
     if ( remove ( pid_file->filename[0] ) != 0 )
-	m_printf ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    {M_PRINTF ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
     //release netfilter_queue resources
-    m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
-    if ( nfq_close ( globalh_out ) == -1 )
+    M_PRINTF ( MLOG_INFO,"deallocating nfqueue resources...\n" );
+    if ( nfq_close ( globalh_out_tcp ) == -1 )
     {
-	m_printf ( MLOG_INFO,"error in nfq_close\n" );
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
+    }
+    if ( nfq_close ( globalh_out_udp ) == -1 )
+    {
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
     }
     printf("TEST FAILED");
     return;
@@ -2760,12 +2990,16 @@ void TEST_SUCCEEDED_handler (int signal)
 {
 
     if ( remove ( pid_file->filename[0] ) != 0 )
-	m_printf ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    {M_PRINTF ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
     //release netfilter_queue resources
-    m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
-    if ( nfq_close ( globalh_out ) == -1 )
+    M_PRINTF ( MLOG_INFO,"deallocating nfqueue resources...\n" );
+    if ( nfq_close ( globalh_out_tcp ) == -1 )
     {
-	m_printf ( MLOG_INFO,"error in nfq_close\n" );
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
+    }
+    if ( nfq_close ( globalh_out_udp ) == -1 )
+    {
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
     }
     printf("test finished successfully\n");
     return;
@@ -2776,15 +3010,20 @@ void SIGTERM_handler ( int signal )
 {
 
     if ( remove ( pid_file->filename[0] ) != 0 )
-        m_printf ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "remove PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 
     rulesfileWrite();
     //release netfilter_queue resources
-    m_printf ( MLOG_INFO,"deallocating nfqueue resources...\n" );
-    if ( nfq_close ( globalh_out ) == -1 )
+    M_PRINTF ( MLOG_INFO,"deallocating nfqueue resources...\n" );
+    if ( nfq_close ( globalh_out_tcp ) == -1 )
     {
-        m_printf ( MLOG_INFO,"error in nfq_close\n" );
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
     }
+    if ( nfq_close ( globalh_out_udp ) == -1 )
+    {
+        M_PRINTF ( MLOG_INFO,"error in nfq_close\n" );
+    }
+    exit(0);
     return;
 }
 
@@ -3139,14 +3378,16 @@ int main ( int argc, char *argv[] )
     printf (" orig uid euid %d %d \n", uid, euid);
 #endif
    
-    if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
-        m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
-        m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
-	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
-	m_printf ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    if ( system ( "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 ){
+        M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
+    if ( system ( "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222" ) == -1 ){
+        M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
+    if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 ){
+        M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
+    if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 ){
+        M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
+    if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 ){
+        M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );}
 
 
     //enable CAP in effective set
@@ -3154,13 +3395,13 @@ int main ( int argc, char *argv[] )
     cap_current = cap_get_proc();
     if (cap_current == NULL)
     {
-	m_printf(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     const cap_value_t caps_list[] = {CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE};
     cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
     if (cap_set_proc(cap_current) == -1)
     {
-	m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 
 #ifndef WITHOUT_SYSVIPC
@@ -3168,45 +3409,63 @@ int main ( int argc, char *argv[] )
 #endif
 
     //-----------------Register queue handler-------------
-    int nfqfd;
-    globalh_out = nfq_open();
-    if ( !globalh_out ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if ( nfq_unbind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
-    if ( nfq_bind_pf ( globalh_out, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
-    struct nfq_q_handle * globalqh = nfq_create_queue ( globalh_out, NFQNUM_OUTPUT, &nfq_handle_out, NULL );
-    if ( !globalqh ){
-        m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+    int nfqfd_tcp;
+    globalh_out_tcp = nfq_open();
+    if ( !globalh_out_tcp ){ M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );}
+    if ( nfq_unbind_pf ( globalh_out_tcp, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );}
+    if ( nfq_bind_pf ( globalh_out_tcp, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );}
+    struct nfq_q_handle * globalqh_tcp = nfq_create_queue ( globalh_out_tcp, NFQNUM_OUTPUT_TCP, &nfq_handle_out_tcp, NULL );
+    if ( !globalqh_tcp ){
+        M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
         return 0;
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
-    nfqfd = nfq_fd ( globalh_out );
-    m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    if ( nfq_set_mode ( globalqh_tcp, NFQNL_COPY_PACKET, 40 ) < 0 ){ M_PRINTF ( MLOG_INFO, "error in set_mode\n" );}
+    if ( nfq_set_queue_maxlen ( globalqh_tcp, 200 ) == -1 ){ M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );}
+    nfqfd_tcp = nfq_fd ( globalh_out_tcp);
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
+
+    //-----------------Register queue handler-------------
+    globalh_out_udp = nfq_open();
+    if ( !globalh_out_udp ){ M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );}
+    if ( nfq_unbind_pf ( globalh_out_udp, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );}
+    if ( nfq_bind_pf ( globalh_out_udp, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );}
+    struct nfq_q_handle * globalqh_udp = nfq_create_queue ( globalh_out_udp, NFQNUM_OUTPUT_UDP, &nfq_handle_out_udp, NULL );
+    if ( !globalqh_udp ){
+        M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+        return 0;
+    }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_udp, NFQNL_COPY_PACKET, 40 ) < 0 ){ M_PRINTF ( MLOG_INFO, "error in set_mode\n" );}
+    if ( nfq_set_queue_maxlen ( globalqh_udp, 200 ) == -1 ){ M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );}
+    nfqfd_udp = nfq_fd ( globalh_out_udp );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
+
     
     
     //-----------------Register queue handler for INPUT chain-----
     globalh_in = nfq_open();
-    if ( !globalh_in ) m_printf ( MLOG_INFO, "error during nfq_open\n" );
-    if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_unbind\n" );
-    if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 ) m_printf ( MLOG_INFO, "error during nfq_bind\n" );
+    if ( !globalh_in ){ M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );}
+    if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );}
+    if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 ){ M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );}
     struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
     if ( !globalqh_input ){
-        m_printf ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+        M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
         return 0;
     }
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ) m_printf ( MLOG_INFO, "error in set_mode\n" );
-    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 ) m_printf ( MLOG_INFO, "error in queue_maxlen\n" );
+    if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 ){ M_PRINTF ( MLOG_INFO, "error in set_mode\n" );}
+    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 ){ M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );}
     nfqfd_input = nfq_fd ( globalh_in );
-    m_printf ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
     //initialze dlist first(reference) element
     if ( ( first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
     {
-        m_printf ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         die();
     }
     first->prev = NULL;
@@ -3216,7 +3475,7 @@ int main ( int argc, char *argv[] )
     //initialze dlist copy's first(reference) element
     if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
     {
-        m_printf ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         die();
     }
     copy_first->prev = NULL;
@@ -3226,30 +3485,41 @@ int main ( int argc, char *argv[] )
     rules_load();
     pthread_create ( &refresh_thread, NULL, refreshthread, NULL );
     pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL);
+    pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL);
+
     pthread_create ( &ct_del_thread, NULL, ct_delthread, NULL );
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
     pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
     pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
+   // pthread_create ( &read_stats_thread, NULL, readstatsthread, NULL );
 
 
     if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return PROCFS_ERROR;
     }
     if ( ( tcp6info = fopen ( TCP6INFO, "r" ) ) == NULL ){
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return PROCFS_ERROR;
     }
     if ( ( udpinfo = fopen ( UDPINFO, "r" ) ) == NULL ){
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return PROCFS_ERROR;
     }
     if ( ( udp6info = fopen (UDP6INFO, "r" ) ) == NULL ){
-        m_printf ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
         return PROCFS_ERROR;
     }
     procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
+    tcpinfo_fd = fileno(tcpinfo);
+    tcp6info_fd = fileno(tcp6info);
+    udpinfo_fd = fileno(udpinfo);
+    udp6info_fd = fileno(udp6info);
 
+    if ((tcp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
+    if ((udp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
+
+/*
 
     if ((tcp_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(tcp_membuf,0, MEMBUF_SIZE);
@@ -3262,6 +3532,7 @@ int main ( int argc, char *argv[] )
 
     if ((udp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(udp6_membuf,0, MEMBUF_SIZE);
+    */
 
 
 #ifdef DEBUG
@@ -3276,9 +3547,9 @@ int main ( int argc, char *argv[] )
     //endless loop of receiving packets and calling a handler on each packet
     int rv;
     char buf[4096] __attribute__ ( ( aligned ) );
-    while ( ( rv = recv ( nfqfd, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
+    while ( ( rv = recv ( nfqfd_tcp, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
     {
-        nfq_handle_packet ( globalh_out, buf, rv );
+        nfq_handle_packet ( globalh_out_tcp, buf, rv );
     }
 }
 // kate: indent-mode cstyle; space-indent on; indent-width 4; 

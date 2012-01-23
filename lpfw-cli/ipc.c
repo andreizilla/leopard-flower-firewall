@@ -18,18 +18,28 @@ void msgq_initialize();
 extern void list();
 extern void add_out(msg_struct add_struct);
 extern void add_in(msg_struct add_struct);
-extern int (*m_printf)(int loglevel, char *format, ...);
+extern int (*m_printf)(int loglevel, char *logstring);
 extern void farray_add(dlist rule);
+extern pthread_mutex_t logstring_mutex;
+extern char logstring[PATHSIZE];
+
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex); \
+
+
 
 void msgq_list() {
     msg_f2d.item.command = F2DCOMM_LIST;
     if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
     farray_clear();
     while (1) {
         if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0, 0) == -1) {
-            m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
         if (!strcmp(msg_d2flist.item.path, "EOF")) break;
         farray_add(msg_d2flist.item);
@@ -44,7 +54,7 @@ void* listenthread(void * ptr) {
 
     while (1) {
         if (msgrcv(mqd_d2f, &msg_d2f, sizeof (msg_struct), 0, 0) == -1) {
-            m_printf(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
         switch (msg_d2f.item.command) {
             case D2FCOMM_ASK_OUT:
@@ -61,7 +71,7 @@ void* listenthread(void * ptr) {
                 break;
 
             default:
-                m_printf(MLOG_INFO, "unknown command", __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "unknown command", __FILE__, __LINE__);
         };
 
     }
@@ -72,7 +82,7 @@ void msgq_f2ddel(dlist rule, int ack_flag) {
     if (ack_flag) {
         msg_f2d.item.command = F2DCOMM_DELANDACK;
         if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
-            m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
     }
 }
@@ -80,21 +90,21 @@ void msgq_f2ddel(dlist rule, int ack_flag) {
 void msgq_write() {
     msg_f2d.item.command = F2DCOMM_WRT;
     if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
 }
 
 void msgq_add(msg_struct add_struct) {
     add_struct.item.command = F2DCOMM_ADD;
     if (msgsnd(mqd_f2d, &add_struct, sizeof (msg_struct), 0) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
 }
 
 void frontend_register() {
     msg_f2d.item.command = F2DCOMM_REG;
     if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         return;
     }
 }
@@ -102,7 +112,7 @@ void frontend_register() {
     void frontend_unregister() {
         msg_f2d.item.command = F2DCOMM_UNREG;
         if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1) {
-            m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             return;
         }
     }
@@ -111,34 +121,34 @@ void frontend_register() {
 
             key_t ipckey_f2d, ipckey_d2f, ipckey_d2flist, ipckey_d2fdel;
             if ((ipckey_d2f = ftok(TMPFILE, FTOKID_D2F)) == -1) {
-                m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             };
             if ((mqd_d2f = msgget(ipckey_d2f, 0)) == -1) {
-                m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 exit(0);
             };
 
             if ((ipckey_d2flist = ftok(TMPFILE, FTOKID_D2FLIST)) == -1) {
-                m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             };
             if ((mqd_d2flist = msgget(ipckey_d2flist, 0)) == -1) {
-                m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 exit(0);
             };
 
             if ((ipckey_f2d = ftok(TMPFILE, FTOKID_F2D)) == -1) {
-                m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             };
             if ((mqd_f2d = msgget(ipckey_f2d, 0)) == -1) {
-                m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 exit(0);
             };
 
             if ((ipckey_d2fdel = ftok(TMPFILE, FTOKID_D2FDEL)) == -1) {
-                m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             };
             if ((mqd_d2fdel = msgget(ipckey_d2fdel, 0)) == -1) {
-                m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 exit(0);
             };
 

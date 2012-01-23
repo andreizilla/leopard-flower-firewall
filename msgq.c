@@ -31,7 +31,7 @@ extern msg_struct msg_f2d; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct_creds msg_creds;
-extern int (*m_printf)(int loglevel, char *format, ...);
+extern int (*m_printf)(int loglevel, char *logstring);
 extern int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 extern unsigned long long starttimeGet(int mypid);
 extern void fe_active_flag_set (int boolean);
@@ -39,10 +39,18 @@ extern void child_close_nfqueue();
 extern int sha512_stream(FILE *stream, void *resblock);
 extern dlist * dlist_copy();
 extern struct arg_file *cli_path, *gui_path, *pygui_path;
-extern pthread_mutex_t nfmark_count_mutex, msgq_mutex;
+extern pthread_mutex_t nfmark_count_mutex, msgq_mutex, logstring_mutex;
 extern int nfmark_count;
 extern void dlist_del ( char *path, char *pid );
 extern gid_t lpfwuser_gid;
+extern char logstring[PATHSIZE];
+
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex); \
+
 
 
 
@@ -67,7 +75,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     //block until message is received
     interrupted:
     if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_struct_creds), 0, 0) == -1) {
-	m_printf(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	if (errno == EINTR) goto interrupted;
     }
     //extract last sender's PID and check the binary path is the same path as this lpfw instance
@@ -86,25 +94,25 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
     //the next line
     if (readlink(procpath, exepath, PATHSIZE - 1) == -1)
     {
-	m_printf(MLOG_INFO, "readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "readlink: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
 #ifdef DEBUG
     printf("%s, %s\n",  exepath, ownpath);
 #endif
     if (strcmp(exepath, ownpath)){
-        m_printf(LOG_ALERT, "Red alert!!! Some application is trying to impersonate the frontend\n");
+        M_PRINTF(LOG_ALERT, "Red alert!!! Some application is trying to impersonate the frontend\n");
         return ;
     }
     //The following checks are already performed by frontend_register(). This is redundant, but again, those hackers are unpredictable
 #ifndef DEBUG
     if (msg_creds.creds.uid  == 0){
-        m_printf (LOG_INFO, "You are trying to run lpfw's frontend as root. Such possibility is disabled due to security reasons. Please rerun as an unpriviledged user\n");
+        M_PRINTF (LOG_INFO, "You are trying to run lpfw's frontend as root. Such possibility is disabled due to security reasons. Please rerun as an unpriviledged user\n");
         return ;
     }
 #endif
 
         if (!strncmp(msg_creds.creds.tty, "/dev/tty", 8)){
-       m_printf (LOG_INFO, "You are trying to run lpfw's frontend from a tty terminal. Such possibility is disabled in this version of lpfw due to security reasons. Try to rerun this command from within an X terminal\n");
+       M_PRINTF (LOG_INFO, "You are trying to run lpfw's frontend from a tty terminal. Such possibility is disabled in this version of lpfw due to security reasons. Try to rerun this command from within an X terminal\n");
         return ;
     }
 
@@ -117,7 +125,7 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	/* no need to setgid on child since gid==lpfwuser is inherited from parent
 	if (setgid(lpfwuser_gid) == -1)
 	{
-	    m_printf(MLOG_INFO, "setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	*/
 
@@ -126,18 +134,18 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	cap_current = cap_get_proc();
 	if (cap_current == NULL)
 	{
-	    m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	const cap_value_t caps_list[] = {CAP_SETUID};
 	cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
 	if (cap_set_proc(cap_current) == -1)
 	{
-	    m_printf(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	//setuid and immediately remove CAP_SETUID from both perm. and eff. sets
 	if (setuid(msg_creds.creds.uid) == -1)
 	{
-	    m_printf(MLOG_INFO, "setuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "setuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	//no need to drop privs, they are all zeroed out upon setuid()
 
@@ -145,9 +153,9 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	struct stat path_stat;
 	if (!strcmp (msg_creds.creds.params[0], "--cli")){
 	   if (stat(cli_path->filename[0], &path_stat) == -1 ){
-            m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
-	    m_printf(MLOG_INFO, "Unable to find %s\n", cli_path->filename[0]); 
+            M_PRINTF(MLOG_INFO, "Unable to find %s\n", cli_path->filename[0]);
 	    }
 	    return;
 	   }
@@ -162,32 +170,32 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 	      msg_creds.creds.params[5][0]?msg_creds.creds.params[5]:(char*)0,
 	      (char*)0);
 	//if exec returns here it means there was an error
-	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
+        M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	else if (!strcmp (msg_creds.creds.params[0], "--gui")){
 	   if (stat(gui_path->filename[0], &path_stat) == -1 ){
-            m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
-	    m_printf(MLOG_INFO, "Unable to find %s\n", gui_path->filename[0]); 
+            M_PRINTF(MLOG_INFO, "Unable to find %s\n", gui_path->filename[0]);
 	    }
 	    return;
 
 	   }
 	  execl (gui_path->filename[0], gui_path->filename[0], (char*)0);
 	  //if exec returns here it means there was an error
-	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
+        M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	}
 	else if (!strcmp (msg_creds.creds.params[0], "--pygui")){
 	 if (stat(pygui_path->filename[0], &path_stat) == -1 ){
-            m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    if (errno == ENOENT){
-	    m_printf(MLOG_INFO, "Unable to find %s\n", pygui_path->filename[0]);
+            M_PRINTF(MLOG_INFO, "Unable to find %s\n", pygui_path->filename[0]);
 	    }
 	    return;
 	 }
 	 execl ("/usr/bin/python", "python",pygui_path->filename[0], (char*)0);
 	   //if exec returns here it means there was an error
-	m_printf(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);    
+        M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
      
     }
 	}
@@ -199,11 +207,11 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
        }
         //frontend should unregister itself upon exit, else it's crashed
         if (fe_active_flag_get()){
-            m_printf(MLOG_INFO, "Frontend apparently crashed, unregistering...\n");
+            M_PRINTF(MLOG_INFO, "Frontend apparently crashed, unregistering...\n");
 	    fe_awaiting_reply = FALSE;
             fe_active_flag_set(FALSE);
         }
-        m_printf(MLOG_INFO, "frontend exited\n");
+        M_PRINTF(MLOG_INFO, "frontend exited\n");
             pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
             return;
         
@@ -225,7 +233,7 @@ void* commandthread(void* ptr){
 	interrupted:
 	if (msgrcv(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0, 0) == -1)
 	{
-	    m_printf(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            M_PRINTF(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    sleep(1); //avoid overwhelming the log
 	    if (errno == EINTR) goto interrupted;
         }
@@ -233,7 +241,7 @@ void* commandthread(void* ptr){
 #ifdef DEBUG
     struct timeval time_struct;
         gettimeofday(&time_struct, NULL);
-        m_printf(MLOG_DEBUG, "Received command %d @ %d %d\n", msg_f2d.item.command, (int) time_struct.tv_sec, (int) time_struct.tv_usec);
+        M_PRINTF(MLOG_DEBUG, "Received command %d @ %d %d\n", msg_f2d.item.command, (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
 	
         switch (msg_f2d.item.command) {
@@ -247,9 +255,9 @@ void* commandthread(void* ptr){
 		if (temp == NULL) {
                     strcpy(msg_d2flist.item.path, "EOF");
                     if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
-                        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                     }
-                    m_printf(MLOG_DEBUG, "sent EOF\n");
+                    M_PRINTF(MLOG_DEBUG, "sent EOF\n");
                     continue;
                 }
                 while (temp != NULL) {
@@ -259,12 +267,12 @@ void* commandthread(void* ptr){
 		    msg_d2flist.item.is_active = temp->is_active;
 		    msg_d2flist.item.nfmark_out = temp->nfmark_out;
                     if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
-                        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                     }
                     if (temp->next == NULL) {
                         strcpy(msg_d2flist.item.path, "EOF");
                         if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1) {
-                            m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                            M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                         }
                         break;
                     }
@@ -279,12 +287,12 @@ void* commandthread(void* ptr){
             case F2DCOMM_WRT:
 #ifdef DEBUG
                 gettimeofday(&time_struct, NULL);
-                m_printf(MLOG_DEBUG, "Before writing  @%d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
+                M_PRINTF(MLOG_DEBUG, "Before writing  @%d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
                 rulesfileWrite();
 #ifdef DEBUG
                 gettimeofday(&time_struct, NULL);
-                m_printf(MLOG_DEBUG, "After  writing @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
+                M_PRINTF(MLOG_DEBUG, "After  writing @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
                 continue;
 
@@ -296,7 +304,7 @@ void* commandthread(void* ptr){
 	      }	
 #ifdef DEBUG
 	      gettimeofday(&time_struct, NULL);
-              m_printf(MLOG_DEBUG, "Before adding  @%d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
+              M_PRINTF(MLOG_DEBUG, "Before adding  @%d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
 
                 //TODO come up with a way to calculate sha without having user to wait when the rule appears
@@ -314,7 +322,7 @@ void* commandthread(void* ptr){
               memset ( exepathbuf, 0, PATHSIZE );
               readlink (exepath, exepathbuf, PATHSIZE-1 );
               if (strcmp(exepathbuf, sent_to_fe_struct.path)){
-                  m_printf(MLOG_INFO, "Frontend asked to add a process that is no longer running,%s,%d\n", __FILE__, __LINE__);
+                  M_PRINTF(MLOG_INFO, "Frontend asked to add a process that is no longer running,%s,%d\n", __FILE__, __LINE__);
                   fe_awaiting_reply = FALSE;
                   continue;
               }
@@ -326,7 +334,7 @@ void* commandthread(void* ptr){
                
                     //Calculate the size of the executable
                     if (stat(sent_to_fe_struct.path, &exestat) == -1 ){
-                        m_printf(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                        M_PRINTF(MLOG_INFO, "stat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                     }
 
                     //Calculate sha of executable
@@ -340,7 +348,7 @@ void* commandthread(void* ptr){
 	       unsigned long long stime;
                stime = starttimeGet ( atoi ( sent_to_fe_struct.pid ) );
                if ( sent_to_fe_struct.stime != stime ){
-                    m_printf ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
+                    M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
                     fe_awaiting_reply = FALSE;
                     continue;
                 }
@@ -350,31 +358,31 @@ void* commandthread(void* ptr){
 		dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, TRUE, sha, sent_to_fe_struct.stime, exestat.st_size, 0 ,TRUE);
 #ifdef DEBUG
        gettimeofday(&time_struct, NULL);
-	m_printf(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
+        M_PRINTF(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
 	fe_awaiting_reply = FALSE;
                 continue;
 
                  case F2DCOMM_REG:
                 if (fe_active_flag_get()) {
-                    m_printf(MLOG_ALERT, "Red alert!!! There was an attempt to register a frontend when one is already active\n");
+                    M_PRINTF(MLOG_ALERT, "Red alert!!! There was an attempt to register a frontend when one is already active\n");
                     continue;
                 }
                 fe_active_flag_set(TRUE);
-                m_printf(MLOG_INFO, "Registered frontend\n");
+                M_PRINTF(MLOG_INFO, "Registered frontend\n");
                 continue;
 
             case F2DCOMM_UNREG:
                 if (!fe_active_flag_get()) {
-                    m_printf(MLOG_ALERT, "Red alert!!! There was an attempt to unregister a frontend when none is active\n");
+                    M_PRINTF(MLOG_ALERT, "Red alert!!! There was an attempt to unregister a frontend when none is active\n");
                     continue;
                 }
                  fe_active_flag_set(FALSE);
 		 fe_awaiting_reply = FALSE;
-                m_printf(MLOG_INFO, "Unregistered frontend\n");
+                M_PRINTF(MLOG_INFO, "Unregistered frontend\n");
                 continue;
 
-	    default: m_printf(MLOG_INFO, "unknown command in commandthread \n");
+            default: M_PRINTF(MLOG_INFO, "unknown command in commandthread \n");
         }
     }
 }
@@ -391,7 +399,7 @@ void* commandthread(void* ptr){
 
     key_t ipckey_d2f, ipckey_f2d, ipckey_d2flist, ipckey_d2fdel, ipckey_creds, ipckey_d2ftraffic;
     if (remove(TMPFILE) != 0)
-        m_printf(MLOG_DEBUG, "remove: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    {M_PRINTF(MLOG_DEBUG, "remove: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
     if (creat(TMPFILE,
 
 #ifdef DEBUG       //make world readable to avoid permission cock-ups during debugging
@@ -401,31 +409,31 @@ void* commandthread(void* ptr){
 #endif
 
     ) == 1)
-        m_printf(MLOG_INFO, "creat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    {M_PRINTF(MLOG_INFO, "creat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
     //-----------------------------------
     if ((ipckey_d2f = ftok(TMPFILE, FTOKID_D2F)) == -1)
-        m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "D2FKey: %d\n", ipckey_d2f);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "D2FKey: %d\n", ipckey_d2f);
 
     if ((ipckey_f2d = ftok(TMPFILE, FTOKID_F2D)) == -1)
-        m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_f2d);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_f2d);
 
     if ((ipckey_d2flist = ftok(TMPFILE, FTOKID_D2FLIST)) == -1)
-        m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_d2flist);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2flist);
 
     if ((ipckey_d2fdel = ftok(TMPFILE, FTOKID_D2FDEL)) == -1)
-        m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_d2fdel);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2fdel);
 
     if ((ipckey_creds = ftok(TMPFILE, FTOKID_CREDS)) == -1)
-        m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_creds);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_creds);
 
     if ((ipckey_d2ftraffic = ftok(TMPFILE, FTOKID_D2FTRAFFIC)) == -1)
-	m_printf(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    m_printf(MLOG_DEBUG, "Key: %d\n", ipckey_d2ftraffic);
+    {M_PRINTF(MLOG_INFO, "ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
+    M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2ftraffic);
 
     /* Set up the message queue to communicate between daemon and GUI*/
     //we need to first get the Qid, then use this id to delete Q
@@ -450,79 +458,79 @@ creds_bits = OTHERS_ACCESS;
 //what the user's UID is. So we allow any user to invoke the frontend.
 
     if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2f, IPC_RMID, 0);
     //create it again
     if ((mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2f);
+    M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2f);
     //----------------------------------------------------
     if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2flist, IPC_RMID, 0);
     //create it again
     if ((mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2flist);
+    M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2flist);
 
     //---------------------------------------------------------
 
     if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_f2d, IPC_RMID, 0);
     //create it again
     if ((mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_f2d);
+    M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_f2d);
 
     //------------------------------------------------------
     if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2fdel, IPC_RMID, 0);
     //create it again
     if ((mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Message identifier %d\n", mqd_d2fdel);
+    M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2fdel);
 
     //------------------------------------------------------
     //This particular message queue should be writable by anyone, hence permission 0002
     //because we don't know in advance what user will be invoking the frontend
 
     if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_creds, IPC_RMID, 0);
     //create it again
     if ((mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits)) == -1) {
-        m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
+    M_PRINTF(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
 
     //-------------------------------------------------
 
     if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits)) == -1) {
-	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //remove queue
     msgctl(mqd_d2ftraffic, IPC_RMID, 0);
     //create it again
     if ((mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits)) == -1) {
-	m_printf(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgget: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-    m_printf(MLOG_DEBUG, "Traffic msgq id %d\n", mqd_d2ftraffic);
+    M_PRINTF(MLOG_DEBUG, "Traffic msgq id %d\n", mqd_d2ftraffic);
 
     //------------------------------------------------------------
 
@@ -543,14 +551,14 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
             msg_d2f.item.command = D2FCOMM_ASK_OUT;
             //pthread_mutex_lock(&mutex_msgq);
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
-                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+                M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
             }
             return 4;
 
         case D2FCOMM_LIST:
             msg_d2f.item.command = D2FCOMM_LIST;
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
-                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            {M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
             return -1;
     }
 }
@@ -573,7 +581,7 @@ int  fe_ask_out(char *path, char *pid, unsigned long long *stime) {
     strcpy(msg_d2f.item.pid, pid);
     msg_d2f.item.command = D2FCOMM_ASK_OUT;
     if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     fe_awaiting_reply = TRUE;
     if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
@@ -603,7 +611,7 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
     msg_d2f.item.inode = dport;
 	    	    
     if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1) {
-        m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     fe_awaiting_reply = TRUE;
     if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
@@ -613,5 +621,5 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
 int fe_list() {
             msg_d2f.item.command = D2FCOMM_LIST;
             if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
-                m_printf(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+            {M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);}
 }

@@ -17,7 +17,7 @@
 #include "common/defines.h"
 #include "common/includes.h"
 
-int (*m_printf)(int loglevel, char *format, ...);
+int (*m_printf)(int loglevel, char *logstring);
 void list();
 
 char TAB[2] = {9, 0};
@@ -55,6 +55,7 @@ int use_xmessage = 0;
 int use_msgq = 1;
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 FILE *logfilefd;
 
@@ -67,12 +68,15 @@ extern void msgq_add(msg_struct add_struct);
 extern void msgq_list();
 extern void msgq_f2ddel(dlist rule, int ack_flag);
 
+char logstring[PATHSIZE];
 
-int m_printf_file(int loglevel, char *format, ...) {
-    char logstring[PATHSIZE*2]; //shaould be enough for the longest line in log
-    va_list args;
-    va_start ( args, format );
-    vsprintf ( logstring, format, args );
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex); \
+
+int m_printf_file(int loglevel, char * logstring) {
     write ( fileno ( logfilefd ), logstring, strlen ( logstring ) );
 
      return 0;
@@ -176,7 +180,7 @@ void * threadZenity(void *ptr) {
             //OK pressed
             if (WEXITSTATUS(status) == 0) {
                 if (zenity_answer == 0) {
-                    m_printf(MLOG_ERROR, "OK pressed without selecting an answer: in %s:%d\n", __FILE__, __LINE__);
+                    M_PRINTF(MLOG_ERROR, "OK pressed without selecting an answer: in %s:%d\n", __FILE__, __LINE__);
 		     //kill commreadthread, otherwise it's gonna wait for input endlessly
                 pthread_cancel(commread_thread);
                 //any random number clears uw
@@ -188,7 +192,7 @@ void * threadZenity(void *ptr) {
             }
         }
         //else WIFEXITED(status) != 0
-        m_printf(MLOG_ERROR, "zenity exited abnormally: in %s:%d\n", __FILE__, __LINE__);
+        M_PRINTF(MLOG_ERROR, "zenity exited abnormally: in %s:%d\n", __FILE__, __LINE__);
         die();
     }
 }
@@ -277,7 +281,7 @@ void farray_add(dlist rule) //split string to path/pid/permissions/flags and add
     }
     //last element's .next should point now to our newly created one
     if ((temp->next = malloc(sizeof (dlist))) == NULL) {
-        m_printf(MLOG_ERROR, "malloc: %s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_ERROR, "malloc: %s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
         die();
     }
     // new element's prev field should point to the former last element...
@@ -305,7 +309,7 @@ void delindex(int index, int ack_flag) {
         temp = temp->next;
     }
     if (temp == 0) {
-        m_printf(MLOG_INFO, "no such index in %s:%d\n", __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "no such index in %s:%d\n", __FILE__, __LINE__);
         return;
     }
     //else if index == i
@@ -351,7 +355,7 @@ void list() {
     init_pair(3, COLOR_BLUE, COLOR_GREEN);
 
     if (ioctl(0, TIOCGWINSZ, &ws) != 0) {
-        m_printf(MLOG_ERROR, "ioctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_ERROR, "ioctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     //wprintw(upperwin, "row=%d, col=%d, xpixel=%d, ypixel=%d\n",  ws.ws_row,ws.ws_col,ws.ws_xpixel,ws.ws_ypixel);
     term_width = ws.ws_col;
@@ -380,7 +384,7 @@ void delstring(char path[PATHSIZE])//daemon asked us to remove a certain rule si
         temp = temp->next;
     }
     pthread_mutex_unlock(&mutex);
-    m_printf(MLOG_INFO, "path not found: %s:%d", __FILE__, __LINE__);
+    M_PRINTF(MLOG_INFO, "path not found: %s:%d", __FILE__, __LINE__);
 }
 
 // take the array and write everything line by line to lower window
@@ -390,7 +394,7 @@ void sigwinch(int signal) {
     int ret;
 
     if (ioctl(0, TIOCGWINSZ, &ws) != 0) {
-        m_printf(MLOG_ERROR, "ioctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_ERROR, "ioctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
     term_width = ws.ws_col;
 
@@ -457,7 +461,7 @@ void refresh_upperwin() {
 //these flags are used to signal that an argument has been entered twice
 
 void badArgs() {
-    m_printf(MLOG_ERROR, "Duplicate,unknown or conflicting argument specified. Exitting...\n");
+    M_PRINTF(MLOG_ERROR, "Duplicate,unknown or conflicting argument specified. Exitting...\n");
     exit(0);
 }
 
@@ -473,7 +477,7 @@ void ncursesInit() {
     init_pair(2, COLOR_BLUE, COLOR_GREEN);
 
     if (ioctl(0, TIOCGWINSZ, &ws) != 0) {
-        m_printf(MLOG_INFO, "ioctl: %s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+        M_PRINTF(MLOG_INFO, "ioctl: %s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
     } else term_width = ws.ws_col;
 
     //create pads from which info will be copied to viewports

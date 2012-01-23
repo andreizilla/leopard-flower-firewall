@@ -10,10 +10,22 @@
 #include <fcntl.h>
 
 
-extern int ( *m_printf ) ( int loglevel, char *format, ... );
+extern int ( *m_printf ) ( int loglevel, char *logstring);
 extern int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
 extern pthread_mutex_t dlist_mutex;
 extern dlist *first;
+extern char logstring[PATHSIZE];
+extern pthread_mutex_t logstring_mutex;
+
+
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex); \
+
+
+
 
 int test1()
 {
@@ -34,7 +46,7 @@ int test1()
 
     if ((childpid = fork()) == -1)
     {
-	m_printf ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+        M_PRINTF ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	return -1;
     }
     if (childpid == 0) //child
@@ -51,7 +63,7 @@ int test1()
 	//readlink fails if PID isn't running
 	if ( readlink ( exelink, exepath, PATH_MAX ) == -1 )
 	{
-	    m_printf ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+            M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	    return -1;
 	}
 	printf ("Own path is %s\n", exepath);
