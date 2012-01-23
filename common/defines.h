@@ -11,7 +11,8 @@
 #define PIDLENGTH 16
 #define PERMSLENGTH 16
 #define SOCKETBUFSIZE 32 // entries in /proc/<pid>/fd are in the form of socket:[1234567] - max length 16 chars
-#define NFQNUM_OUTPUT 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUTPUT_TCP 11220 //arbitrary number used for iptables rule
+#define NFQNUM_OUTPUT_UDP 11222 //arbitrary number used for iptables rule
 #define NFQNUM_INPUT 11221
 #define MAX_LINE_LENGTH 1024 //max lc ength of a line in configfile/rulesfile
 #define DIGEST_SIZE 64
@@ -28,6 +29,7 @@
 #define REFRESH_INTERVAL 2
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
+#define MAGIC_NO -1
 
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"
