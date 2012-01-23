@@ -30,6 +30,10 @@
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2
 #define MAGIC_NO -1
+#define DIRECTION_IN 1
+#define DIRECTION_OUT 2
+#define PROTO_TCP 3
+#define PROTO_UDP 4
 
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"

@@ -1468,7 +1468,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set)
+int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
     char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
     char path[32];
@@ -1524,7 +1524,8 @@ int socket_find_from_pids_in_dlist ( int *mysocket, int *nfmark_to_set)
                 memset ( exepathbuf, 0, PATHSIZE );
                 readlink ( path, exepathbuf, PATHSIZE );
                 //TODO exepathbuf[readlink's retval] = 0 instead of memset
-                m_printf ( MLOG_TRAFFIC, "%s %s ", exepathbuf, temp->pid );
+                strcpy(m_path, exepathbuf);
+                strcpy (m_pid, temp->pid);
                 closedir ( m_dir );
 
                 unsigned long long stime;
@@ -1639,7 +1640,6 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
                         closedir ( proc_DIR );
                         strcpy ( m_path, exepathbuf );
                         strcpy ( m_pid, proc_dirent->d_name );
-                        m_printf ( MLOG_TRAFFIC, "%s %s ", m_path, m_pid );
                         return GOTO_NEXT_STEP;
                     }
                 }
@@ -2007,18 +2007,14 @@ int  port2socket_tcp ( int *portint, int *socketint )
 }
 
 //Handler for TCP packets for INPUT NFQUEUE
-int packet_handle_tcp_in ( int srctcp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+int packet_handle_tcp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_tcp ( &srctcp, &socketint )) != GOTO_NEXT_STEP ) goto out;
-    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_tcp(&socketint);
@@ -2034,15 +2030,12 @@ out:
 //Handler for TCP packets for OUTPUT NFQUEUE
 int packet_handle_tcp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime){
     int retval;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ((retval = parsecache_out(socket, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socket, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
     retval = socket_find_in_proc ( &socket, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
         retval = socket_check_kernel_tcp(&socket);
@@ -2056,19 +2049,15 @@ out:
 }
 
 //Handler for UDP packets
-int packet_handle_udp_in ( int srcudp, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-    int retval, socketint;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
+    int retval;
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ( (retval = port2socket_udp ( &srcudp, &socketint ) ) != GOTO_NEXT_STEP) goto out;
-    if ((retval = parsecache_in(socketint, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
     retval = socket_find_in_proc ( &socketint, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
 	retval = socket_check_kernel_udp(&socketint);
@@ -2087,15 +2076,12 @@ out:
 int packet_handle_udp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    char cache_path[PATHSIZE];
-    char cache_pid[PIDLENGTH];
     //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-    if ((retval = parsecache_out(socket, cache_path, cache_pid)) != GOTO_NEXT_STEP){
+    if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP){
 	m_printf (MLOG_DEBUG2, "(cache)");
-	m_printf ( MLOG_TRAFFIC, " %s %s ", cache_path, cache_pid );
 	goto out;
     }
-    if ( (retval = socket_find_from_pids_in_dlist ( &socket, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
+    if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
     retval = socket_find_in_proc ( &socket, path, pid, stime );
     if (retval == SOCKET_NONE_PIDFD){
         retval = socket_check_kernel_udp(&socket);
@@ -2212,14 +2198,106 @@ int is_udp_port_in_table (int port)
     return -1;
 }
 
+void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstport, char *path, char *pid, int verdict)
+{
+    char logstring[PATHSIZE];
+    if (direction == DIRECTION_IN)
+    {
+        strcpy(logstring,">");
+        if (proto == PROTO_TCP) strcat(logstring,"TCP ");
+        else if (proto == PROTO_UDP) strcat (logstring, "UDP ");
+        char port[8];
+        sprintf (port,"%d",dstport);
+        strcat (logstring, "dst ");
+        strcat (logstring, port);
+        strcat (logstring, " src ");
+        strcat (logstring, ip);
+        strcat (logstring,":");
+        sprintf(port, "%d", srcport);
+        strcat (logstring, port);
+        strcat (logstring, " ");
+    }
+    else if (direction == DIRECTION_OUT)
+    {
+        strcpy(logstring,"<");
+        if (proto == PROTO_TCP) strcat(logstring,"TCP ");
+        else if (proto == PROTO_UDP) strcat (logstring, "UDP ");
+        char port[8];
+        sprintf (port,"%d",srcport);
+        strcat (logstring, "src ");
+        strcat (logstring, port);
+        strcat (logstring, " dst ");
+        strcat (logstring, ip);
+        strcat (logstring,":");
+        sprintf(port, "%d", dstport);
+        strcat (logstring, port);
+        strcat (logstring, " ");
+    }
+    strcat (logstring, path);
+    strcat (logstring, " ");
+    strcat (logstring, pid);
+    strcat (logstring, " ");
 
+    switch ( verdict )
+       {
+       case ACCEPT:
+       case SOCKET_FOUND_IN_DLIST_ALLOW:
+       case PATH_FOUND_IN_DLIST_ALLOW:
+       case NEW_INSTANCE_ALLOW:
+       case FORKED_CHILD_ALLOW:
+       case CACHE_TRIGGERED_ALLOW:
+       case INKERNEL_RULE_ALLOW:
+
+        strcat (logstring, "allow\n"); break;
+
+
+       case DROP:
+        strcat (logstring, "drop\n"); break;
+       case PORT_NOT_FOUND:
+           strcat (logstring, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); break;
+       case SENT_TO_FRONTEND:
+           strcat (logstring,  "(asking frontend) drop\n" ); break;
+       case SOCKET_FOUND_IN_DLIST_DENY:
+       case PATH_FOUND_IN_DLIST_DENY:
+       case NEW_INSTANCE_DENY:
+       case FORKED_CHILD_DENY:
+       case CACHE_TRIGGERED_DENY:
+       case INKERNEL_RULE_DENY:
+           strcat (logstring,  "deny\n" ); break;
+        case SOCKET_NONE_PIDFD:
+            strcat (logstring,  "(no process associated with packet) drop\n" ); break;
+       case FRONTEND_NOT_LAUNCHED:
+           strcat (logstring, "(frontend not active) drop\n" ); break;
+       case FRONTEND_BUSY:
+           strcat (logstring, "(frontend busy) drop\n" ); break;
+       case UNSUPPORTED_PROTOCOL:
+           strcat (logstring, "(unsupported protocol) drop\n" ); break;
+       case ICMP_MORE_THAN_ONE_ENTRY:
+           strcat (logstring, "More than one program is using icmp, dropping\n" ); break;
+       case ICMP_NO_ENTRY:
+           strcat (logstring, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); break;
+       case SHA_DONT_MATCH:
+           strcat (logstring, "Red alert. Some app is trying to impersonate another\n" ); break;
+       case STIME_DONT_MATCH:
+           strcat (logstring, "Red alert. Some app is trying to impersonate another\n" ); break;
+       case EXESIZE_DONT_MATCH:
+           strcat (logstring, "Red alert. Executable's size don't match the records\n" ); break;
+       case INODE_HAS_CHANGED:
+           strcat (logstring, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); break;
+       case EXE_HAS_BEEN_CHANGED:
+           strcat (logstring, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); break;
+       case SRCPORT_NOT_FOUND_IN_PROC:
+           strcat (logstring, "source port not found in procfs\n" ); break;
+       }
+    m_printf(MLOG_TRAFFIC, "%s", logstring);
+}
 
 int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval, socketint;
 
     if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
-    if (( retval = socket_find_from_pids_in_dlist ( &socketint, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
+    if (( retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
     if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
     if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime) )!= GOTO_NEXT_STEP) goto out;
     if ( !fe_active_flag_get() )
@@ -2233,10 +2311,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     gettimeofday(&lastpacket, NULL);
     pthread_mutex_unlock(&lastpacket_mutex);
 
-#ifdef DEBUG
-    static int is_strange_daddr = 0;
-    static char strange_daddr[INET_ADDRSTRLEN];
-#endif
     struct iphdr *ip;
     int id;
     struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
@@ -2247,35 +2321,32 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
 
-#ifdef DEBUG
-    //works only on my machine :))
-    if (strcmp(daddr, "192.168.0.2")){
-        is_strange_daddr = 1;
-        strcpy(strange_daddr, daddr);
-    }
-    m_printf ( MLOG_DEBUG, "\n %s INPUT \n ", is_strange_daddr?strange_daddr:"-");
-# endif
-
-    in_packet_size = ntohs(ip->tot_len);
     int verdict;
     u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
     char path[PATHSIZE], pid[PIDLENGTH];
     unsigned long long stime;
+    int proto;
+    int m_socketint;
     switch ( ip->protocol )
     {
     case IPPROTO_TCP:
-        ;
-        // ihl field is IP header length in 32-bit words, multiply a word by 4 to get length in bytes
+        proto = PROTO_TCP;
+        // ihl is IP header length in 32bit words, multiply a word by 4 to get length in bytes
         struct tcphdr *tcp;
         tcp = ( struct tcphdr* ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbo = tcp->source;
         dport_netbo = tcp->dest;
         sport_hostbo = ntohs ( tcp->source );
         dport_hostbo = ntohs ( tcp->dest );
-	m_printf ( MLOG_TRAFFIC, ">TCP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
+
+        if ((m_socketint = is_tcp_port_in_table(dport_hostbo)) == -1) //not found in cache
+        {
+            verdict = PORT_NOT_FOUND;
+            goto kernel_verdict;
+        }
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-	    if ((verdict = packet_handle_tcp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_tcp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -2309,17 +2380,22 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         break;
         
     case IPPROTO_UDP:
-        ;
+        proto = PROTO_UDP;
         struct udphdr *udp;
         udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbo = udp->source;
         dport_netbo = udp->dest;
         sport_hostbo = ntohs ( udp->source );
         dport_hostbo = ntohs ( udp->dest );     
-	m_printf ( MLOG_TRAFFIC, ">UDP dst %d src %s:%d ", dport_hostbo, saddr, sport_hostbo );
+
+        if ((m_socketint = is_udp_port_in_table(dport_hostbo)) == -1) //not found in cache
+        {
+            verdict = PORT_NOT_FOUND;
+            goto kernel_verdict;
+        }
 
         fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;            
-	    if ((verdict = packet_handle_udp_in ( dport_hostbo, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_udp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
 		if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
 		    pthread_mutex_lock(&dlist_mutex);
 		    dlist *temp = first;
@@ -2360,7 +2436,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
             if (fe_was_busy_in){ verdict = FRONTEND_BUSY; break;}
 	    else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
-        break;
+      break;
     default:
         m_printf ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
         m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
@@ -2368,18 +2444,11 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     }
 
     kernel_verdict:
- switch ( verdict )
-    {
-    case ACCEPT:
-    case SOCKET_FOUND_IN_DLIST_ALLOW:
-    case PATH_FOUND_IN_DLIST_ALLOW:
-    case NEW_INSTANCE_ALLOW:
-    case FORKED_CHILD_ALLOW:
-    case CACHE_TRIGGERED_ALLOW:
-    case INKERNEL_RULE_ALLOW:
+        print_traffic_log(proto, DIRECTION_IN, daddr, sport_hostbo, dport_hostbo, path, pid, verdict);
 
+    if (verdict < ALLOW_VERDICT_MAX)
+    {
         nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-        m_printf ( MLOG_TRAFFIC, "allow\n" );
         
      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -2405,51 +2474,9 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
      }
      }
         return 0;
-
-    case DROP:
-        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
-    case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" ); goto DROPverdict;
-    case SENT_TO_FRONTEND:
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case PATH_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case NEW_INSTANCE_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_LAUNCHED:
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
-    case FRONTEND_BUSY:
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
-    case UNSUPPORTED_PROTOCOL:
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
-    case ICMP_MORE_THAN_ONE_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
-    case ICMP_NO_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
-    case SHA_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case STIME_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case EXESIZE_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
-    case INODE_HAS_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
-    case EXE_HAS_BEEN_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
-    case FORKED_CHILD_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case CACHE_TRIGGERED_DENY:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SRCPORT_NOT_FOUND_IN_PROC:
-	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
-    case INKERNEL_RULE_DENY:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	 m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
-    DROPverdict:
+
+    // else
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
         return 0;
 
@@ -2483,10 +2510,6 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     int port, m_socketint, found_flag;
     int i = 0;
 
-    switch ( ip->protocol )
-    {
-    case IPPROTO_UDP:
-        ;
         struct udphdr *udp;
         udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
         sport_netbyteorder = udp->source;
@@ -2495,7 +2518,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
         if ((m_socketint = is_udp_port_in_table(srcudp)) != -1) //found in cache
         {
-            printf("udptable cache hit \n");
+         //   printf("udptable cache hit \n");
             goto found2;
         }
 
@@ -2539,10 +2562,9 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 found2:
         ;
 
-        m_printf ( MLOG_TRAFFIC, "<UDP src %d dst %s:%d ", srcudp, daddr, ntohs ( udp->dest ) );
-
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-            if ((verdict = packet_handle_udp_out ( m_socketint, &nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
+            if ((verdict = packet_handle_udp_out ( m_socketint, &nfmark_to_set_out, path, pid, &stime ))
+                    == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
                 if (verdict == INKERNEL_SOCKET_FOUND){ //see if this is an inkernel rule
                     pthread_mutex_lock(&dlist_mutex);
                     dlist *temp = first;
@@ -2571,11 +2593,10 @@ found2:
                     strcpy(pid, daddr);
                     stime = ntohs (udp->dest);
                 }
-            if (fe_was_busy_out){ verdict = FRONTEND_BUSY; break;}
+            if (fe_was_busy_out){ verdict = FRONTEND_BUSY;}
             else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
-        break;
-    case IPPROTO_ICMP:
+ /*   case IPPROTO_ICMP:
         ;
         m_printf ( MLOG_TRAFFIC, "<ICMP dst %d ", daddr);
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
@@ -2584,25 +2605,14 @@ found2:
             else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
         }
         break;
-    default:
-        m_printf ( MLOG_INFO, "unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
-        m_printf ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
-        verdict = UNSUPPORTED_PROTOCOL;
-    }
+        */
+
 
     kernel_verdict:
-    switch ( verdict )
+    print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, ntohs ( udp->dest ), path, pid, verdict);
+    if (verdict < ALLOW_VERDICT_MAX)
     {
-    case ACCEPT:
-    case SOCKET_FOUND_IN_DLIST_ALLOW:
-    case PATH_FOUND_IN_DLIST_ALLOW:
-    case NEW_INSTANCE_ALLOW:
-    case FORKED_CHILD_ALLOW:
-    case CACHE_TRIGGERED_ALLOW:
-    case INKERNEL_RULE_ALLOW:
-
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-     m_printf ( MLOG_TRAFFIC, "allow\n" );
 
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -2631,54 +2641,10 @@ found2:
         }
 
 return 0;
-
-
-    case DROP:
-        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
-    case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
-    case SENT_TO_FRONTEND:
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case PATH_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case NEW_INSTANCE_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_LAUNCHED:
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
-    case FRONTEND_BUSY:
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
-    case UNSUPPORTED_PROTOCOL:
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
-    case ICMP_MORE_THAN_ONE_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
-    case ICMP_NO_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
-    case SHA_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case STIME_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case EXESIZE_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
-    case INODE_HAS_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
-    case EXE_HAS_BEEN_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
-    case FORKED_CHILD_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case CACHE_TRIGGERED_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SRCPORT_NOT_FOUND_IN_PROC:
-         m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
-    case INKERNEL_RULE_DENY:
-        m_printf ( MLOG_TRAFFIC, "in-kernel rule, deny\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
     }
-    DROPverdict:
+    //else if verdict > ALLOW_VERDICT_MAX
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-        return 0;
+    return 0;
 }
 
 
@@ -2699,7 +2665,8 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
     int verdict;
     u_int16_t sport_netbyteorder, dport_netbyteorder;
-    char path[PATHSIZE], pid[PIDLENGTH];
+    char path[PATHSIZE]={0};
+    char pid[PIDLENGTH]={0};
     unsigned long long stime;
 
     int bytesread_tcp, bytesread_tcp6;
@@ -2717,7 +2684,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
     if ((socket = is_tcp_port_in_table(srctcp)) != -1) //found in cache
     {
-        printf("tcptable cache hit \n");
+       // printf("tcptable cache hit \n");
         goto found2;
     }
 
@@ -2760,8 +2727,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     return 0;
 
     found2:
-	m_printf ( MLOG_TRAFFIC, "<TCP src %d dst %s:%d ", srctcp, daddr, ntohs ( tcp->dest ) );
-	//remember f/e's state before we process
+        //remember f/e's state before we process
         fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
         if ((verdict = packet_handle_tcp_out ( socket, &nfmark_to_set_out, path, pid, &stime ))
                 == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND){
@@ -2799,18 +2765,11 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         }
 
     kernel_verdict:
-    switch ( verdict )
-    {
-    case ACCEPT:
-    case SOCKET_FOUND_IN_DLIST_ALLOW:
-    case PATH_FOUND_IN_DLIST_ALLOW:
-    case NEW_INSTANCE_ALLOW:
-    case FORKED_CHILD_ALLOW:
-    case CACHE_TRIGGERED_ALLOW:
-    case INKERNEL_RULE_ALLOW:
+    print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, ntohs ( tcp->dest ), path, pid, verdict);
 
+        if (verdict < ALLOW_VERDICT_MAX)
+    {
      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
-     m_printf ( MLOG_TRAFFIC, "allow\n" );
         
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_DST, ip->daddr);
      nfct_set_attr_u32(ct_out, ATTR_ORIG_IPV4_SRC, ip->saddr);
@@ -2839,55 +2798,16 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         }
 
 return 0;
+        }
 
-
-    case DROP:
-        m_printf ( MLOG_TRAFFIC, "drop\n" ); goto DROPverdict;
-    case PORT_NOT_FOUND:
-        m_printf ( MLOG_TRAFFIC, "packet's source port not found in /proc/net/*. Very unusual, please report.\n" ); goto DROPverdict;
-    case SENT_TO_FRONTEND:
-        m_printf ( MLOG_TRAFFIC, "sent to frontend, dont block the nfqueue - silently drop it\n" ); goto DROPverdict;
-    case SOCKET_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case PATH_FOUND_IN_DLIST_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case NEW_INSTANCE_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case FRONTEND_NOT_LAUNCHED:
-        m_printf ( MLOG_TRAFFIC, "frontend is not active, dropping\n" ); goto DROPverdict;
-    case FRONTEND_BUSY:
-        m_printf ( MLOG_TRAFFIC, "frontend is busy, dropping\n" ); goto DROPverdict;
-    case UNSUPPORTED_PROTOCOL:
-        m_printf ( MLOG_TRAFFIC, "Unsupported protocol, dropping\n" ); goto DROPverdict;;
-    case ICMP_MORE_THAN_ONE_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "More than one program is using icmp, dropping\n" ); goto DROPverdict;
-    case ICMP_NO_ENTRY:
-        m_printf ( MLOG_TRAFFIC, "icmp packet received by there is no icmp entry in /proc. Very unusual. Please report\n" ); goto DROPverdict;
-    case SHA_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case STIME_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Some app is trying to impersonate another\n" ); goto DROPverdict;
-    case EXESIZE_DONT_MATCH:
-        m_printf ( MLOG_TRAFFIC, "Red alert. Executable's size don't match the records\n" ); goto DROPverdict;
-    case INODE_HAS_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" ); goto DROPverdict;
-    case EXE_HAS_BEEN_CHANGED:
-        m_printf ( MLOG_TRAFFIC, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" ); goto DROPverdict;
-    case FORKED_CHILD_DENY:
-        m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case CACHE_TRIGGERED_DENY:
-	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    case SRCPORT_NOT_FOUND_IN_PROC:
-	 m_printf ( MLOG_TRAFFIC, "source port not found in procfs\n" ); goto DROPverdict;
-    case INKERNEL_RULE_DENY:
-	m_printf ( MLOG_TRAFFIC, "in-kernel rule, deny\n" ); goto DROPverdict;
-    case SOCKET_NONE_PIDFD:
-	m_printf ( MLOG_TRAFFIC, "deny\n" ); goto DROPverdict;
-    }
-    DROPverdict:
+//else if verdict > ALLOW_VERDICT_MAX
     nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
         return 0;
 }
+
+
+
+
 
 void loggingInit()
 {
@@ -3611,7 +3531,7 @@ int main ( int argc, char *argv[] )
     pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL );
     pthread_create ( &traffic_thread, NULL, trafficthread, NULL );
     pthread_create ( &trafficdestroy_thread, NULL, trafficdestroythread, NULL );
-    pthread_create ( &read_stats_thread, NULL, readstatsthread, NULL );
+   // pthread_create ( &read_stats_thread, NULL, readstatsthread, NULL );
 
 
     if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL ){
@@ -3639,6 +3559,7 @@ int main ( int argc, char *argv[] )
     if ((tcp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
     if ((udp_smallbuf=(char*)malloc(4096)) == NULL) perror("malloc");
 
+/*
 
     if ((tcp_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(tcp_membuf,0, MEMBUF_SIZE);
@@ -3651,6 +3572,7 @@ int main ( int argc, char *argv[] )
 
     if ((udp6_membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
     memset(udp6_membuf,0, MEMBUF_SIZE);
+    */
 
 
 #ifdef DEBUG
