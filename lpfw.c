@@ -109,7 +109,7 @@ int rule_ordinal_out, rule_ordinal_in;
 int out_packet_size, in_packet_size;
 
 char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
-char tcp_smallbuf[4096], udp_smallbuf[4096];
+char tcp_smallbuf[4096], udp_smallbuf[4096], tcp6_smallbuf[4096], udp6_smallbuf[4096];
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 
@@ -143,6 +143,174 @@ char logstring[PATHSIZE];
     pthread_mutex_unlock(&logstring_mutex); \
  
 
+int build_tcp_port_cache(int *socket_found, int port_to_find)
+{
+    int bytesread_tcp;
+    char newline[2] = {'\n','\0'};
+    int port, socket, found_flag, i;
+    char *token;
+
+    i = 0;
+    memset(tcp_smallbuf,0, 4096);
+    fseek(tcpinfo,0,SEEK_SET);
+    found_flag = 0;
+    while ((bytesread_tcp = read(tcpinfo_fd, tcp_smallbuf, 4060)) > 0)
+      {
+	tcp_stats++;
+	if (bytesread_tcp == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok(tcp_smallbuf, newline); //skip the first line (column headers)
+	while ((token = strtok(NULL, newline)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
+	    tcp_table[i*2] = port;
+	    tcp_table[i*2+1] = socket;
+	    if (port_to_find != port)
+	      {
+		i++;
+		*socket_found = socket;
+		continue;
+	      }
+	    //else
+	    found_flag = 1;
+	    i++;
+	  }
+      }
+    tcp_table[i*2] = MAGIC_NO;
+    if (!found_flag) {return -1;}
+    else {return 1;}
+}
+
+int build_tcp6_port_cache(int *socket_found, int port_to_find)
+{
+    int bytesread_tcp6;
+    char newline[2] = {'\n','\0'};
+    int port, socket, found_flag, i;
+    char *token;
+
+    i=0;
+    memset(tcp6_smallbuf,0, 4096);
+    fseek(tcp6info,0,SEEK_SET);
+    found_flag = 0;
+    while ((bytesread_tcp6 = read(tcp6info_fd, tcp6_smallbuf, 4060)) > 0)
+      {
+	tcp_stats++;
+	if (bytesread_tcp6 == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok(tcp6_smallbuf, newline); //skip the first line (column headers)
+	while ((token = strtok(NULL, newline)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
+	    tcp6_table[i*2] = port;
+	    tcp6_table[i*2+1] = socket;
+	    if (port_to_find != port)
+	      {
+		i++;
+		*socket_found = socket;
+		continue;
+	      }
+	    //else
+	    found_flag = 1;
+	    i++;
+	  }
+      }
+    tcp6_table[i*2] = MAGIC_NO;
+    if (!found_flag) {return -1;}
+    else {return 1;}
+}
+
+
+int build_udp_port_cache(int *socket_found, int port_to_find)
+{
+    int bytesread_udp;
+    char newline[2] = {'\n','\0'};
+    int port, socket, found_flag, i;
+    char *token;
+
+    i = 0;
+    memset(udp_smallbuf,0, 4096);
+    fseek(udpinfo,0,SEEK_SET);
+    found_flag = 0;
+    while ((bytesread_udp = read(udpinfo_fd, udp_smallbuf, 4060)) > 0)
+      {
+	udp_stats++;
+	if (bytesread_udp == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok(udp_smallbuf, newline); //skip the first line (column headers)
+	while ((token = strtok(NULL, newline)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
+	    udp_table[i*2] = port;
+	    udp_table[i*2+1] = socket;
+	    if (port_to_find != port)
+	      {
+		i++;
+		*socket_found = socket;
+		continue;
+	      }
+	    //else
+	    found_flag = 1;
+	    i++;
+	  }
+      }
+    udp_table[i*2] = MAGIC_NO;
+    if (!found_flag) {return -1;}
+    else {return 1;}
+}
+
+int build_udp6_port_cache(int *socket_found, int port_to_find)
+{
+    int bytesread_udp6;
+    char newline[2] = {'\n','\0'};
+    int port, socket, found_flag, i;
+    char *token;
+
+    i = 0;
+    memset(udp6_smallbuf,0, 4096);
+    fseek(udp6info,0,SEEK_SET);
+    found_flag = 0;
+    while ((bytesread_udp6 = read(udp6info_fd, udp6_smallbuf, 4060)) > 0)
+      {
+	udp_stats++;
+	if (bytesread_udp6 == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok(udp6_smallbuf, newline); //skip the first line (column headers)
+	while ((token = strtok(NULL, newline)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
+	    udp6_table[i*2] = port;
+	    udp6_table[i*2+1] = socket;
+	    if (port_to_find != port)
+	      {
+		i++;
+		*socket_found = socket;
+		continue;
+	      }
+	    //else
+	    found_flag = 1;
+	    i++;
+	  }
+      }
+    udp6_table[i*2] = MAGIC_NO;
+    if (!found_flag) {return -1;}
+    else {return 1;}
+}
 
 
 void * readstatsthread( void *ptr)
@@ -2247,8 +2415,6 @@ int is_tcp_port_in_cache (int port)
           return retval;
         }
     }
-  //it wasn't found reinject it into the NFQUEUE again
-  return -1;
 
   i = 0;
   while (tcp6_table[i*2] != MAGIC_NO)
@@ -2287,8 +2453,6 @@ int is_udp_port_in_table (int port)
           return udp_table[i*2+1];
         }
     }
-  //it wasn't found reinject it into the NFQUEUE again
-  return -1;
 
   i = 0;
   while (udp6_table[i*2] != MAGIC_NO)
@@ -2301,7 +2465,6 @@ int is_udp_port_in_table (int port)
         }
       else
         {
-
           int retval2;
           retval2 = udp6_table[i*2+1];
           return retval2;
@@ -2766,13 +2929,6 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   char path[PATHSIZE], pid[PIDLENGTH];
   unsigned long long starttime;
 
-  int bytesread_udp, bytesread_udp6;
-  char newline[2] = {'\n','\0'};
-  int pause = 2;
-  char *token;
-  int port, socket, found_flag;
-  int i = 0;
-
   struct udphdr *udp;
   udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
   sport_netbyteorder = udp->source;
@@ -2780,51 +2936,27 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int srcudp = ntohs ( udp->source );
   int dstudp = ntohs ( udp->dest );
 
-  if ((socket = is_udp_port_in_table(srcudp)) == -1) //not found in cache
+  int socket_found;
+  if ((socket_found = is_udp_port_in_table(srcudp)) == -1) //not found in cache
     {
   struct timespec timer2,dummy2;
   timer2.tv_sec=0;
-  timer2.tv_nsec=1000000000/pause;
+  timer2.tv_nsec=1000000000/2;
   nanosleep(&timer2, &dummy2);
 
-  memset(udp_smallbuf,0, 4096);
-  fseek(udpinfo,0,SEEK_SET);
-  found_flag = 0;
-  while ((bytesread_udp = read(udpinfo_fd, udp_smallbuf,  4060)) > 0)
-    {
-      udp_stats++;
-      if (bytesread_udp == -1)
-        {
-          perror ("read");
-          break;
-        }
-      token = strtok(udp_smallbuf, newline); //skip the first line (column headers)
-      while ((token = strtok(NULL, newline)) != NULL)
-        {
-          //take a line until EOF
-	  sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
-          udp_table[i*2] = port;
-	  udp_table[i*2+1] = socket;
-          if (srcudp != port)
-            {
-              i++;
-              continue;
-            }
-          //else
-          found_flag = 1;
-          i++;
-        }
-    }
-  udp_table[i*2] = MAGIC_NO;
-  if (!found_flag)
+  if (build_udp_port_cache(&socket_found, srcudp) == -1)
   {
-  nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-  return 0;
+      if (build_udp6_port_cache(&socket_found, srcudp) == -1)
+      {
+      //the packet has no inode associated with it
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+      }
   }
-  }
+}
 
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_udp_out ( socket, &nfmark_to_set_out, path, pid, &starttime );
+  verdict = packet_handle_udp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
       if (verdict == INKERNEL_SOCKET_FOUND)
         {
 	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
@@ -2917,12 +3049,6 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   char pid[PIDLENGTH]= {0};
   unsigned long long starttime;
 
-  int bytesread_tcp, bytesread_tcp6;
-  char newline[2] = {'\n','\0'};
-  char *token;
-  int port, socket, found_flag;
-  int i = 0;
-
   // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
   struct tcphdr *tcp;
   tcp = ( struct tcphdr* ) ((char*)ip + ( 4 * ip->ihl ) );
@@ -2931,54 +3057,28 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int srctcp = ntohs ( tcp->source );
   int dsttcp = ntohs ( tcp->dest );
 
-
-  if ((socket = is_tcp_port_in_cache(srctcp)) == -1) //not found in cache
+  int socket_found;
+  if ((socket_found = is_tcp_port_in_cache(srctcp)) == -1) //not found in cache
     {
-  struct timespec timer2,dummy2;
-  timer2.tv_sec=0;
-  timer2.tv_nsec=1000000000/2;
-  nanosleep(&timer2, &dummy2);
+	  struct timespec timer2,dummy2;
+	  timer2.tv_sec=0;
+	  timer2.tv_nsec=1000000000/2;
+	  nanosleep(&timer2, &dummy2);
 
-  memset(tcp_smallbuf,0, 4096);
-  fseek(tcpinfo,0,SEEK_SET);
-  found_flag = 0;
-  while ((bytesread_tcp = read(tcpinfo_fd, tcp_smallbuf, 4060)) > 0)
-    {
-      tcp_stats++;
-      if (bytesread_tcp == -1)
-        {
-          perror ("read");
-          break;
-        }
-      token = strtok(tcp_smallbuf, newline); //skip the first line (column headers)
-      while ((token = strtok(NULL, newline)) != NULL)
-        {
-          //take a line until EOF
-          sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
-          tcp_table[i*2] = port;
-          tcp_table[i*2+1] = socket;
-          if (srctcp != port)
-            {
-              i++;
-              continue;
-            }
-          //else
-          found_flag = 1;
-          i++;
-        }
-    }
-  tcp_table[i*2] = MAGIC_NO;
-  if (!found_flag)
-  {
-  //the packet has no inode associated with it
-  nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-  return 0;
-  }
-  }
+	  if (build_tcp_port_cache(&socket_found, srctcp) == -1)
+	  {
+	      if (build_tcp6_port_cache(&socket_found, srctcp) == -1)
+	      {
+	      //the packet has no inode associated with it
+	      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+	      return 0;
+	      }
+	  }
+      }
 
   //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_tcp_out ( socket, &nfmark_to_set_out, path, pid, &starttime );
+  verdict = packet_handle_tcp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
     if (verdict == INKERNEL_SOCKET_FOUND)
       {
 	verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
