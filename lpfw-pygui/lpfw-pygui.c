@@ -104,6 +104,10 @@ int main (int argc, char* argv[])
     strcpy(system_call_string, "python ");
     strncat(system_call_string, python_folder->filename[0], PATHSIZE-10);
     strcat(system_call_string, "/lpfwgui.py");
+    if (* ( log_debug->ival ) == 1)
+    {
+	strcat(system_call_string, " debug");
+    }
     system(system_call_string );
 	
 }

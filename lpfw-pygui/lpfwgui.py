@@ -171,7 +171,7 @@ def msgq_init():
     proc = subprocess.Popen(["./ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
      
     stdout_thread = threading.Thread(target=stdoutthread, args=(proc.stderr,))
-    #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reeading pipe
+    #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reading pipe
     stdout_thread.daemon = True
     stdout_thread.start()
     

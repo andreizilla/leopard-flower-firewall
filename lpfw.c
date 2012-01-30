@@ -2760,7 +2760,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       break;
     default:
       M_PRINTF ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
-      M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
+      M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet \n" );
       verdict = UNSUPPORTED_PROTOCOL;
     }
 
