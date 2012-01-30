@@ -2668,7 +2668,8 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
   int verdict;
   //source and destination ports in host and net byte order
   u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
-  char path[PATHSIZE], pid[PIDLENGTH];
+  char path[PATHSIZE] = {0};
+  char pid[PIDLENGTH] = {0};
   unsigned long long starttime;
   int proto;
   int socket;
