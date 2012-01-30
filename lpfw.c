@@ -1396,9 +1396,9 @@ void* refreshthread ( void* ptr )
     }
 }
 
-void global_rule_add( char *str_protocol, char *str_direction, char *str_ports)
+void global_rule_add( char *str_protocol, char *str_direction, char *str_permission, char *str_ports)
 {
-    int protocol, direction;
+    int protocol, direction, permission;
     global_rule_t *global_rule_to_add;
     if ( ( global_rule_to_add = ( global_rule_t * ) malloc ( sizeof ( global_rule_t ) ) ) == NULL )
       {
@@ -1432,15 +1432,29 @@ void global_rule_add( char *str_protocol, char *str_direction, char *str_ports)
 	printf ("A request to add an unknown direction to the global rules detected \n");
 	return;
     }
+    if (!strcmp(str_permission, "ALLOW"))
+    {
+	permission = PERM_ALLOW;
+    }
+    else if (!strcmp(str_permission, "DENY"))
+    {
+	permission = PERM_DENY;
+    }
+    else
+    {
+	printf ("A request to add an unknown permission to the global rules detected \n");
+	return;
+    }
     global_rule_to_add->protocol = protocol;
     global_rule_to_add->direction = direction;
+    global_rule_to_add->permission = permission;
 
     char *token, *token_range;
-    global_rule_t *global_rule;
+    global_rule_t *global_rule, *global_rule_prev;
     int port, port_min, port_max, is_range, is_first;
     ports_list_t *m_ports_list = NULL, *m_ports_list_prev = NULL, *m_ports_list_first = NULL;
 
-    //First check that the ports and/or port ranges to be added don't overlap each other
+//First check that the ports and/or port ranges to be added don't overlap each other
 
     while ((token = strtok(str_ports, ",")) != NULL)
     {
@@ -1543,7 +1557,7 @@ void global_rule_add( char *str_protocol, char *str_direction, char *str_ports)
     {
 
 	while ((global_rule != NULL) && (global_rule->protocol == protocol)
-	       && (global_rule->direction == direction))
+	       && (global_rule->direction == direction) && (global_rule->permission == permission))
     {
 	ports_list = global_rule->ports_list;
 	while (ports_list == NULL)
@@ -1581,10 +1595,48 @@ void global_rule_add( char *str_protocol, char *str_direction, char *str_ports)
 	global_rule = global_rule->next;
     }
   }
-    //Now add a rule to global rules list (TO BE CONTINUED....)
+//Now add a rule to global rules list
+    global_rule_to_add->ports_list = m_ports_list;
+
+    if (first_global_rule == NULL)
+    {
+	global_rule_to_add->prev = NULL;
+	global_rule_to_add->next = NULL;
+	first_global_rule = global_rule_to_add;
+    }
+    else
+    {
+	global_rule = first_global_rule;
+	while ((global_rule != NULL) && (global_rule->protocol == protocol) &&
+	       (global_rule->direction == direction) && (global_rule->permission == permission))
+	{
+	    global_rule_prev = global_rule;
+	    global_rule = global_rule->next;
+	}
+	if (global_rule == NULL)
+	{
+	    global_rule_to_add->prev = global_rule_prev;
+	    global_rule_to_add->next = NULL;
+	    global_rule = global_rule_to_add;
+	}
+	else
+	{
+	    ports_list = global_rule->ports_list;
+	    while (ports_list != NULL)
+	    {
+		ports_list_prev = ports_list;
+		ports_list = ports_list->next;
+	    }
+	    ports_list_prev->next = m_ports_list_first;
+	    m_ports_list_first->prev = ports_list_prev;
+	}
+
+    }
+    return;
 
     error:
-    ;
+    printf ("Error validating port \n");
+    return;
 }
 
 
@@ -1630,6 +1682,7 @@ void rules_load()
       char *token;
       char protocol[4];
       char direction[4];
+      char permission[6];
       char ports[PATHSIZE - 100];
       while(strcmp(fgets ( path, PATHSIZE, stream ), newline))
   {
@@ -1637,9 +1690,11 @@ void rules_load()
 	  strncpy(protocol, token, sizeof(protocol));
 	  token = strtok(NULL, " ");
 	  strncpy(direction, token, sizeof(direction));
+	  token = strtok(path, " ");
+	  strncpy(permission, token, sizeof(permission));
 	  token = strtok(NULL, " ");
 	  strncpy(ports, token, sizeof(ports));
-	  global_rule_add(protocol, direction, ports);
+	  global_rule_add(protocol, direction, permission, ports);
   }
 }
 

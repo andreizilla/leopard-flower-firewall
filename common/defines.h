@@ -53,6 +53,8 @@
 #define DENY_ONCE "DENY_ONCE"
 #define DENY_ALWAYS "DENY_ALWAYS"
 #define KERNEL_PROCESS "KERNEL_PROCESS"
+#define PERM_ALLOW 0
+#define PERM_DENY  1
 
 #define MLOG_INFO 1
 #define MLOG_TRAFFIC 2
