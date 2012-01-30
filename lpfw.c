@@ -972,7 +972,10 @@ void dlist_del ( char *path, char *pid )
               pthread_cond_signal(&condvar);
             }
           pthread_mutex_unlock ( &dlist_mutex );
-          fe_list();
+	  if (fe_active_flag_get())
+	  {
+	    fe_list();
+	  }
           return;
         }
       temp = temp->next;
@@ -1277,7 +1280,10 @@ void* refreshthread ( void* ptr )
 		  rule->nfmark_in = NFMARKIN_BASE + nfmark_count;
 		  rule->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
                   nfmark_count++;
-                  fe_list();
+		  if (fe_active_flag_get())
+		  {
+		    fe_list();
+		  }
 		  continue;
 		}
 	    }
@@ -1533,7 +1539,10 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 }
               pthread_mutex_unlock ( &dlist_mutex );
               //notify fe that the rule has an active PID now
-              fe_list();
+	      if (fe_active_flag_get())
+	      {
+		fe_list();
+	      }
               return retval;
             }
           else if ( temp->is_active )
@@ -1618,7 +1627,10 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                       stime = starttimeGet ( atoi ( pid ) );
 
                       *nfmark_to_set = dlist_add ( path, pid, tempperms2, TRUE, tempsha2, stime, parent_size2, 0, FALSE );
-                      fe_list();
+		      if (fe_active_flag_get())
+		      {
+			fe_list();
+		      }
                       return retval;
                     }
                   temp = temp->next;
@@ -1685,7 +1697,10 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
                           dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark ,FALSE);
-                          fe_list();
+			  if (fe_active_flag_get())
+			  {
+			    fe_list();
+			  }
 
                           *nfmark_to_set = tempnfmark;
                           return NEW_INSTANCE_ALLOW;
@@ -1694,7 +1709,10 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
                           dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark, FALSE );
-                          fe_list();
+			  if (fe_active_flag_get())
+			  {
+			    fe_list();
+			  }
                           return NEW_INSTANCE_DENY;
                         }
                     }
