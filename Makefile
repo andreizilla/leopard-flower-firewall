@@ -32,7 +32,7 @@ lpfwpygui:
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: DESTDIR = $(shell pwd)
 debug: DEBUG = debug
-debug: lpfw lpfwcli lpfwpygui
+debug: lpfw install lpfwcli lpfwpygui
 
 install:
 	mv lpfw $(DESTDIR)
