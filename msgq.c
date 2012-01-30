@@ -36,6 +36,7 @@ extern char logstring[PATHSIZE];
 extern struct arg_file *cli_path, *gui_path, *pygui_path;
 extern pthread_mutex_t nfmark_count_mutex, msgq_mutex, logstring_mutex;
 extern int nfmark_count;
+extern pid_t fe_pid;
 
 extern int (*m_printf)(int loglevel, char *logstring);
 extern int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
@@ -412,6 +413,12 @@ interrupted:
               continue;
             }
           fe_active_flag_set(TRUE);
+	  struct msqid_ds msqid_f2d;
+	  if (msgctl(mqd_f2d, IPC_STAT, &msqid_f2d) == -1)
+	  {
+	      M_PRINTF(MLOG_DEBUG, "msgctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	  }
+	  fe_pid = msqid_f2d.msg_lspid;
           M_PRINTF(MLOG_INFO, "Registered frontend\n");
           continue;
 

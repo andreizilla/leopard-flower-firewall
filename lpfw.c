@@ -84,8 +84,8 @@ pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread;
-pthread_t conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread;
+pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread,
+conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread, frontend_poll_thread;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
@@ -134,6 +134,8 @@ int tcp_stats, udp_stats;
 int tcp_table[MEMBUF_SIZE], udp_table[MEMBUF_SIZE], tcp6_table[MEMBUF_SIZE], udp6_table[MEMBUF_SIZE];
 
 char logstring[PATHSIZE];
+//PID of currently active frontend
+pid_t fe_pid;
 
 
 #define M_PRINTF(loglevel, ...) \
@@ -545,6 +547,20 @@ void * conntrackdestroythread( void *ptr)
   res = nfct_catch(traffic_handle); //the thread should block here
 }
 
+void* frontendpoll_thread ( void* ptr )
+{
+    while(1)
+    {
+	sleep(2);
+	if (!fe_active_flag_get()) continue;
+	if (kill(fe_pid,0) != 0)
+	{
+	    M_PRINTF (MLOG_INFO, "kill: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
+	    awaiting_reply_from_fe = FALSE;
+	    fe_active_flag_set(FALSE);
+	}
+    }
+}
 //Register callback to delete nfmark and wait on condition to be triggered.
 void* conntrack_delete_thread ( void* ptr )
 {
@@ -4080,6 +4096,7 @@ int main ( int argc, char *argv[] )
   if (pthread_create ( &conntrack_export_thread, NULL, conntrackexporthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &conntrackdestroy_thread, NULL, conntrackdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &ct_del_thread, NULL, conntrack_delete_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &frontend_poll_thread, NULL, frontendpoll_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
   if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
