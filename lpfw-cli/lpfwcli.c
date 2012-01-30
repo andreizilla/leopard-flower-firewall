@@ -144,20 +144,16 @@ void* threadZenity2(void *commpipe)
   int *a;
   a = (int*) commpipe;
 
-  read(*a, buf, sizeof (buf));
+  if (read(*a, buf, sizeof (buf)) == -1)
+  {
+      M_PRINTF(MLOG_ERROR, "read:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+      return;
+  }
   zenity_answer = atoi(&buf[0]);
 }
 
 void * threadZenity(void *ptr)
 {
-  char cmd[PATHSIZE];
-  char zenity1[] = " --list --title 'Leopard Flower- Permission request' --text 'The following program (with PID) is trying to access the network: \n";
-  char zenity2[] = " Please choose action:' --hide-header --column= 1 'ALLOW ALWAYS' 2 'ALLOW ONCE' 3 'DENY ALWAYS' 4 'DENY ONCE' --column= --hide-column=1 ";
-  strcpy(cmd, zenity1);
-  strcat(cmd, global_struct.item.path);
-  strcat(cmd, "\n");
-  strcat(cmd, zenity2);
-
   zenity_answer = 0;
 
   int commpipe[2];
@@ -171,21 +167,42 @@ void * threadZenity(void *ptr)
       freopen("/dev/null", "w", stderr);
 
       //redirect STDOUT to our own file descriptor
-      dup2(commpipe[1], 1);
-      char zenity1[] = "--text=The following program (with PID) is trying to access the network: \n";
+      if (dup2(commpipe[1], 1) == -1)
+      {
+	  M_PRINTF(MLOG_ERROR, "dup2:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+	  return;
+      }
+      char zenity1[PATHSIZE] = "--text=The following program (with PID) is trying to access the network: \n";
       strcat(zenity1, global_struct.item.path);
       strcat(zenity1, "\n Please choose action:");
 
-      execl(zenity_path->filename[0], zenity_path->filename[0], "--list", "--title=Leopard Flower- Permission request", zenity1,
-            "--column=", "1", "ALLOW ALWAYS", "2", "ALLOW ONCE", "3", "DENY ALWAYS", "4", "DENY ONCE",
-            "--column=", "--hide-column=1", "--height=240", (char *) 0);
+//Run this from terminal to test this:
+//zenity --list --title="request" --text="program: \n /blah \n action:" --column= 1 "ALLOW ALWAYS"
+// 2 "ALLOW ONCE" 3 "DENY ALWAYS" 4 "DENY ONCE" --column= --hide-column=1  --height=240
+
+      if (execl("/usr/bin/zenity", "/usr/bin/zenity", "--list", "--title=Leopard Flower- Permission request", zenity1,
+	    "--column= ", "1", "ALLOW ALWAYS", "2", "ALLOW ONCE", "3", "DENY ALWAYS", "4", "DENY ONCE",
+	    "--column= ", "--hide-column=1", "--height=240", (char *) 0) == -1)
+      {
+	  M_PRINTF(MLOG_ERROR, "exec:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+	  return;
+      }
+
     }
   if (pid > 1)
     {
       pthread_t commread_thread;
-      pthread_create(&commread_thread, NULL, threadZenity2, &commpipe[0]);
+      if (pthread_create(&commread_thread, NULL, threadZenity2, &commpipe[0]) !=0)
+      {
+	  M_PRINTF(MLOG_ERROR, "pthread_create:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+	  return;
+      }
       int status;
-      waitpid(pid, &status, 0);
+      if (waitpid(pid, &status, 0) == (pid_t)-1)
+      {
+	  M_PRINTF(MLOG_ERROR, "waitpid:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+	  return;
+      }
       //check if exited normally
       if (WIFEXITED(status))
         {
@@ -193,7 +210,11 @@ void * threadZenity(void *ptr)
           if (WEXITSTATUS(status) == 1)
             {
               //kill commreadthread, otherwise it's gonna wait for input endlessly
-              pthread_cancel(commread_thread);
+	      if (pthread_cancel(commread_thread) != 0)
+	      {
+		  M_PRINTF(MLOG_ERROR, "pthread_cancel:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+		  return;
+	      }
               //any random number clears uw
               process_verdict(234);
               return;
@@ -205,7 +226,11 @@ void * threadZenity(void *ptr)
                 {
                   M_PRINTF(MLOG_ERROR, "OK pressed without selecting an answer: in %s:%d\n", __FILE__, __LINE__);
                   //kill commreadthread, otherwise it's gonna wait for input endlessly
-                  pthread_cancel(commread_thread);
+		  if (pthread_cancel(commread_thread) != 0)
+		  {
+		      M_PRINTF(MLOG_ERROR, "pthread_cancel:%s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
+		      return;
+		  }
                   //any random number clears uw
                   process_verdict(234);
                   return;
@@ -246,7 +271,7 @@ void add_out(msg_struct add_struct)
       pthread_t zenity_thread;
       pthread_create(&zenity_thread, NULL, threadZenity, NULL);
     }
-  if (use_xmessage)
+  else if (use_xmessage)
     {
       pthread_t xmessage_thread;
       pthread_create(&xmessage_thread, NULL, threadXmessage, NULL);
@@ -281,7 +306,7 @@ void add_in(msg_struct add_struct)
       pthread_t zenity_thread;
       pthread_create(&zenity_thread, NULL, threadZenity, NULL);
     }
-  if (use_xmessage)
+  else if (use_xmessage)
     {
       pthread_t xmessage_thread;
       pthread_create(&xmessage_thread, NULL, threadXmessage, NULL);
@@ -707,8 +732,14 @@ void parse_command_line(int argc, char* argv[])
     void *argtable[] = {log_file, log_debug, nozenity, zenity_path, help, version, end};
 
     // Set default values
-    log_file->filename[0] = LPFWCLI_LOG;
-    zenity_path->filename[0] = "zenity ";
+    char *log_file_pointer = malloc(strlen(LPFWCLI_LOG)+1);
+    strcpy (log_file_pointer, LPFWCLI_LOG);
+    log_file->filename[0] = log_file_pointer;
+
+    char *zenity_path_pointer = malloc(strlen("/usr/bin/zenity")+1);
+    strcpy (zenity_path_pointer, "/usr/bin/zenity");
+    zenity_path->filename[0] = zenity_path_pointer;
+
     * ( log_debug->ival ) = 0;
     * ( nozenity->ival ) = 0;
 
@@ -733,7 +764,7 @@ void parse_command_line(int argc, char* argv[])
 	    printf ( "%s\n", VERSION );
 	    exit (0);
 	  }
-
+    }
     else if ( nerrors > 0 )
       {
 	arg_print_errors ( stdout, end, "Leopard Flower frontend" );
@@ -742,9 +773,13 @@ void parse_command_line(int argc, char* argv[])
 	exit (1);
       }
 
+	if (* ( nozenity->ival ) = 1){
+	    use_zenity = 0;
+	}
+
+
     // Free memory - don't do this cause args needed later on
     //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
-    }
 }
 
 int main(int argc, char *argv[])
@@ -754,7 +789,7 @@ int main(int argc, char *argv[])
 
     if ((logfilefd = fopen(log_file->filename[0], "w+")) == 0)
     {
-	printf("Can't open file %s for logging\n %s\n", log_file->filename[0]), strerror(errno);
+	printf("Can't open file %s for logging\n %s\n", log_file->filename[0], strerror(errno));
 	exit(0);
     }
   else m_printf = &m_printf_file;

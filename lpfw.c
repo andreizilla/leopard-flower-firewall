@@ -2976,7 +2976,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	  }
 	  else
 	  {
-	  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, daddr, srcudp, dstudp )
+	  verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime)
 		      : FRONTEND_NOT_LAUNCHED;
 	  }
       }
@@ -3098,7 +3098,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	}
 	else
 	{
-	    verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, daddr, srctcp, dsttcp )
+	    verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime)
 			: FRONTEND_NOT_LAUNCHED;
 	}
     }
@@ -3463,10 +3463,21 @@ int parse_command_line(int argc, char* argv[])
                      };
 
   // Set default values
-  logging_facility->sval[0] = "stdout";
-  rules_file->filename[0] = RULESFILE;
-  pid_file->filename[0] = PIDFILE;
-  log_file->filename[0] = LPFW_LOGFILE;
+  char *stdout_pointer = malloc(strlen("stdout")+1);
+  strcpy (stdout_pointer, "stdout");
+  logging_facility->sval[0] = stdout_pointer;
+
+  char *rulesfile_pointer = malloc(strlen(RULESFILE)+1);
+  strcpy (rulesfile_pointer, RULESFILE);
+  rules_file->filename[0] = rulesfile_pointer;
+
+  char *pidfile_pointer = malloc(strlen(PIDFILE)+1);
+  strcpy (pidfile_pointer, PIDFILE);
+  pid_file->filename[0] = pidfile_pointer;
+
+  char *lpfw_logfile_pointer = malloc(strlen(LPFW_LOGFILE)+1);
+  strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
+  log_file->filename[0] = lpfw_logfile_pointer;
 
 #ifndef WITHOUT_SYSVIPC
 
