@@ -1237,8 +1237,17 @@ void* refreshthread ( void* ptr )
 	    }
 	  else
 	    {
-              M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-
+	      M_PRINTF ( MLOG_DEBUG, "readlink for:%s %s in %s:%d\n", rule->path, strerror ( errno ), __FILE__, __LINE__ );
+	      if ( !strcmp ( rule->perms, ALLOW_ONCE ) || !strcmp ( rule->perms, DENY_ONCE ) )
+	      {
+		  char path[PATHSIZE];
+		  char pid[PIDLENGTH];
+		  strcpy (path, rule->path);
+		  strcpy (pid, rule->pid);
+		  pthread_mutex_unlock ( &dlist_mutex );
+		  dlist_del ( path, pid );
+		  continue;
+	      }
 	      //Only delete *ALWAYS rule if there is at least one more rule in dlist with the same PATH
 	      //If the rule is the only one in dlist with such PATH, simply toggle its_active flag
 	      if ( !strcmp ( rule->perms, ALLOW_ALWAYS ) || !strcmp ( rule->perms, DENY_ALWAYS ) )
@@ -3597,6 +3606,24 @@ void capabilities_setup()
 #endif
 }
 
+void capabilities_modify(int capability, int set, int action)
+{
+    //enable CAP_SETGID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+      {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+    const cap_value_t caps_list[] = {capability};
+    cap_set_flag(cap_current,  set, 1, caps_list, action);
+    if (cap_set_proc(cap_current) == -1)
+      {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+}
+
+
 /* Create group lpfwuser. Backend and frontend both should belong to this group to communicate over sysvmsgq */
 void setgid_lpfwuser()
 {
@@ -3647,19 +3674,7 @@ void setgid_lpfwuser()
 #endif
   lpfwuser_gid = m_group->gr_gid;
 
-  //enable CAP_SETGID in effective set
-  cap_t cap_current;
-  cap_current = cap_get_proc();
-  if (cap_current == NULL)
-    {
-      printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-  const cap_value_t caps_list[] = {CAP_SETGID};
-  cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
-  if (cap_set_proc(cap_current) == -1)
-    {
-      printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+  capabilities_modify(CAP_SETGID, CAP_EFFECTIVE, CAP_SET);
 
   //setgid and immediately remove CAP_SETGID from both perm. and eff. sets
   if (setgid(lpfwuser_gid) == -1)
@@ -3667,30 +3682,16 @@ void setgid_lpfwuser()
       printf("setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       return;
     }
-  cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
-  cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
-  if (cap_set_proc(cap_current) == -1)
-    {
-      printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+
+  capabilities_modify(CAP_SETGID, CAP_EFFECTIVE, CAP_CLEAR);
+  capabilities_modify(CAP_SETGID, CAP_PERMITTED, CAP_CLEAR);
 }
 
 /* Setuid() lpfw to root */
 void setuid_root()
 {
-  //enable CAP_SETUID in effective set
-  cap_t cap_current;
-  cap_current = cap_get_proc();
-  if (cap_current == NULL)
-    {
-      printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-  const cap_value_t caps_list[] = {CAP_SETUID};
-  cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
-  if (cap_set_proc(cap_current) == -1)
-    {
-      printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+  capabilities_modify(CAP_SETUID, CAP_EFFECTIVE, CAP_SET);
+
   //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
   if (setuid(0) == -1)
     {
@@ -3699,11 +3700,7 @@ void setuid_root()
     }
   //we still neet to setuid in fe_reg_thread so leave this CAP in permitted set
   //cap_set_flag(cap_current,  CAP_PERMITTED, 1, caps_list, CAP_CLEAR);
-  cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_CLEAR);
-  if (cap_set_proc(cap_current) == -1)
-    {
-      printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+  capabilities_modify(CAP_SETUID, CAP_EFFECTIVE, CAP_CLEAR);
 }
 
 void setup_signal_handlers()
@@ -3964,18 +3961,10 @@ void open_proc_net_files()
 void chown_and_setgid_frontend()
 {
     //TODO check if we really need those 2 caps, maybe _CHOWN is enough.
-    cap_t cap_current;
-    cap_current = cap_get_proc();
-    if (cap_current == NULL)
-      {
-	M_PRINTF(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
-    const cap_value_t caps_list[] = {CAP_CHOWN, CAP_FSETID, CAP_DAC_READ_SEARCH};
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
-    if (cap_set_proc(cap_current) == -1)
-      {
-	M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
+
+    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_SET);
+    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_SET);
+    capabilities_modify(CAP_DAC_READ_SEARCH, CAP_EFFECTIVE, CAP_SET);
 
     char system_call_string[PATHSIZE];
     strcpy (system_call_string, "chown :lpfwuser ");
@@ -4008,15 +3997,10 @@ void chown_and_setgid_frontend()
 
     }
 
-
-
-    const cap_value_t caps_list_to_clear[] = {CAP_CHOWN, CAP_FSETID};
-    cap_set_flag(cap_current,  CAP_PERMITTED, 2, caps_list_to_clear, CAP_CLEAR);
-    cap_set_flag(cap_current,  CAP_EFFECTIVE, 2, caps_list_to_clear, CAP_CLEAR);
-    if (cap_set_proc(cap_current) == -1)
-      {
-	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
+    capabilities_modify(CAP_CHOWN, CAP_EFFECTIVE, CAP_CLEAR);
+    capabilities_modify(CAP_CHOWN, CAP_PERMITTED, CAP_CLEAR);
+    capabilities_modify(CAP_FSETID, CAP_EFFECTIVE, CAP_CLEAR);
+    capabilities_modify(CAP_FSETID, CAP_PERMITTED, CAP_CLEAR);
 }
 
 
@@ -4063,19 +4047,10 @@ int main ( int argc, char *argv[] )
   printf (" orig uid euid %d %d \n", uid, euid);
 #endif
 
-  //enable CAP in effective set
-  cap_t cap_current;
-  cap_current = cap_get_proc();
-  if (cap_current == NULL)
-    {
-      M_PRINTF(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
-  const cap_value_t caps_list[] = {CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE};
-  cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
-  if (cap_set_proc(cap_current) == -1)
-    {
-      M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    }
+  capabilities_modify(CAP_NET_ADMIN, CAP_EFFECTIVE, CAP_SET);
+  capabilities_modify(CAP_DAC_READ_SEARCH, CAP_EFFECTIVE, CAP_SET);
+  capabilities_modify(CAP_SYS_PTRACE, CAP_EFFECTIVE, CAP_SET);
+
 
 #ifndef WITHOUT_SYSVIPC
   init_msgq();
