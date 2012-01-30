@@ -23,6 +23,7 @@ typedef struct m_global_rule
     struct m_global_rule *prev;
     int protocol;
     int direction;
+    int permission;
     ports_list_t *ports_list;
 } global_rule_t;
 
