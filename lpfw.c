@@ -3160,7 +3160,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       verdict = UNSUPPORTED_PROTOCOL;
     }
 
-  print_traffic_log(proto, DIRECTION_IN, daddr, sport_hostbo, dport_hostbo, path, pid, verdict);
+  print_traffic_log(proto, DIRECTION_IN, saddr, sport_hostbo, dport_hostbo, path, pid, verdict);
   if (verdict < ALLOW_VERDICT_MAX)
     {
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
