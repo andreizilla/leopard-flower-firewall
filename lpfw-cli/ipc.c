@@ -1,4 +1,4 @@
-#include "common/includes.h"
+#include "../common/includes.h"
 #include <sys/ipc.h>
 #include <pthread.h>
 #include "stdio.h"

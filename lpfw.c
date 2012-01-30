@@ -3038,9 +3038,6 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
       while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out_udp) == -1)
         {
-#ifdef DEBUG2
-          M_PRINTF ( MLOG_DEBUG2, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-#endif
           if (errno == EBUSY)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );

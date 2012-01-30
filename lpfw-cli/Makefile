@@ -2,8 +2,8 @@ DESTDIR = ./
 GCCFLAGS =
 SOURCES 	=	ipc.c \
 			lpfwcli.c \
-			common/includes.h \
-			common/defines.h \
+			../common/includes.h \
+			../common/defines.h \
 			../argtable/arg_end.c \
 			../argtable/arg_file.c \
 			../argtable/arg_int.c \
@@ -22,4 +22,4 @@ debug: lpfwcli
 
 
 install:
-	cp lpfwcli $(DESTDIR)
+	mv lpfwcli $(DESTDIR)

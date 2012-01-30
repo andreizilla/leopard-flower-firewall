@@ -15,8 +15,8 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <grp.h>
-#include "common/defines.h"
-#include "common/includes.h"
+#include "../common/defines.h"
+#include "../common/includes.h"
 #include "../argtable/argtable2.h"
 #include "../version.h" //for version string during packaging
 
