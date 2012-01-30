@@ -335,6 +335,7 @@ void * conntrackexporthread( void *ptr)
 	      ct_entries_export[j][2] = ct_entries[i][6];
             }
 next:
+	  ;
         }
 #ifdef DEBUG
       for (i = 0; ct_entries_export[i][0] != 0; ++i)
