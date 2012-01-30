@@ -145,6 +145,23 @@ pid_t fe_pid;
     pthread_mutex_unlock(&logstring_mutex); \
  
 
+void capabilities_modify(int capability, int set, int action)
+{
+    //enable CAP_SETGID in effective set
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+      {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+    const cap_value_t caps_list[] = {capability};
+    cap_set_flag(cap_current,  set, 1, caps_list, action);
+    if (cap_set_proc(cap_current) == -1)
+      {
+	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+}
+
 int build_tcp_port_cache(int *socket_found, int port_to_find)
 {
     int bytesread_tcp;
@@ -549,13 +566,14 @@ void * conntrackdestroythread( void *ptr)
 
 void* frontendpoll_thread ( void* ptr )
 {
+    capabilities_modify( CAP_KILL, CAP_EFFECTIVE, CAP_SET);
     while(1)
     {
 	sleep(2);
 	if (!fe_active_flag_get()) continue;
 	if (kill(fe_pid,0) != 0)
 	{
-	    M_PRINTF (MLOG_INFO, "kill: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
+	    M_PRINTF (MLOG_INFO, "kill: pid== %d %s,%s,%d\n", fe_pid, strerror ( errno ), __FILE__, __LINE__ );
 	    awaiting_reply_from_fe = FALSE;
 	    fe_active_flag_set(FALSE);
 	}
@@ -3611,19 +3629,25 @@ void capabilities_setup()
   cap_get_flag(cap_current, CAP_CHOWN, CAP_PERMITTED, &value);
   if (value == CAP_CLEAR)
     {
-      printf ("CAP_SETGID is not permitted \n");
+      printf ("CAP_CHOWN is not permitted \n");
       exit(0);
     }
   cap_get_flag(cap_current, CAP_FSETID, CAP_PERMITTED, &value);
   if (value == CAP_CLEAR)
     {
-      printf ("CAP_SETGID is not permitted \n");
+      printf ("CAP_FSETID is not permitted \n");
+      exit(0);
+    }
+  cap_get_flag(cap_current, CAP_KILL, CAP_PERMITTED, &value);
+  if (value == CAP_CLEAR)
+    {
+      printf ("CAP_KILL is not permitted \n");
       exit(0);
     }
 
   cap_clear(cap_current);
-  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FSETID};
-  cap_set_flag(cap_current, CAP_PERMITTED, 7, caps_list, CAP_SET);
+  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FSETID, CAP_KILL};
+  cap_set_flag(cap_current, CAP_PERMITTED, 8, caps_list, CAP_SET);
   if (cap_set_proc(cap_current) == -1)
     {
       printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -3636,22 +3660,6 @@ void capabilities_setup()
 #endif
 }
 
-void capabilities_modify(int capability, int set, int action)
-{
-    //enable CAP_SETGID in effective set
-    cap_t cap_current;
-    cap_current = cap_get_proc();
-    if (cap_current == NULL)
-      {
-	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
-    const cap_value_t caps_list[] = {capability};
-    cap_set_flag(cap_current,  set, 1, caps_list, action);
-    if (cap_set_proc(cap_current) == -1)
-      {
-	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
-}
 
 
 /* Create group lpfwuser. Backend and frontend both should belong to this group to communicate over sysvmsgq */

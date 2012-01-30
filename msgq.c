@@ -412,13 +412,13 @@ interrupted:
               M_PRINTF(MLOG_ALERT, "Red alert!!! There was an attempt to register a frontend when one is already active\n");
               continue;
             }
-          fe_active_flag_set(TRUE);
 	  struct msqid_ds msqid_f2d;
 	  if (msgctl(mqd_f2d, IPC_STAT, &msqid_f2d) == -1)
 	  {
 	      M_PRINTF(MLOG_DEBUG, "msgctl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	  }
 	  fe_pid = msqid_f2d.msg_lspid;
+	  fe_active_flag_set(TRUE);
           M_PRINTF(MLOG_INFO, "Registered frontend\n");
           continue;
 
