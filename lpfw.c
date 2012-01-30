@@ -2552,7 +2552,7 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
       strcat (m_logstring, "drop\n");
       break;
     case PORT_NOT_FOUND:
-      strcat (m_logstring, "packet's source port not found in /proc/net/*. This means that the remote machine has probed our port\n" );
+      strcat (m_logstring, "(port not found in /proc/net/*) drop \n" );
       break;
     case SENT_TO_FRONTEND:
       strcat (m_logstring,  "(asking frontend) drop\n" );
@@ -2697,13 +2697,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	  if (verdict == INKERNEL_SOCKET_FOUND)
             {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
-	      if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
-	      {
-		  verdict = GOTO_NEXT_STEP;
-		  strcpy(path, KERNEL_PROCESS);
-		  strcpy(pid, saddr);
-		  starttime = sport_hostbo;
-	      }
 	  }
 	  if (verdict == GOTO_NEXT_STEP)
 	  {
@@ -2734,17 +2727,10 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	}
 
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
+      verdict = packet_handle_udp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
 	  if (verdict == INKERNEL_SOCKET_FOUND)
 	    {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
-	      if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
-	      {
-		  verdict = GOTO_NEXT_STEP;
-		  strcpy(path, KERNEL_PROCESS);
-		  strcpy(pid, saddr);
-		  starttime = sport_hostbo;
-	      }
 	  }
 	  if (verdict == GOTO_NEXT_STEP)
 	  {
@@ -2961,13 +2947,6 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       if (verdict == INKERNEL_SOCKET_FOUND)
         {
 	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
-	  if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
-	      {
-		  verdict = GOTO_NEXT_STEP;
-		  strcpy(path, KERNEL_PROCESS);
-		  strcpy(pid, daddr);
-		  starttime = dstudp;
-	      }
 	}
       if (verdict == GOTO_NEXT_STEP)
       {
@@ -3083,13 +3062,6 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     if (verdict == INKERNEL_SOCKET_FOUND)
       {
 	verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
-	if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
-	    {
-		verdict = GOTO_NEXT_STEP;
-		strcpy(path, KERNEL_PROCESS);
-		strcpy(pid, daddr);
-		starttime = dsttcp;
-	    }
 	}
     if (verdict == GOTO_NEXT_STEP)
     {
