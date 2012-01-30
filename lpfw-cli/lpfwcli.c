@@ -4,7 +4,7 @@
 #include <string.h>
 #include <termios.h>
 #include <stdio.h>
-#include "errno.h"
+#include <errno.h>
 #include <pthread.h>
 #include <ncurses.h>
 #include <stdlib.h>
@@ -175,6 +175,9 @@ void * threadZenity(void *ptr)
       char zenity1[PATHSIZE] = "--text=The following program (with PID) is trying to access the network: \n";
       strcat(zenity1, global_struct.item.path);
       strcat(zenity1, "\n Please choose action:");
+
+      //Gtk apps won't run with setgid(), so put back or real GID
+      setegid(getgid());
 
 //Run this from terminal to test this:
 //zenity --list --title="request" --text="program: \n /blah \n action:" --column= 1 "ALLOW ALWAYS"
@@ -773,7 +776,7 @@ void parse_command_line(int argc, char* argv[])
 	exit (1);
       }
 
-	if (* ( nozenity->ival ) = 1){
+	if (* ( nozenity->ival ) == 1){
 	    use_zenity = 0;
 	}
 

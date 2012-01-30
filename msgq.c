@@ -78,7 +78,7 @@ interrupted:
   if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_struct_creds), 0, 0) == -1)
     {
       M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      if (errno == EINTR) goto interrupted;
+      goto interrupted;
     }
   //extract last sender's PID and check the binary path is the same path as this lpfw instance
   msgctl(mqd_creds, IPC_STAT, msgqid_creds);
@@ -260,7 +260,7 @@ interrupted:
         {
           M_PRINTF(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
           sleep(1); //avoid overwhelming the log
-          if (errno == EINTR) goto interrupted;
+	  goto interrupted;
         }
 
 #ifdef DEBUG

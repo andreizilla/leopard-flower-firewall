@@ -59,10 +59,13 @@ void* listenthread(void * ptr)
 
   while (1)
     {
+      interrupted:
       if (msgrcv(mqd_d2f, &msg_d2f, sizeof (msg_struct), 0, 0) == -1)
         {
-          M_PRINTF(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-        };
+	  M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	  sleep(1); //avoid overwhelming the log
+	  goto interrupted;
+	};
       switch (msg_d2f.item.command)
         {
         case D2FCOMM_ASK_OUT:
