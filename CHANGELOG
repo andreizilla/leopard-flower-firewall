@@ -1,4 +1,4 @@
-Version 0.4 (ca. Jan 2012)
+Version 0.4 (ca. Feb 2012)
 Counters for permitted traffic in frontend.
 Support for kernel-initiated traffic (NFS, Samba etc.)
 

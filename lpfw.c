@@ -4068,6 +4068,7 @@ int main ( int argc, char *argv[] )
   chown_and_setgid_frontend();
   init_log();
   pidfile_check();
+  capabilities_modify(CAP_NET_ADMIN, CAP_EFFECTIVE, CAP_SET);
   init_conntrack();
   init_iptables();
 
@@ -4078,7 +4079,6 @@ int main ( int argc, char *argv[] )
   printf (" orig uid euid %d %d \n", uid, euid);
 #endif
 
-  capabilities_modify(CAP_NET_ADMIN, CAP_EFFECTIVE, CAP_SET);
   capabilities_modify(CAP_DAC_READ_SEARCH, CAP_EFFECTIVE, CAP_SET);
   capabilities_modify(CAP_SYS_PTRACE, CAP_EFFECTIVE, CAP_SET);
 
