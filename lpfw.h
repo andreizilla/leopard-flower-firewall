@@ -26,7 +26,8 @@ extern int nfmark_count;
 extern pid_t fe_pid;
 extern int (*m_printf)(int loglevel, char *logstring);
 
-int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
+int dlist_add ( const char *path, const char *pid, const char *perms, const mbool current, const char *sha,
+		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance );
 unsigned long long starttimeGet(int mypid);
 void fe_active_flag_set (int boolean);
 void child_close_nfqueue();

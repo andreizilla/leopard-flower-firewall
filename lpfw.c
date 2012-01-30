@@ -255,7 +255,7 @@ void capabilities_modify(int capability, int set, int action)
       }
 }
 
-int build_tcp_port_cache(long *socket_found, int port_to_find)
+int build_tcp_port_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_tcp;
     char newline[2] = {'\n','\0'};
@@ -282,7 +282,7 @@ int build_tcp_port_cache(long *socket_found, int port_to_find)
 	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
 	    tcp_port_and_socket_cache[i*2] = (long)port;
 	    tcp_port_and_socket_cache[i*2+1] = socket;
-	    if (port_to_find != port)
+	    if (*port_to_find != port)
 	      {
 		i++;
 		*socket_found = socket;
@@ -298,7 +298,7 @@ int build_tcp_port_cache(long *socket_found, int port_to_find)
     else {return 1;}
 }
 
-int build_tcp6_port_cache(long *socket_found, int port_to_find)
+int build_tcp6_port_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_tcp6;
     char newline[2] = {'\n','\0'};
@@ -325,7 +325,7 @@ int build_tcp6_port_cache(long *socket_found, int port_to_find)
 	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
 	    tcp6_port_and_socket_cache[i*2] = (long)port;
 	    tcp6_port_and_socket_cache[i*2+1] = socket;
-	    if (port_to_find != port)
+	    if (*port_to_find != port)
 	      {
 		i++;
 		*socket_found = socket;
@@ -342,7 +342,7 @@ int build_tcp6_port_cache(long *socket_found, int port_to_find)
 }
 
 
-int build_udp_port_cache(long *socket_found, int port_to_find)
+int build_udp_port_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_udp;
     char newline[2] = {'\n','\0'};
@@ -369,7 +369,7 @@ int build_udp_port_cache(long *socket_found, int port_to_find)
 	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
 	    udp_port_and_socket_cache[i*2] = (long)port;
 	    udp_port_and_socket_cache[i*2+1] = socket;
-	    if (port_to_find != port)
+	    if (*port_to_find != port)
 	      {
 		i++;
 		*socket_found = socket;
@@ -385,7 +385,7 @@ int build_udp_port_cache(long *socket_found, int port_to_find)
     else {return 1;}
 }
 
-int build_udp6_port_cache(long *socket_found, int port_to_find)
+int build_udp6_port_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_udp6;
     char newline[2] = {'\n','\0'};
@@ -412,7 +412,7 @@ int build_udp6_port_cache(long *socket_found, int port_to_find)
 	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
 	    udp6_port_and_socket_cache[i*2] = (long)port;
 	    udp6_port_and_socket_cache[i*2+1] = socket;
-	    if (port_to_find != port)
+	    if (*port_to_find != port)
 	      {
 		i++;
 		*socket_found = socket;
@@ -968,7 +968,8 @@ dlist * dlist_copy()
 }
 
 //Add new element to dlist and return new nfmark (if any)
-int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
+int dlist_add ( const char *path, const char *pid, const char *perms, const mbool active, const char *sha,
+		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance)
 {
   static int rule_ordinal_count = 0;
   int retnfmark;
@@ -1121,7 +1122,7 @@ void dlist_del ( char *path, char *pid )
   pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int socket_cache_in_search(long socket, char *path, char *pid)
+int socket_cache_in_search(const long *socket, char *path, char *pid)
 {
   int i;
   int retval;
@@ -1136,7 +1137,7 @@ int socket_cache_in_search(long socket, char *path, char *pid)
       while (temp->sockets_cache[i] != (long)MAGIC_NO)
         {
           if (i >= MAX_CACHE-1) break;
-          if (temp->sockets_cache[i] == socket)  //found match
+	  if (temp->sockets_cache[i] == *socket)  //found match
             {
               if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
               else retval = CACHE_TRIGGERED_DENY;
@@ -1155,7 +1156,7 @@ int socket_cache_in_search(long socket, char *path, char *pid)
   return SOCKETS_CACHE_NOT_FOUND;
 }
 
-int socket_cache_out_search(long socket, char *path, char *pid)
+int socket_cache_out_search(const long *socket, char *path, char *pid)
 {
   int i;
   int retval;
@@ -1170,7 +1171,7 @@ int socket_cache_out_search(long socket, char *path, char *pid)
       while (temp->sockets_cache[i] != (long)MAGIC_NO)
         {
           if (i >= MAX_CACHE-1) break;
-          if (temp->sockets_cache[i] == socket)  //found match
+	  if (temp->sockets_cache[i] == *socket)  //found match
             {
               if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
 	      else {retval = CACHE_TRIGGERED_DENY;}
@@ -1814,7 +1815,7 @@ inkernel:
 }
 
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
-int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime)
 {
   pthread_mutex_lock ( &dlist_mutex );
   dlist* temp = first_rule->next;
@@ -2075,7 +2076,7 @@ quit:
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_active_processes_search ( long *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
+int socket_active_processes_search ( const long *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
   char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
   char path[32];
@@ -2165,7 +2166,7 @@ int socket_active_processes_search ( long *mysocket, char *m_path, char *m_pid, 
 }
 
 //scan /proc to find which PID the socket belongs to
-int socket_procfs_search ( long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
+int socket_procfs_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
   //vars for scanning through /proc dir
   struct dirent *proc_dirent, *fd_dirent;
@@ -2300,7 +2301,7 @@ int icmp_check_only_one_inode ( long *socket )
   return ICMP_ONLY_ONE_ENTRY;
 }
 
-int socket_check_kernel_udp(long *socket)
+int socket_check_kernel_udp(const long *socket)
 {
   //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
   //The ony diffrnc is they have uid=0 (but so are root's)
@@ -2393,7 +2394,7 @@ int socket_check_kernel_udp(long *socket)
 }
 
 
-int socket_check_kernel_tcp(long *socket)
+int socket_check_kernel_tcp(const long *socket)
 {
   //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
   //The ony diffrnc is they have uid=0 (but so are root's)
@@ -2646,7 +2647,7 @@ endloop:
 
 
 //Handler for TCP packets for INPUT NFQUEUE
-int packet_handle_tcp_in ( long socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
     retval = socket_cache_in_search(socket, path, pid);
@@ -2655,15 +2656,15 @@ int packet_handle_tcp_in ( long socket, int *nfmark_to_set, char *path, char *pi
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
 	return retval;
     }
-    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    retval = socket_active_processes_search ( socket, path, pid, nfmark_to_set );
     if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND)
     {
 	return retval;
     }
-    retval = socket_procfs_search ( &socket, path, pid, stime );
+    retval = socket_procfs_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_tcp(&socket);
+      retval = socket_check_kernel_tcp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2674,7 +2675,7 @@ int packet_handle_tcp_in ( long socket, int *nfmark_to_set, char *path, char *pi
 }
 
 //Handler for TCP packets for OUTPUT NFQUEUE
-int packet_handle_tcp_out ( long socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval;
   retval = socket_cache_out_search(socket, path, pid);
@@ -2683,15 +2684,15 @@ int packet_handle_tcp_out ( long socket, int *nfmark_to_set, char *path, char *p
       M_PRINTF (MLOG_DEBUG2, "(cache)");
       return retval;
   }
-  retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+  retval = socket_active_processes_search ( socket, path, pid, nfmark_to_set );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
   {
       return retval;
   }
-  retval = socket_procfs_search ( &socket, path, pid, stime );
+  retval = socket_procfs_search ( socket, path, pid, stime );
   if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
   {
-    retval = socket_check_kernel_tcp(&socket);
+    retval = socket_check_kernel_tcp(socket);
     return retval;
   }
   else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2702,7 +2703,7 @@ int packet_handle_tcp_out ( long socket, int *nfmark_to_set, char *path, char *p
 }
 
 //Handler for UDP packets
-int packet_handle_udp_in ( long socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
     retval = socket_cache_out_search(socket, path, pid);
@@ -2711,15 +2712,15 @@ int packet_handle_udp_in ( long socket, int *nfmark_to_set, char *path, char *pi
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
 	return retval;
     }
-    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    retval = socket_active_processes_search ( socket, path, pid, nfmark_to_set );
     if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
     {
 	return retval;
     }
-    retval = socket_procfs_search ( &socket, path, pid, stime );
+    retval = socket_procfs_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_udp(&socket);
+      retval = socket_check_kernel_udp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2730,7 +2731,7 @@ int packet_handle_udp_in ( long socket, int *nfmark_to_set, char *path, char *pi
 }
 
 //Handler for UDP packets
-int packet_handle_udp_out ( long socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
     retval = socket_cache_out_search(socket, path, pid);
@@ -2739,15 +2740,15 @@ int packet_handle_udp_out ( long socket, int *nfmark_to_set, char *path, char *p
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
 	return retval;
     }
-    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    retval = socket_active_processes_search ( socket, path, pid, nfmark_to_set );
     if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
     {
 	return retval;
     }
-    retval = socket_procfs_search ( &socket, path, pid, stime );
+    retval = socket_procfs_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_udp(&socket);
+      retval = socket_check_kernel_udp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2776,14 +2777,14 @@ void increase_allowed_traffic_out(int out_packet_size)
 }
 */
 
-long is_tcp_port_in_cache (int port)
+long is_tcp_port_in_cache (const int *port)
 {
   int i = 0;
 
   while (tcp_port_and_socket_cache[i*2] != (long)MAGIC_NO)
     {
       if (i >= (MEMBUF_SIZE / (sizeof(long)*2)) - 1) break;
-      if (tcp_port_and_socket_cache[i*2] != (long)port)
+      if (tcp_port_and_socket_cache[i*2] != (long)*port)
         {
           i++;
           continue;
@@ -2800,7 +2801,7 @@ long is_tcp_port_in_cache (int port)
   while (tcp6_port_and_socket_cache[i*2] != (long)MAGIC_NO)
     {
       if (i >= (MEMBUF_SIZE / (sizeof(long)*2)) - 1) break;
-      if (tcp6_port_and_socket_cache[i*2] != port)
+      if (tcp6_port_and_socket_cache[i*2] != *port)
         {
           i++;
           continue;
@@ -2817,13 +2818,13 @@ long is_tcp_port_in_cache (int port)
 }
 
 
-long is_udp_port_in_cache (int port)
+long is_udp_port_in_cache (const int *port)
 {
   int i = 0;
   while (udp_port_and_socket_cache[i*2] != (long)MAGIC_NO)
     {
       if (i >= (MEMBUF_SIZE / (sizeof(long)*2)) - 1) break;
-      if (udp_port_and_socket_cache[i*2] !=(long) port)
+      if (udp_port_and_socket_cache[i*2] !=(long) *port)
         {
           i++;
           continue;
@@ -2838,7 +2839,7 @@ long is_udp_port_in_cache (int port)
   while (udp6_port_and_socket_cache[i*2] != (long)MAGIC_NO)
     {
       if (i >= (MEMBUF_SIZE / (sizeof(long)*2)) - 1) break;
-      if (udp6_port_and_socket_cache[i*2] != (long)port)
+      if (udp6_port_and_socket_cache[i*2] != (long)*port)
         {
           i++;
           continue;
@@ -3048,7 +3049,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
   int verdict;
   //source and destination ports in host and net byte order
-  u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
+  int sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
   char path[PATHSIZE] = {0}, pid[PIDLENGTH] = {0};
   unsigned long long starttime;
   int proto;
@@ -3065,7 +3066,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       sport_hostbo = ntohs ( tcp->source );
       dport_hostbo = ntohs ( tcp->dest );
 
-      if ((socket = is_tcp_port_in_cache(dport_hostbo)) == -1) //not found in cache
+      if ((socket = is_tcp_port_in_cache(& dport_hostbo)) == -1) //not found in cache
         {
 	  //No need to rebuild the cache b/c likelihood is very high that port is not there
 	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
@@ -3073,7 +3074,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         }
 
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
+      verdict = packet_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
 	  if (verdict == INKERNEL_SOCKET_FOUND)
             {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
@@ -3103,14 +3104,14 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       sport_hostbo = ntohs ( udp->source );
       dport_hostbo = ntohs ( udp->dest );
 
-      if ((socket = is_udp_port_in_cache(dport_hostbo)) == -1) //not found in cache
+      if ((socket = is_udp_port_in_cache(& dport_hostbo)) == -1) //not found in cache
         {
 	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
 	  break;
 	}
 
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_udp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
+      verdict = packet_handle_udp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
 	  if (verdict == INKERNEL_SOCKET_FOUND)
 	    {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
@@ -3238,7 +3239,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
       break;
     default:
       M_PRINTF ( MLOG_INFO, "OUT unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
-      M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet" );
+      M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet \n" );
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
       return 0;
     }
@@ -3319,16 +3320,16 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int dstudp = ntohs ( udp->dest );
 
   long socket_found;
-  if ((socket_found = is_udp_port_in_cache(srcudp)) == -1) //not found in cache
+  if ((socket_found = is_udp_port_in_cache(&srcudp)) == -1) //not found in cache
     {
   struct timespec timer,dummy;
   timer.tv_sec=0;
   timer.tv_nsec=1000000000/2;
   nanosleep(&timer, &dummy);
 
-  if (build_udp_port_cache(&socket_found, srcudp) == -1)
+  if (build_udp_port_cache(&socket_found, &srcudp) == -1)
   {
-      if (build_udp6_port_cache(&socket_found, srcudp) == -1)
+      if (build_udp6_port_cache(&socket_found, &srcudp) == -1)
       {
       //the packet has no inode associated with it
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -3338,7 +3339,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 }
 
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_udp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
+  verdict = packet_handle_udp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
       if (verdict == INKERNEL_SOCKET_FOUND)
         {
 	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
@@ -3440,16 +3441,16 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int dsttcp = ntohs ( tcp->dest );
 
   long socket_found;
-  if ((socket_found = is_tcp_port_in_cache(srctcp)) == -1) //not found in cache
+  if ((socket_found = is_tcp_port_in_cache(&srctcp)) == -1) //not found in cache
     {
 	  struct timespec timer,dummy;
 	  timer.tv_sec=0;
 	  timer.tv_nsec=1000000000/2;
 	  nanosleep(&timer, &dummy);
 
-	  if (build_tcp_port_cache(&socket_found, srctcp) == -1)
+	  if (build_tcp_port_cache(&socket_found, &srctcp) == -1)
 	  {
-	      if (build_tcp6_port_cache(&socket_found, srctcp) == -1)
+	      if (build_tcp6_port_cache(&socket_found, &srctcp) == -1)
 	      {
 	      //the packet has no inode associated with it
 	      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
@@ -3460,7 +3461,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
   //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_tcp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
+  verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
 
     if (verdict == INKERNEL_SOCKET_FOUND)
     {
