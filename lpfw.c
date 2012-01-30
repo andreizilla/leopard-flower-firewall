@@ -2855,7 +2855,8 @@ long is_udp_port_in_cache (const int *port)
   return -1;
 }
 
-void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstport, char *path, char *pid, int verdict)
+void print_traffic_log(const int proto, const int direction, const char *ip, const int srcport,
+		       const int dstport, const char *path, const char *pid, const int verdict)
 {
   char m_logstring[PATHSIZE];
   if (direction == DIRECTION_IN)
@@ -2951,6 +2952,9 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
       break;
     case SOCKET_NOT_FOUND_IN_PROCPIDFD:
       strcat (m_logstring,  "(no process associated with packet) drop\n" );
+      break;
+    case PORT_NOT_FOUND_IN_PROCNET:
+      strcat (m_logstring,  "(no process associated with port) drop\n" );
       break;
     case FRONTEND_NOT_LAUNCHED:
       strcat (m_logstring, "(frontend not active) drop\n" );
@@ -3332,8 +3336,8 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       if (build_udp6_port_cache(&socket_found, &srcudp) == -1)
       {
       //the packet has no inode associated with it
-      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-      return 0;
+	verdict = PORT_NOT_FOUND_IN_PROCNET;
+	goto execute_verdict;
       }
   }
 }
@@ -3360,6 +3364,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	  }
       }
 
+  execute_verdict:
   print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, dstudp, path, pid, verdict);
   if (verdict < ALLOW_VERDICT_MAX)
     {
@@ -3453,8 +3458,8 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	      if (build_tcp6_port_cache(&socket_found, &srctcp) == -1)
 	      {
 	      //the packet has no inode associated with it
-	      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-	      return 0;
+		verdict = PORT_NOT_FOUND_IN_PROCNET;
+	      goto execute_verdict;
 	      }
 	  }
       }
@@ -3483,7 +3488,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	}
     }
 
-
+  execute_verdict:
   print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
   if (verdict < ALLOW_VERDICT_MAX)
