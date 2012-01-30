@@ -271,6 +271,7 @@ int main ( int argc, char *argv[] )
     pthread_create(&d2ftraffic_thread, NULL, d2ftrafficthread, NULL);
 #ifdef DEBUG
     printf ("Beginning the main loop \n");
+    printf ("My GID is %d \n", (int)getgid());
 #endif
     while(1)
     {

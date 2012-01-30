@@ -1,4 +1,5 @@
 DESTDIR = ./
+DEBUG =
 GCCFLAGS = -g
 SOURCES 	=	lpfw.c \
 			msgq.c \
@@ -21,12 +22,14 @@ lpfw: $(SOURCES)
 	gcc $(GCCFLAGS) $(SOURCES) -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 lpfwcli:
-	cd lpfw-cli; make; make DESTDIR=$(DESTDIR) install
+	cd lpfw-cli; make $(DEBUG); make DESTDIR=$(DESTDIR) install
 
 lpfwpygui:
-	cd lpfw-pygui; make; make DESTDIR=$(DESTDIR) install
+	cd lpfw-pygui; make $(DEBUG); make DESTDIR=$(DESTDIR) install
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
+debug: DESTDIR = $(shell pwd)
+debug: DEBUG = "debug"
 debug: lpfw lpfwcli lpfwpygui
 
 install:

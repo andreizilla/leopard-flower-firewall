@@ -415,7 +415,7 @@ if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     #I don't know how to redirect output to /dev/null so just make a tmp file until I figure out
     logfile = open("/dev/null", "w")
     sys.stdout = logfile
-        
+    
 app=QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(True)
 window = myMainWindow()

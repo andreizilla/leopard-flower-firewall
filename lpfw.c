@@ -2845,12 +2845,12 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
           if (errno == EBUSY)
             {
               M_PRINTF ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           if (errno == EILSEQ)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           else
             {
@@ -2931,12 +2931,12 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
           if (errno == EBUSY)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           if (errno == EILSEQ)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           else
             {
@@ -3041,12 +3041,12 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
           if (errno == EBUSY)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           if (errno == EILSEQ)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           else
             {
@@ -3154,12 +3154,12 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
           if (errno == EBUSY)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           if (errno == EILSEQ)
             {
               M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+	      break;
             }
           else
             {
