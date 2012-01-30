@@ -168,7 +168,7 @@ def stdoutthread(stdout):
 def msgq_init(): 
     print "in msgq_init"
     global proc
-    proc = subprocess.Popen(["./ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(["./lpfw-pygui/ipc_wrapper2"], shell=True, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
      
     stdout_thread = threading.Thread(target=stdoutthread, args=(proc.stderr,))
     #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reading pipe

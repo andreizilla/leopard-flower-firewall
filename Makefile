@@ -29,7 +29,7 @@ lpfwpygui:
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: DESTDIR = $(shell pwd)
-debug: DEBUG = "debug"
+debug: DEBUG = debug
 debug: lpfw lpfwcli lpfwpygui
 
 install:

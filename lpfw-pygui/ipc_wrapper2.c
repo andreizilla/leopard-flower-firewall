@@ -264,14 +264,15 @@ void* d2ftrafficthread(void * ptr) {
 int main ( int argc, char *argv[] )
 {    
     pthread_t f2d_thread, d2f_thread, d2flist_thread, d2fdel_thread, d2ftraffic_thread;
-    pthread_create(&f2d_thread, NULL, f2dthread, NULL);
-    pthread_create(&d2f_thread, NULL, d2fthread, NULL);
-    pthread_create(&d2flist_thread, NULL, d2flistthread, NULL);
+    if (pthread_create (&f2d_thread, NULL, f2dthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+    if (pthread_create (&d2f_thread, NULL, d2fthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+    if (pthread_create (&d2flist_thread, NULL, d2flistthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+    if (pthread_create (&d2ftraffic_thread, NULL, d2ftrafficthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+
     //pthread_create(&d2fdel_thread, NULL, d2fdelthread, NULL);
-    pthread_create(&d2ftraffic_thread, NULL, d2ftrafficthread, NULL);
 #ifdef DEBUG
     printf ("Beginning the main loop \n");
-    printf ("My GID is %d \n", (int)getgid());
+    printf ("My GID is %d \n", (int)getegid());
 #endif
     while(1)
     {
