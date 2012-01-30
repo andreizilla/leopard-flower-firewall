@@ -3612,7 +3612,7 @@ void setgid_lpfwuser()
     {
       if (errno == 0)
         {
-          printf("lpfwuser group does not exit, creating...\n");
+	  printf("lpfwuser group does not exist, creating...\n");
           if (system("groupadd lpfwuser") == -1)
             {
               printf("error in system(groupadd)\n");

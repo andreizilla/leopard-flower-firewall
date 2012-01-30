@@ -7,7 +7,6 @@ These instructions apply specifically to Ubuntu 10.10 but are very likely to wor
 The following packaged must be installed for lpfw daemon to compile:
 libnetfilter-queue-dev
 libnetfilter-conntrack-dev
-libnfnetlink-dev
 libcap-dev
 Issue "make" in the source root directory
 

@@ -445,7 +445,7 @@ void init_msgq()
 #ifdef DEBUG       //make world readable to avoid permission cock-ups during debugging
             0666
 #else
-            0060 //lpfwuser group members may RDWR
+	    0660 //lpfwuser group members may RDWR
 #endif
 
            ) == 1)
