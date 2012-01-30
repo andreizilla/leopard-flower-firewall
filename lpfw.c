@@ -158,15 +158,15 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 int global_rules_filter( int direction, int protocol, int port, int verdict)
 {
     if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
-    if (direction = DIRECTION_OUT)
+    if (direction == DIRECTION_OUT)
     {
-	if (protocol = PROTO_TCP) direction = TCP_OUT_ALLOW;
-	else if (protocol = PROTO_UDP) direction =  UDP_OUT_ALLOW;
+	if (protocol == PROTO_TCP) direction = TCP_OUT_ALLOW;
+	else if (protocol == PROTO_UDP) direction =  UDP_OUT_ALLOW;
     }
     else if (direction = DIRECTION_IN)
     {
-	if (protocol = PROTO_TCP) direction = TCP_IN_ALLOW;
-	else if (protocol = PROTO_UDP) direction =  UDP_IN_ALLOW;
+	if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
+	else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
     }
     ports_list_t *ports_list;
     ports_list = ports_list_array[direction];
