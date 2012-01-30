@@ -30,19 +30,16 @@
 #include "common/defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
-
-gid_t lpfwuser_gid;
+#include "lpfw.h"
+#include "msgq.h"
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
-struct arg_file *rules_file, *pid_file, *log_file, *cli_path, *gui_path, *pygui_path;
+struct arg_file *rules_file, *pid_file, *log_file;
 struct arg_int *log_info, *log_traffic, *log_debug;
-
-char ownpath[PATHSIZE]; //full path of lpfw executable
-char owndir[PATHSIZE]; //full path to the dir lpfw executable is in (with trailing /)
 
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
@@ -53,7 +50,13 @@ dlist*copy_first;
 #endif
 
 global_rule_t *first_global_rule = NULL;
-
+char ownpath[PATHSIZE];
+char owndir[PATHSIZE];
+gid_t lpfwuser_gid;
+char logstring[PATHSIZE];
+struct arg_file *cli_path, *gui_path, *pygui_path;
+pthread_mutex_t msgq_mutex, logstring_mutex;
+pid_t fe_pid;
 
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 msg_struct msg_d2f = {1, 0};
@@ -62,29 +65,13 @@ msg_struct msg_d2fdel = {1, 0};
 msg_struct msg_d2flist = {1, 0};
 msg_struct_creds msg_creds = {1, 0};
 
-extern int fe_ask_out ( char*, char*, unsigned long long* );
-extern int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
-extern int fe_list();
-extern void init_msgq();
-extern int sha512_stream ( FILE *stream, void *resblock );
-extern int awaiting_reply_from_fe;
-extern int mqd_d2ftraffic;
-extern struct msqid_ds *msgqid_d2ftraffic;
-extern void* run_tests(void *);
-
-
-//Forward declarations to make code parser happy
-int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 int ( *m_printf ) ( int loglevel, char *logstring );
 
 //mutex to protect dlist AND nfmark_count
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
-//mutex to avoid fe_ask_* to send data simultaneously
-pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
 //mutex to lock fe_active_flag
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 //two NFCT_Q_DUMP simultaneous operations can produce an error
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -134,15 +121,11 @@ char predicate = FALSE;
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-//netfilter mark number for the packet (to be added to NF_MARK_BASE)
 int nfmark_count = 0;
 
 int tcp_stats, udp_stats;
 int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE], tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 
-char logstring[PATHSIZE];
-//PID of currently active frontend
-pid_t fe_pid;
 
 
 //this array is used internally by lpfw to

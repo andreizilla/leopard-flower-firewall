@@ -1,3 +1,6 @@
+#ifndef DEFINES_H
+#define DEFINES_H
+
 #define TRUE 1
 #define FALSE 0
 
@@ -78,4 +81,8 @@
 #define TWMAX 1
 #define SWMAX 1
 #define HWMAX 1
+
+#endif // DEFINES_H
+
+
 // kate: indent-mode cstyle; space-indent on; indent-width 4; 

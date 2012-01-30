@@ -1,10 +1,11 @@
+#ifndef INCLUDES_H_
+#define INCLUDES_H_
+
 #include "defines.h"
 #include <unistd.h>
 #include <sys/types.h> //for ino_t
 #include <dirent.h> //for DIR*
 
-#ifndef INCLUDES_H_
-#define INCLUDES_H_
 
 typedef char mbool;
 

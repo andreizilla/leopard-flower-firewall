@@ -1,4 +1,4 @@
-#include "sys/ipc.h"
+#include <sys/ipc.h>
 #include <syslog.h>
 #include <string.h>
 #include <stdlib.h> //for exit
@@ -6,49 +6,16 @@
 #include <sys/msg.h>
 #include <sys/wait.h>
 #include <errno.h>
-#include "common/defines.h"
-#include "common/includes.h"
 #include <malloc.h>
 #include <dirent.h> //for ino_t
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/capability.h>
-#include "argtable/argtable2.h" //for some externs
-
-//Forward declarations needed for kdevelop to do code parsing correctly
-int fe_ask_out(char*, char*, unsigned long long*);
-int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
-
-int fe_list();
-void init_msgq();
-
-
-//These externs are initialized in lpfw.c
-extern char ownpath[PATHSIZE];
-extern char owndir[PATHSIZE];
-extern msg_struct msg_d2f;
-extern msg_struct msg_f2d; // = {MSGQNUM_F2D_CHAR, " "};
-extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
-extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
-extern msg_struct_creds msg_creds;
-extern gid_t lpfwuser_gid;
-extern char logstring[PATHSIZE];
-extern struct arg_file *cli_path, *gui_path, *pygui_path;
-extern pthread_mutex_t nfmark_count_mutex, msgq_mutex, logstring_mutex;
-extern int nfmark_count;
-extern pid_t fe_pid;
-
-extern int (*m_printf)(int loglevel, char *logstring);
-extern int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
-extern unsigned long long starttimeGet(int mypid);
-extern void fe_active_flag_set (int boolean);
-extern void child_close_nfqueue();
-extern int sha512_stream(FILE *stream, void *resblock);
-extern dlist * dlist_copy();
-extern void dlist_del ( char *path, char *pid );
-extern void capabilities_modify(int capability, int set, int action);
-
-
+#include "argtable/argtable2.h"
+#include "common/defines.h"
+#include "common/includes.h"
+#include "lpfw.h"
+#include "msgq.h"
 
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
@@ -56,8 +23,8 @@ extern void capabilities_modify(int capability, int set, int action);
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex); \
  
-
-
+int awaiting_reply_from_fe;
+int mqd_d2ftraffic;
 
 
 //message queue id - communication link beteeen daemon and frontend
