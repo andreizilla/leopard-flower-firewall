@@ -1134,7 +1134,7 @@ void dlist_del ( char *path, char *pid )
   pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int parsecache_in(int socket, char *path, char *pid)
+int socket_cache_in_search(int socket, char *path, char *pid)
 {
   int i;
   int retval;
@@ -1165,10 +1165,10 @@ int parsecache_in(int socket, char *path, char *pid)
         }
     }
   pthread_mutex_unlock(&dlist_mutex);
-  return GOTO_NEXT_STEP;
+  return SOCKETS_CACHE_NOT_FOUND;
 }
 
-int parsecache_out(int socket, char *path, char *pid)
+int socket_cache_out_search(int socket, char *path, char *pid)
 {
   int i;
   int retval;
@@ -1199,7 +1199,7 @@ int parsecache_out(int socket, char *path, char *pid)
         }
     }
   pthread_mutex_unlock(&dlist_mutex);
-  return GOTO_NEXT_STEP;
+  return SOCKETS_CACHE_NOT_FOUND;
 }
 
 //scan active /proc/pid entries (ignoring kernel processes) and build a correlation of PIDs to sockets
@@ -2083,12 +2083,12 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 quit:
   pthread_mutex_unlock ( &dlist_mutex );
   //if the path is not in dlist or is a new instance of an *ONCE rule
-  return GOTO_NEXT_STEP;
+  return PATH_IN_DLIST_NOT_FOUND;
 }
 
 //scan only those /proc entries that are already in the dlist
 // and only those that have a current PID (meaning the app has already sent a packet)
-int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
+int socket_active_processes_search ( int *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
   char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
   char path[32];
@@ -2174,11 +2174,11 @@ int socket_find_from_pids_in_dlist ( int *mysocket, char *m_path, char *m_pid, i
       temp = temp->next;
     }
   pthread_mutex_unlock ( &dlist_mutex );
-  return GOTO_NEXT_STEP;
+  return SOCKET_ACTIVE_PROCESSES_NOT_FOUND;
 }
 
 //scan /proc to find which PID the socket belongs to
-int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
+int socket_procfs_search ( int *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
   //vars for scanning through /proc dir
   struct dirent *proc_dirent, *fd_dirent;
@@ -2260,7 +2260,7 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
                       closedir ( proc_DIR );
                       strcpy ( m_path, exepathbuf );
                       strcpy ( m_pid, proc_dirent->d_name );
-                      return GOTO_NEXT_STEP;
+		      return SOCKET_FOUND_IN_PROCPIDFD;
                     }
                 }
             }
@@ -2311,7 +2311,7 @@ int icmp_check_only_one_inode ( int *m_inodeint )
       ++loop;
     }
   M_PRINTF ( MLOG_DEBUG, "(icmp)inode %d", inodeint );
-  return 0;
+  return ICMP_ONLY_ONE_ENTRY;
 }
 
 int socket_check_kernel_udp(int *socket)
@@ -2365,7 +2365,7 @@ int socket_check_kernel_udp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+	  return INKERNEL_SOCKET_NOT_FOUND;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
@@ -2399,11 +2399,11 @@ int socket_check_kernel_udp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+	  return INKERNEL_SOCKET_NOT_FOUND;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
-  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+  return INKERNEL_SOCKET_NOT_FOUND;
 }
 
 
@@ -2458,7 +2458,7 @@ int socket_check_kernel_tcp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+	  return   INKERNEL_SOCKET_NOT_FOUND;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
@@ -2492,15 +2492,15 @@ int socket_check_kernel_tcp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+	  return   INKERNEL_SOCKET_NOT_FOUND;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
-  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
+  return   INKERNEL_SOCKET_NOT_FOUND;
 }
 
 
-//find in procfs which socket corresponds to source port
+//NEEDED BY THE TEST SUITE, don't comment out yetfind in procfs which socket corresponds to source port
 int port2socket_udp ( int *portint, int *socketint )
 {
   char buffer[5];
@@ -2575,7 +2575,7 @@ endloop:
   *socketint = m_socketint;
   if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
   //else
-  return GOTO_NEXT_STEP;
+  return 0;
 }
 
 
@@ -2655,107 +2655,120 @@ endloop:
   *socketint = m_socketint;
   if (*socketint == 0) return INKERNEL_SOCKET_FOUND;
   //else
-  return GOTO_NEXT_STEP;
+  return 0;
 }
 
-//Handler for TCP packets for INPUT NFQUEUE
-int packet_handle_tcp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
-{
-  int retval;
-  //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-  if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP)
-    {
-      M_PRINTF (MLOG_DEBUG2, "(cache)");
-      goto out;
-    }
-  if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
-  retval = socket_find_in_proc ( &socketint, path, pid, stime );
-  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
-    {
-      retval = socket_check_kernel_tcp(&socketint);
-      goto out;
-    }
-  else if (retval != GOTO_NEXT_STEP) goto out;
 
-  if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime) ) != GOTO_NEXT_STEP) goto out;
-out:
-  return retval;
+//Handler for TCP packets for INPUT NFQUEUE
+int packet_handle_tcp_in ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+{
+    int retval;
+    retval = socket_cache_in_search(socket, path, pid);
+    if (retval != SOCKETS_CACHE_NOT_FOUND)
+    {
+	M_PRINTF (MLOG_DEBUG2, "(cache)");
+	return retval;
+    }
+    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND)
+    {
+	return retval;
+    }
+    retval = socket_procfs_search ( &socket, path, pid, stime );
+    if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
+    {
+      retval = socket_check_kernel_tcp(&socket);
+      return retval;
+    }
+    else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
+    {
+      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      return retval;
+    }
 }
 
 //Handler for TCP packets for OUTPUT NFQUEUE
 int packet_handle_tcp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval;
-  //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-  if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP)
-    {
+  retval = socket_cache_out_search(socket, path, pid);
+  if (retval != SOCKETS_CACHE_NOT_FOUND)
+  {
       M_PRINTF (MLOG_DEBUG2, "(cache)");
-      goto out;
-    }
-  if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
-  retval = socket_find_in_proc ( &socket, path, pid, stime );
+      return retval;
+  }
+  retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+  if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
+  {
+      return retval;
+  }
+  retval = socket_procfs_search ( &socket, path, pid, stime );
   if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
-    {
-      retval = socket_check_kernel_tcp(&socket);
-      goto out;
-    }
-  else if (retval != GOTO_NEXT_STEP) goto out;
-
-  if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime) ) != GOTO_NEXT_STEP) goto out;
-out:
-  return retval;
+  {
+    retval = socket_check_kernel_tcp(&socket);
+    return retval;
+  }
+  else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
+  {
+    retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+    return retval;
+  }
 }
 
 //Handler for UDP packets
-int packet_handle_udp_in ( int socketint, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int packet_handle_udp_in ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-  int retval;
-  //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-  if ((retval = parsecache_in(socketint, path, pid)) != GOTO_NEXT_STEP)
+    int retval;
+    retval = socket_cache_out_search(socket, path, pid);
+    if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
-      M_PRINTF (MLOG_DEBUG2, "(cache)");
-      goto out;
+	M_PRINTF (MLOG_DEBUG2, "(cache)");
+	return retval;
     }
-  if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
-  retval = socket_find_in_proc ( &socketint, path, pid, stime );
-  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
+    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
     {
-      retval = socket_check_kernel_udp(&socketint);
-      goto out;
+	return retval;
     }
-  else if (retval != GOTO_NEXT_STEP) goto out;
-
-
-
-  if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime) ) != GOTO_NEXT_STEP) goto out;
-out:
-  return retval;
+    retval = socket_procfs_search ( &socket, path, pid, stime );
+    if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
+    {
+      retval = socket_check_kernel_udp(&socket);
+      return retval;
+    }
+    else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
+    {
+      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      return retval;
+    }
 }
 
 //Handler for UDP packets
 int packet_handle_udp_out ( int socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
-  int retval;
-  //returns GOTO_NEXT_STEP => OK to go to the next step, otherwise  it returns one of the verdict values
-  if ((retval = parsecache_out(socket, path, pid)) != GOTO_NEXT_STEP)
+    int retval;
+    retval = socket_cache_out_search(socket, path, pid);
+    if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
-      M_PRINTF (MLOG_DEBUG2, "(cache)");
-      goto out;
+	M_PRINTF (MLOG_DEBUG2, "(cache)");
+	return retval;
     }
-  if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
-  retval = socket_find_in_proc ( &socket, path, pid, stime );
-  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
+    retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
+    if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
+    {
+	return retval;
+    }
+    retval = socket_procfs_search ( &socket, path, pid, stime );
+    if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
       retval = socket_check_kernel_udp(&socket);
-      goto out;
+      return retval;
     }
-  else if (retval != GOTO_NEXT_STEP) goto out;
-
-
-
-  if ( (retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime) ) != GOTO_NEXT_STEP) goto out;
-out:
-  return retval;
+    else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
+    {
+      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      return retval;
+    }
 }
 
 /* Not in use atm b/c trafficthread calculates traffic
@@ -2917,7 +2930,6 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
 
   switch ( verdict )
     {
-    case ACCEPT:
     case SOCKET_FOUND_IN_DLIST_ALLOW:
     case PATH_FOUND_IN_DLIST_ALLOW:
     case NEW_INSTANCE_ALLOW:
@@ -2990,14 +3002,14 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
 int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval, socketint;
-
-  if (( retval = icmp_check_only_one_inode ( &socketint ) ) != GOTO_NEXT_STEP)  goto out;
-  if (( retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP) goto out;
-  if (( retval = socket_find_in_proc ( &socketint, path, pid, stime ) )!= GOTO_NEXT_STEP) goto out;
-  if (( retval = path_find_in_dlist (nfmark_to_set, path, pid, stime) )!= GOTO_NEXT_STEP) goto out;
-  if ( !fe_active_flag_get() )
-out:
-    return retval;
+  retval = icmp_check_only_one_inode ( &socketint );
+  if (retval != ICMP_ONLY_ONE_ENTRY) {return retval;}
+  retval = socket_active_processes_search ( &socketint, path, pid, nfmark_to_set );
+  if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND) {return retval;}
+  retval = socket_procfs_search ( &socketint, path, pid, stime );
+  if (retval != SOCKET_FOUND_IN_PROCPIDFD) {return retval;}
+  retval = path_find_in_dlist (nfmark_to_set, path, pid, stime);
+  return retval;
 }
 
 int process_inkernel_socket(char *ipaddr, int *nfmark)
@@ -3050,11 +3062,9 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
   int verdict;
   //source and destination ports in host and net byte order
   u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
-  char path[PATHSIZE] = {0};
-  char pid[PIDLENGTH] = {0};
+  char path[PATHSIZE] = {0}, pid[PIDLENGTH] = {0};
   unsigned long long starttime;
-  int proto;
-  int socket;
+  int proto, socket;
   switch ( ip->protocol )
     {
     case IPPROTO_TCP:
@@ -3083,7 +3093,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_TCP, dport_hostbo, verdict);
 
-	  if (verdict == GOTO_NEXT_STEP)
+	  if (verdict == PATH_IN_DLIST_NOT_FOUND)
 	  {
 	      if (fe_was_busy_in)
 	      {
@@ -3120,7 +3130,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_UDP, dport_hostbo, verdict);
 
-	  if (verdict == GOTO_NEXT_STEP)
+	  if (verdict == PATH_IN_DLIST_NOT_FOUND)
 	  {
 	      if (fe_was_busy_in)
 	      {
@@ -3133,6 +3143,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	  }
       break;
 
+/* Receiving incoming icmp connections should be done on the kernel level
     case IPPROTO_ICMP:
       M_PRINTF ( MLOG_TRAFFIC, ">ICMP src %s ", saddr);
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
@@ -3146,6 +3157,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	  else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
       break;
+ */
     default:
       M_PRINTF ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
       M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet \n" );
@@ -3225,7 +3237,8 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
     {
     case IPPROTO_ICMP:
       fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-      if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP)
+      verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime );
+      if (verdict  == PATH_IN_DLIST_NOT_FOUND)
         {
           if (fe_was_busy_out)
             {
@@ -3307,7 +3320,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
   int verdict;
   u_int16_t sport_netbyteorder, dport_netbyteorder;
-  char path[PATHSIZE], pid[PIDLENGTH];
+  char path[PATHSIZE]= {0}, pid[PIDLENGTH]= {0};
   unsigned long long starttime;
 
   struct udphdr *udp;
@@ -3320,10 +3333,10 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int socket_found;
   if ((socket_found = is_udp_port_in_table(srcudp)) == -1) //not found in cache
     {
-  struct timespec timer2,dummy2;
-  timer2.tv_sec=0;
-  timer2.tv_nsec=1000000000/2;
-  nanosleep(&timer2, &dummy2);
+  struct timespec timer,dummy;
+  timer.tv_sec=0;
+  timer.tv_nsec=1000000000/2;
+  nanosleep(&timer, &dummy);
 
   if (build_udp_port_cache(&socket_found, srcudp) == -1)
   {
@@ -3345,7 +3358,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
       verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
 
-      if (verdict == GOTO_NEXT_STEP)
+      if (verdict == PATH_IN_DLIST_NOT_FOUND)
       {
 	  if (fe_was_busy_in)
 	  {
@@ -3427,8 +3440,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
   int verdict;
   u_int16_t sport_netbyteorder, dport_netbyteorder;
-  char path[PATHSIZE]= {0};
-  char pid[PIDLENGTH]= {0};
+  char path[PATHSIZE]= {0}, pid[PIDLENGTH]= {0};
   unsigned long long starttime;
 
   // ihl field is IP header length in 32-bit words, multiply by 4 to get length in bytes
@@ -3442,10 +3454,10 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   int socket_found;
   if ((socket_found = is_tcp_port_in_cache(srctcp)) == -1) //not found in cache
     {
-	  struct timespec timer2,dummy2;
-	  timer2.tv_sec=0;
-	  timer2.tv_nsec=1000000000/2;
-	  nanosleep(&timer2, &dummy2);
+	  struct timespec timer,dummy;
+	  timer.tv_sec=0;
+	  timer.tv_nsec=1000000000/2;
+	  nanosleep(&timer, &dummy);
 
 	  if (build_tcp_port_cache(&socket_found, srctcp) == -1)
 	  {
@@ -3461,6 +3473,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
   verdict = packet_handle_tcp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
+
     if (verdict == INKERNEL_SOCKET_FOUND)
     {
 	verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
@@ -3468,7 +3481,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
     verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dsttcp, verdict);
 
-    if (verdict == GOTO_NEXT_STEP)
+    if (verdict == PATH_IN_DLIST_NOT_FOUND)
     {
 	if (fe_was_busy_in)
 	{
