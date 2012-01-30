@@ -51,11 +51,13 @@ def refreshmodel(ruleslist):
             ker_pid = QStandardItem("N/A")
             ker_perms = QStandardItem("ALLOW_ALWAYS")
             ker_fullpath = QStandardItem("KERNEL-> "+item[1])
-            ker_in_traf = QStandardItem()
-            ker_out_traf = QStandardItem()
-            modelAll.appendRow((ker_name,ker_pid,ker_perms,ker_fullpath,ker_in_traf,ker_out_traf))
+            ker_in_allow_traf = QStandardItem()
+            ker_out_allow_traf = QStandardItem()
+            ker_in_deny_traf = QStandardItem()
+            ker_out_deny_traf = QStandardItem()
+            modelAll.appendRow((ker_name,ker_pid,ker_perms,ker_fullpath,ker_in_allow_traf,ker_out_allow_traf,ker_in_deny_traf,ker_out_deny_traf))
             #see below why del is needed
-            del ker_fullpath,ker_pid,ker_perms,ker_name,ker_in_traf,ker_out_traf
+            del ker_fullpath,ker_pid,ker_perms,ker_name,ker_in_allow_traf,ker_out_allow_traf,ker_in_deny_traf,ker_out_allow_traf
         else:
             fullpath = QStandardItem(item[0])
             #item[4] contains nfmark
@@ -70,10 +72,12 @@ def refreshmodel(ruleslist):
             m_list = string.rsplit(item[0],"/",1)
             m_name = m_list[1]
             name = QStandardItem(m_name)
-            in_traf = QStandardItem()
-            out_traf = QStandardItem()
-            modelAll.appendRow((name,pid,perms,fullpath,in_traf,out_traf))
-            del fullpath,pid,perms,name,in_traf,out_traf
+            in_allow_traf = QStandardItem()
+            out_allow_traf = QStandardItem()
+            in_deny_traf = QStandardItem()
+            out_deny_traf = QStandardItem()
+            modelAll.appendRow((name,pid,perms,fullpath,in_allow_traf,out_allow_traf,in_deny_traf,out_deny_traf))
+            del fullpath,pid,perms,name,in_allow_traf,out_allow_traf,in_deny_traf,out_deny_traf
             print "Received: %s" %(item[0])
             if (pid_string != "N/A"):
                 fullpath2 = QStandardItem(item[0])
@@ -81,10 +85,12 @@ def refreshmodel(ruleslist):
                 pid2 = QStandardItem(pid_string)
                 perms2 = QStandardItem(item[2])
                 name2 = QStandardItem(m_name)
-                in_traf2 = QStandardItem()
-                out_traf2 = QStandardItem()
-                modelActive.appendRow((name2,pid2,perms2,fullpath2,in_traf2,out_traf2))
-                del fullpath2,pid2,perms2,name2, in_traf2, out_traf2
+                in_allow_traf2 = QStandardItem()
+                out_allow_traf2 = QStandardItem()
+                in_deny_traf2 = QStandardItem()
+                out_deny_traf2 = QStandardItem()
+                modelActive.appendRow((name2,pid2,perms2,fullpath2,in_allow_traf2,out_allow_traf2,in_deny_traf2,out_deny_traf2))
+                del fullpath2,pid2,perms2,name2,in_allow_traf2,out_allow_traf2,in_deny_traf2,out_deny_traf2
 #apparently(???) deletion causes its contents to be COPIED into QModel rather than be referenced. If a variable is reused w/out deletion, its contents simply gets re-written
     ruleslock.release()
     
@@ -99,22 +105,27 @@ def traffic_handler(ruleslist):
     "Receive every second nfmarks and traffic stats and put them in the model"
     global ruleslock
     ruleslock.acquire()
-    #take all nfmarks 0th 3rd 6th etc. and look them up in the model
+    #take all nfmarks 0th 5th 10th etc. and look them up in the model
     i = -1
     for nfmark in ruleslist:
         i = i + 1
-        if ((i % 3) != 0): #only every third
+        if ((i % 5) != 0): #only every 5th
             continue
         for j in range(modelAll.rowCount()):
             #4th element of each line has nfmark in its data field
             if (modelAll.item(j,3).data().toString() == nfmark):
                 modelAll.item(j,4).setText(str(ruleslist[i+1]))
                 modelAll.item(j,5).setText(str(ruleslist[i+2]))
+                modelAll.item(j,6).setText(str(ruleslist[i+3]))
+                modelAll.item(j,7).setText(str(ruleslist[i+4]))
+
         for j in range(modelActive.rowCount()):
             #4th element of each line has nfmark in its data field
             if (modelActive.item(j,3).data().toString() == nfmark):
                 modelActive.item(j,4).setText(str(ruleslist[i+1]))
                 modelActive.item(j,5).setText(str(ruleslist[i+2]))
+                modelActive.item(j,6).setText(str(ruleslist[i+3]))
+                modelActive.item(j,7).setText(str(ruleslist[i+4]))
         
     ruleslock.release()
     
@@ -435,11 +446,11 @@ tray.show()
 actionShow.triggered.connect(window.show)
 actionExit.triggered.connect(window.realQuit)
 
-
+ 
 modelAll = QStandardItemModel()
-modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path", "Incoming allowed", "Outgoing allowed"))
+modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path","Incoming allowed","Outgoing allowed","Incoming denied","Outgoing denied"))
 modelActive = QStandardItemModel()
-modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path", "Incoming allowed", "Outgoing allowed"))
+modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path","Incoming allowed","Outgoing allowed","Incoming denied","Outgoing denied"))
 window.tableView.setModel(modelAll)
 dialogOut = myDialogOut()
 dialogOut.setWindowTitle("Leopard Flower firewall")

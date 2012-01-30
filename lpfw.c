@@ -85,6 +85,7 @@ pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 //two NFCT_Q_DUMP simultaneous operations can produce an error
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread,
@@ -141,12 +142,61 @@ char logstring[PATHSIZE];
 pid_t fe_pid;
 
 
+//this array is used internally by lpfw to
+int ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
+//this array is built for export to frontend based on ct_entries
+int ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
+/*
+  [0] nfmark (export[0])
+  [1] bytes in allowed
+  [2] bytes out allowed
+  [3] bytes in from all previously destroyed conntracks which had this nfmark
+  [4] bytes out from all previously destroyed conntracks which had this nfmark
+  [5] [1] + [3] (export[1])
+  [6] [2] + [4] (export[2])
+  [7] total bytes in denied so far  (export[3])
+  [8] total bytes out denied so far (export[4])
+*/
+
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex); \
  
+
+
+void denied_traffic_add (int direction, int mark, int bytes)
+{
+    pthread_mutex_lock ( &ct_entries_mutex);
+    int i;
+    for (i = 0; ct_entries[i][0] != 0; ++i)
+      {
+	if (ct_entries[i][0] != mark) continue;
+	if (direction = DIRECTION_OUT)
+	{
+	    ct_entries[i][8] += bytes;
+	}
+	else if (direction = DIRECTION_IN)
+	{
+	    ct_entries[i][7] += bytes;
+	}
+	pthread_mutex_unlock ( &ct_entries_mutex);
+	return;
+      }
+    //the entry is not yet in array, adding now
+    ct_entries[i][0] = mark;
+    if (direction = DIRECTION_OUT)
+    {
+	ct_entries[i][8] += bytes;
+    }
+    else if (direction = DIRECTION_IN)
+    {
+	ct_entries[i][7] += bytes;
+    }
+    pthread_mutex_unlock ( &ct_entries_mutex);
+    return ;
+}
 
 void fe_active_flag_set ( int boolean )
 {
@@ -341,7 +391,7 @@ int build_udp6_port_cache(int *socket_found, int port_to_find)
     else {return 1;}
 }
 
-
+//For debug purposes only - measure read()s per second on /proc/net* files
 void * readstatsthread( void *ptr)
 {
   static int old_tcp_stats;
@@ -380,23 +430,6 @@ int conntrack_delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *
   return NFCT_CB_CONTINUE;
 }
 
-//this array is used inside lpfw for debug purposes
-int ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
-//this array is built for export to frontend based on ct_entries
-int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3] = {};
-/*
-  [0] nfmark
-  [1] bytes in
-  [2] bytes out
-  [3] bytes in from all previously destroyed conntracks which had this nfmark
-  [4] bytes out from all previously destroyed conntracks which had this nfmark
-  [5] [1] + [3]
-  [6] [2] + [4]
-  For debug purposes:
-  [7] how many times previous [5] was larger than the present [5]
-  [8] how many times previous [6] was larger than the present [6]
-*/
-
 //process rules that trafficthread dumps every second to extract traffic statistics
 int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
@@ -410,18 +443,21 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
   out_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
   in_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
 
+  pthread_mutex_lock ( &ct_entries_mutex);
   int i;
   for (i = 0; ct_entries[i][0] != 0; ++i)
     {
       if (ct_entries[i][0] != mark) continue;
       ct_entries[i][1] += in_bytes;
       ct_entries[i][2] += out_bytes;
+      pthread_mutex_unlock ( &ct_entries_mutex);
       return NFCT_CB_CONTINUE;
     }
   //the entry is not yet in array, adding now
   ct_entries[i][0] = mark;
   ct_entries[i][1] = in_bytes;
   ct_entries[i][2] = out_bytes;
+  pthread_mutex_unlock ( &ct_entries_mutex);
   return NFCT_CB_CONTINUE;
 }
 
@@ -476,7 +512,8 @@ void * conntrackexporthread( void *ptr)
       int i;
       for (i=0; i<CT_ENTRIES_EXPORT_MAX; ++i)
         {
-	  ct_entries[i][1] = ct_entries[i][2] = ct_entries_export[i][0] = ct_entries_export[i][1] = ct_entries_export[i][2] = 0;
+	  ct_entries[i][1] = ct_entries[i][2] = ct_entries_export[i][0] = ct_entries_export[i][1] =
+		  ct_entries_export[i][2] = ct_entries_export[i][3] = ct_entries_export[i][4] = 0;
         }
       pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1)
@@ -486,16 +523,13 @@ void * conntrackexporthread( void *ptr)
       pthread_mutex_unlock(&ct_dump_mutex);
 //we get here only when dumping operation finishes and traffic_callback has created a new array of
 //conntrack entries
+
+      pthread_mutex_lock(&ct_entries_mutex);
+
       for (i = 0; ct_entries[i][0] != 0; ++i)
         {
-	  if (ct_entries[i][5] > ct_entries[i][1]+ct_entries[i][3]) ++ct_entries[i][7];
-	  if (ct_entries[i][6] > ct_entries[i][2]+ct_entries[i][4]) ++ct_entries[i][8];
 	  ct_entries[i][5] = ct_entries[i][1]+ct_entries[i][3];
 	  ct_entries[i][6] = ct_entries[i][2]+ct_entries[i][4];
-
-          // printf ("%d >%d <%d >%d <%d >%d <%d errin:%d errout:%d \n", rules[i][0],
-          //    rules[i][1], rules[i][2], rules[i][3], rules[i][4], rules[i][5], rules[i][6],
-          //    rules[i][7], rules[i][8]);
         }
 
       //rearrange array for export
@@ -504,38 +538,57 @@ void * conntrackexporthread( void *ptr)
         {
 	  for (j=0; ct_entries_export[j][0] !=0; ++j)
             {
+	      //if this is an IN nfmark
 	      if (ct_entries[i][0] >= NFMARKIN_BASE)
                 {
+		  //find its OUT nfmark
 		  int delta = ct_entries[i][0] - NFMARK_DELTA;
 		  if (delta == ct_entries_export[j][0])
                     {
+		      //bytes in for IN nfmark are bytes out for OUT nfmark
 		      ct_entries_export[j][1] += ct_entries[i][6];
 		      ct_entries_export[j][2] += ct_entries[i][5];
+		      ct_entries_export[j][3] += ct_entries[i][8];
+		      ct_entries_export[j][4] += ct_entries[i][7];
                       goto next;
                     }
                 }
+	      //else if this is a OUT nfmark
 	      if (ct_entries[i][0] == ct_entries_export[j][0])
                 {
 		  ct_entries_export[j][1] += ct_entries[i][5];
 		  ct_entries_export[j][2] += ct_entries[i][6];
+		  ct_entries_export[j][3] += ct_entries[i][7];
+		  ct_entries_export[j][4] += ct_entries[i][8];
+
                   goto next;
                 }
             }
+	  //Doesn't exist in export list, create an entry
 	  if (ct_entries[i][0] >= NFMARKIN_BASE)
             {
 	      ct_entries_export[j][0] = ct_entries[i][0] - NFMARK_DELTA;
 	      ct_entries_export[j][1] = ct_entries[i][6];
 	      ct_entries_export[j][2] = ct_entries[i][5];
+	      ct_entries_export[j][3] = ct_entries[i][8];
+	      ct_entries_export[j][4] = ct_entries[i][7];
+
             }
           else
             {
 	      ct_entries_export[j][0] = ct_entries[i][0];
 	      ct_entries_export[j][1] = ct_entries[i][5];
 	      ct_entries_export[j][2] = ct_entries[i][6];
+	      ct_entries_export[j][3] = ct_entries[i][7];
+	      ct_entries_export[j][4] = ct_entries[i][8];
+
             }
 next:
-	  ;
-        }
+;
+      }
+
+      pthread_mutex_unlock(&ct_entries_mutex);
+
 #ifdef DEBUG
       for (i = 0; ct_entries_export[i][0] != 0; ++i)
         {
@@ -2669,7 +2722,7 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
       strcat (m_logstring, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" );
       break;
     case SRCPORT_NOT_FOUND_IN_PROC:
-      strcat (m_logstring, "source port not found in procfs\n" );
+      strcat (m_logstring, "source port not found in procfs, drop\n" );
       break;
     }
   M_PRINTF(MLOG_TRAFFIC, "%s", m_logstring);
@@ -2868,11 +2921,17 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         }
       return 0;
     }
-
-  // else
+  else if (verdict < DENY_VERDICT_MAX)
+  {
+      denied_traffic_add(DIRECTION_IN, nfmark_to_set_out, ip->tot_len );
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+  }
+  else
+  {
   nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
   return 0;
-
+  }
 }
 
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
@@ -3065,9 +3124,17 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
       return 0;
     }
-  //else if verdict > ALLOW_VERDICT_MAX
+  else if (verdict < DENY_VERDICT_MAX)
+  {
+      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out, ip->tot_len );
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+  }
+  else
+  {
   nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
   return 0;
+  }
 }
 
 
@@ -3128,7 +3195,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   verdict = packet_handle_tcp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
     if (verdict == INKERNEL_SOCKET_FOUND)
       {
-	verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
+	verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
 	}
     if (verdict == GOTO_NEXT_STEP)
     {
@@ -3178,10 +3245,17 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
       return 0;
     }
-
-//else if verdict > ALLOW_VERDICT_MAX
-  nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
-  return 0;
+  else if (verdict < DENY_VERDICT_MAX)
+  {
+      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out, ip->tot_len );
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+  }
+  else
+  {
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+  }
 }
 
 
