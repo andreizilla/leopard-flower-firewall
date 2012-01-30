@@ -3415,7 +3415,7 @@ void SIGTERM_handler ( int signal )
 }
 
 /*command line parsing contributed by Ramon Fried*/
-int parse_comline_args(int argc, char* argv[])
+int parse_command_line(int argc, char* argv[])
 {
   // if the parsing of the arguments was unsuccessful
   int nerrors;
@@ -3427,7 +3427,7 @@ int parse_comline_args(int argc, char* argv[])
 #else
                                 "<file>,<stdout>"
 #endif
-                                , "Divert loggin to..." );
+				, "Divert loggin to..." );
   rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
   pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
   log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
@@ -3585,10 +3585,22 @@ void capabilities_setup()
       printf ("CAP_SETGID is not permitted \n");
       exit(0);
     }
+  cap_get_flag(cap_current, CAP_CHOWN, CAP_PERMITTED, &value);
+  if (value == CAP_CLEAR)
+    {
+      printf ("CAP_SETGID is not permitted \n");
+      exit(0);
+    }
+  cap_get_flag(cap_current, CAP_FSETID, CAP_PERMITTED, &value);
+  if (value == CAP_CLEAR)
+    {
+      printf ("CAP_SETGID is not permitted \n");
+      exit(0);
+    }
 
   cap_clear(cap_current);
-  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID};
-  cap_set_flag(cap_current, CAP_PERMITTED, 5, caps_list, CAP_SET);
+  const cap_value_t caps_list[] = {CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FSETID};
+  cap_set_flag(cap_current, CAP_PERMITTED, 7, caps_list, CAP_SET);
   if (cap_set_proc(cap_current) == -1)
     {
       printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -3965,6 +3977,47 @@ void open_proc_net_files()
     udp6info_fd = fileno(udp6info);
 }
 
+void chown_and_setgid_frontend()
+{
+    //TODO check if we really need those 2 caps, maybe _CHOWN is enough.
+    cap_t cap_current;
+    cap_current = cap_get_proc();
+    if (cap_current == NULL)
+      {
+	M_PRINTF(MLOG_INFO,"cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+    const cap_value_t caps_list[] = {CAP_CHOWN, CAP_FSETID, CAP_DAC_READ_SEARCH};
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 3, caps_list, CAP_SET);
+    if (cap_set_proc(cap_current) == -1)
+      {
+	M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+
+    char system_call_string[PATHSIZE];
+    strcpy (system_call_string, "chown :lpfwuser ");
+    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
+    if (system (system_call_string) == -1)
+    {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+
+    }
+    strcpy (system_call_string, "chmod g+s ");
+    strncat (system_call_string, cli_path->filename[0], PATHSIZE-20);
+    if (system (system_call_string) == -1)
+    {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+
+    }
+    const cap_value_t caps_list_to_clear[] = {CAP_CHOWN, CAP_FSETID};
+    cap_set_flag(cap_current,  CAP_PERMITTED, 2, caps_list_to_clear, CAP_CLEAR);
+    cap_set_flag(cap_current,  CAP_EFFECTIVE, 2, caps_list_to_clear, CAP_CLEAR);
+    if (cap_set_proc(cap_current) == -1)
+      {
+	printf("cap_set_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      }
+}
+
+
 int main ( int argc, char *argv[] )
 {
 
@@ -3981,7 +4034,7 @@ int main ( int argc, char *argv[] )
 
   if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
     {
-      parse_comline_args(argc, argv);
+      parse_command_line(argc, argv);
       return 0;
     }
 
@@ -3994,7 +4047,8 @@ int main ( int argc, char *argv[] )
   save_own_path();
 #endif
 
-  parse_comline_args(argc, argv);
+  parse_command_line(argc, argv);
+  chown_and_setgid_frontend();
   init_log();
   pidfile_check();
   init_conntrack();

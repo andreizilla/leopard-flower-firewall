@@ -14,8 +14,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <grp.h>
 #include "common/defines.h"
 #include "common/includes.h"
+#include "../argtable/argtable2.h"
+#include "../version.h" //for version string during packaging
+
 
 int (*m_printf)(int loglevel, char *logstring);
 void list();
@@ -23,7 +27,6 @@ void list();
 char TAB[2] = {9, 0};
 //string holds daemon request
 msg_struct global_struct;
-char zenity_path[MAX_LINE_LENGTH] = "/usr/bin/zenity";
 
 dlist *first;
 
@@ -70,12 +73,20 @@ extern void msgq_f2ddel(dlist rule, int ack_flag);
 
 char logstring[PATHSIZE];
 
+struct arg_file *log_file, *zenity_path;
+struct arg_int *log_debug, *nozenity;
+
+
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex); \
  
+
+
+
+
 int m_printf_file(int loglevel, char * logstring)
 {
   write ( fileno ( logfilefd ), logstring, strlen ( logstring ) );
@@ -165,7 +176,7 @@ void * threadZenity(void *ptr)
       strcat(zenity1, global_struct.item.path);
       strcat(zenity1, "\n Please choose action:");
 
-      execl(zenity_path, zenity_path, "--list", "--title=Leopard Flower- Permission request", zenity1,
+      execl(zenity_path->filename[0], zenity_path->filename[0], "--list", "--title=Leopard Flower- Permission request", zenity1,
             "--column=", "1", "ALLOW ALWAYS", "2", "ALLOW ONCE", "3", "DENY ALWAYS", "4", "DENY ONCE",
             "--column=", "--hide-column=1", "--height=240", (char *) 0);
     }
@@ -652,59 +663,104 @@ void  fe_cleanup_and_quit()
   die();
 }
 
+void check_own_gid()
+{
+    gid_t lpfwuser_gid, own_gid;
+    struct group *m_group;
+
+    errno = 0;
+    m_group = getgrnam("lpfwuser");
+    if(!m_group)
+      {
+	if (errno == 0)
+	  {
+	    printf ("lpfwuser group still doesn't exist even though we've just created it \n");
+	  }
+	else
+	  {
+	    perror ("getgrnam");
+	  }
+      }
+    lpfwuser_gid = m_group->gr_gid;
+    own_gid = getegid();
+    if (own_gid != lpfwuser_gid)
+    {
+	printf("Please set gid to lpfwuser on this file, owngid:%d    target: %d\n", (int)own_gid, (int)lpfwuser_gid);
+	exit(0);
+    }
+}
+
+void parse_command_line(int argc, char* argv[])
+{
+    // if the parsing of the arguments was unsuccessful
+    int nerrors;
+
+    // Define argument table structs
+    log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
+    zenity_path = arg_file0 ( NULL, "zenity-path", "<path to file>", "Path to zenity executable (if not in the $PATH)" );
+    log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+    nozenity = arg_int0 ( NULL, "nozenity", "<1/0 for yes/no>", "Don't use zenity notifications" );
+
+    struct arg_lit *help = arg_lit0 ( NULL, "help", "Display this help screen" );
+    struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
+    struct arg_end *end = arg_end ( 10 );
+    void *argtable[] = {log_file, log_debug, nozenity, zenity_path, help, version, end};
+
+    // Set default values
+    log_file->filename[0] = LPFWCLI_LOG;
+    zenity_path->filename[0] = "zenity ";
+    * ( log_debug->ival ) = 0;
+    * ( nozenity->ival ) = 0;
+
+    if ( arg_nullcheck ( argtable ) != 0 )
+      {
+	printf ( "Error: insufficient memory\n" );
+	exit(0);
+      }
+
+    nerrors = arg_parse ( argc, argv, argtable );
+
+    if ( nerrors == 0 )
+      {
+	if ( help->count == 1 )
+	  {
+	    printf ( "Leopard Flower frontend :\n Syntax and help:\n" );
+	    arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+	    exit (0);
+	  }
+	else if ( version->count == 1 )
+	  {
+	    printf ( "%s\n", VERSION );
+	    exit (0);
+	  }
+
+    else if ( nerrors > 0 )
+      {
+	arg_print_errors ( stdout, end, "Leopard Flower frontend" );
+	printf ( "Leopard Flower frontend:\n Syntax and help:\n" );
+	arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+	exit (1);
+      }
+
+    // Free memory - don't do this cause args needed later on
+    //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
+    }
+}
+
 int main(int argc, char *argv[])
 {
+    check_own_gid();
+    parse_command_line(argc, argv);
 
-#ifndef DEBUG
-  if (argc == 1 || strcmp(argv[1],"magic_number"))
+    if ((logfilefd = fopen(log_file->filename[0], "w+")) == 0)
     {
-      printf("This program is part of LeopardFlower suite and should not be executed directly by user. \n");
-      return 2;
+	printf("Can't open file %s for logging\n %s\n", log_file->filename[0]), strerror(errno);
+	exit(0);
     }
-#endif
-
-  if ((logfilefd = fopen(LPFWCLI_LOG, "w+")) == 0)
-    printf("Can't open file for logging\n %s\n", strerror(errno));
   else m_printf = &m_printf_file;
 
-  //reiterate through arg list, setting flags to prevent arg being given more than once
-  if (argc > 2)
-    {
-      int no_zenity_flag = 0;
-      int ipc_flag = 0;
-      int zenity_path_flag = 0;
-
-      int i = 3;
-      for (i; i <= argc; ++i)
-        {
-          // printf ("ARGC= %d arg %d %s\n",argc, i, argv[i-1]);
-          if (!strcmp(argv[i - 1], "--no-zenity"))
-            {
-              if (no_zenity_flag || zenity_path_flag) badArgs();
-              use_zenity = 0;
-              no_zenity_flag = 1;
-            }
-          else if (!strcmp(argv[i - 1], "--msgq"))
-            {
-              if (ipc_flag) badArgs();
-              use_msgq = 1;
-              ipc_flag = 1;
-            }
-          else if (!strcmp(argv[i - 1], "--zenity-path"))
-            {
-              if (zenity_path_flag || no_zenity_flag) badArgs();
-              //there should be another arg
-              if (!(argc > i)) badArgs();
-              ++i;
-              strcpy(zenity_path, argv[i - 1]);
-              zenity_path_flag = 1;
-            }
-          else badArgs();
-        }
-    }
-
   //check if zenity is in the PATH
-  //if (use_zenity) zenityCheck();
+  if (use_zenity) zenityCheck();
 
   //install signal handler on window resize
   signal(SIGWINCH, sigwinch);

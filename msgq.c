@@ -155,8 +155,11 @@ interrupted:
         }
       //no need to drop privs, they are all zeroed out upon setuid()
 
-      //check that frontend file exists and launch it
       struct stat path_stat;
+
+      /* lpfwcli is now started independently, keep this just in case
+
+      //check that frontend file exists and launch it
       if (!strcmp (msg_creds.creds.params[0], "--cli"))
         {
           if (stat(cli_path->filename[0], &path_stat) == -1 )
@@ -181,7 +184,8 @@ interrupted:
           //if exec returns here it means there was an error
           M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         }
-      else if (!strcmp (msg_creds.creds.params[0], "--gui"))
+	*/
+      if (!strcmp (msg_creds.creds.params[0], "--gui"))
         {
           if (stat(gui_path->filename[0], &path_stat) == -1 )
             {
