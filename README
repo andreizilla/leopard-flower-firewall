@@ -1,26 +1,25 @@
-<<<----Leopard Flower 0.4 (released Jan 2012)---->>>
+<<<----Leopard Flower 0.4 (released Feb 2012)---->>>
 
-  Leopard Flower (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a graphical frontend.
+  Leopard Flower personal firewall for Linux (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a frontend which comes in two flavours: text based "lpfwcli" and graphical "lpfwpygui".
 
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
-  The following packaged must be installed for lpfw to work:
+  The following packaged must be installed for lpfw daemon to run:
   iptables
   libnetfilter-queue
   libnetfilter-conntrack
-  libnfnetlink
+  The following packages must be installed for the graphical frontend to run:
+  python-qt4 (this will pull in 80 MB+ of dependencies)
+
 
 SIMPLE CONFIGURATION:
-  1. Make sure files lpfw and lpfwgui are in the same folder
+  1. Make sure lpfw,lpfwcli, and lpfwpygui are in the same folder
   2. In a terminal window navigate into the folder where lpfw is located and launch "./lpfw" as root
-  3. In a terminal window of an X session launch "./lpfw --gui" as a regular user (not root). You will see the graphical frontend.
-  4. Is you prefer to use a command line frontend instead of the graphical one, issue "./lpfw --cli" in a terminal window of an X session.
-
-
+  3. In a terminal window of an X session navigate into the folder where lpfw is located and launch "./lpfwcli" or "./lpfwpygui" as a regular user (not root). You will see the frontend.
 
 
 ADVANCED CONFIGURATION:
-  1. If you don't want lpfw to look for lpfwcli/lpfwgui in the same folder, you can pass to lpfw a command line option --cli-path=/--gui-path= followed by a path to lpfwcli/lpfwgui
+  1. If you don't want lpfw to look for lpfwcli/lpfwpygui in the same folder, you can pass to lpfw a command line option --cli-path=/--pygui-path= followed by a path to lpfwcli/lpfwgui
   2. If you want lpfw to start upon system boot-up, lpfw.conf is an upstart script which should be placed into /etc/init.(If your distro doen't use upstart, then the script should be adjusted to your distro's needs). This script expects to find lpfw in /usr/sbin
   3. 30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
   4. Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "./lpfw --cli" or "./lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)

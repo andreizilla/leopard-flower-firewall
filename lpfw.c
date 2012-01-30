@@ -628,6 +628,7 @@ int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
 
 void  init_conntrack()
 {
+  u_int8_t family = AF_INET;
   if ((ct_out_tcp = nfct_new()) == NULL)
     {
       perror("new");
@@ -648,6 +649,10 @@ void  init_conntrack()
     {
       perror("nfct_open");
     }
+  if (nfct_query(dummy_handle, NFCT_Q_FLUSH, &family) == -1)
+  {
+      M_PRINTF ( MLOG_INFO, "nfct_query FLUSH %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+  }
   if ((setmark_handle_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
       perror("nfct_open");

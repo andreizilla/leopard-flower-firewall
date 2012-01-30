@@ -25,7 +25,7 @@ python (v2.6)
 python-qt4
 Issue "make" from within lpfw-pygui directory
 
-lpfw should be placed into the same folder as lpfwcli and/or all the *.py(c) files from lpfw-pygui folder.
+lpfw,lpfwcli, and lpfwpygui should be placed into the same folder, unless overriden by command line options.
 Run lpfw as root or user with capabilities CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID
 Run lpfw --cli or lpfw --pygui as regular user.
 
