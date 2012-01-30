@@ -22,6 +22,8 @@ ADVANCED CONFIGURATION:
 
     If you don't want lpfw and lpfwcli/lpfwpygui to be in the same folder, you can pass to lpfw a command line option --cli-path=/--pygui-path= followed by a path to lpfwcli/lpfwgui. Otherwise lpfw rejects the frontend.
 
+    The same goes for lpfwpygui and the folder lpfw-pygui. Use lpfwpygui's --py-folder switch to indicate an alternative location.
+
     lpfw can be run as user with the following capabilities:
 CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_CHOWN, CAP_FSETID, CAP_KILL
 

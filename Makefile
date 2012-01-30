@@ -15,8 +15,10 @@ SOURCES 	=	lpfw.c \
 			common/includes.h \
 			common/defines.h \
 
-all: lpfw lpfwcli lpfwpygui
-all: DESTDIR = $(shell pwd)
+ifeq ($(DESTDIR), ./)
+    DESTDIR = $(shell pwd)
+endif
+all: lpfw install lpfwcli lpfwpygui
 
 lpfw: $(SOURCES)
 	gcc $(GCCFLAGS) $(SOURCES) -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
@@ -33,7 +35,7 @@ debug: DEBUG = debug
 debug: lpfw lpfwcli lpfwpygui
 
 install:
-	cp lpfw $(DESTDIR)
+	mv lpfw $(DESTDIR)
 
 #lpfw2: $(SOURCES)
 #we link against our own -lnetfiler_conntrack library v. 0.9.1

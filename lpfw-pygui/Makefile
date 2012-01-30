@@ -21,6 +21,16 @@ lpfwpygui:  $(SOURCES)
 
 install:
 	mv lpfwpygui $(DESTDIR)
+	mkdir -p $(DESTDIR)/lpfw-pygui
+	mv ipc_wrapper2 $(DESTDIR)/lpfw-pygui
+	cp resource.py $(DESTDIR)/lpfw-pygui
+	cp prefs.py $(DESTDIR)/lpfw-pygui
+	cp popup_out.py $(DESTDIR)/lpfw-pygui
+	cp popup_in.py $(DESTDIR)/lpfw-pygui
+	cp lpfwgui.py $(DESTDIR)/lpfw-pygui
+	cp frontend.py $(DESTDIR)/lpfw-pygui
+
+
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: ipc_wrapper2 lpfwpygui

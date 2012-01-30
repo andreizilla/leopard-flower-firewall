@@ -17,7 +17,12 @@ The following packaged must be installed for python frontend to compile:
 
 !!! Additional packages are required to run lpfw properly, please see README for extra packages and usage info
 
-Simply type "make" and you will get lpfw/lpfwcli/lpfwpygui in one folder
+Navigate into the source folder and type:
+mkdir build
+cd build
+make -C ../ DESTDIR=`pwd`
+
+Now build folder should have files lpfw, lpfwcli, lpfwpygui and folder lpfw-pygui.
 
   On some systems after typing "make", you may get a warning similar to the one below:
   lpfw.c:1230:32: warning: passing argument 2 of ‘nfq_get_payload’ from
