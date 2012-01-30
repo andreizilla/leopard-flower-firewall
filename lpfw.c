@@ -277,7 +277,7 @@ int build_tcp_port_cache(int *socket_found, int port_to_find)
     int bytesread_tcp;
     char newline[2] = {'\n','\0'};
     int port, socket, found_flag, i;
-    char *token;
+    char *token, *lasts;
 
     i = 0;
     memset(tcp_smallbuf,0, 4096);
@@ -291,8 +291,8 @@ int build_tcp_port_cache(int *socket_found, int port_to_find)
 	    perror ("read");
 	    return -1;
 	  }
-	token = strtok(tcp_smallbuf, newline); //skip the first line (column headers)
-	while ((token = strtok(NULL, newline)) != NULL)
+	token = strtok_r(tcp_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
 	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
@@ -319,7 +319,7 @@ int build_tcp6_port_cache(int *socket_found, int port_to_find)
     int bytesread_tcp6;
     char newline[2] = {'\n','\0'};
     int port, socket, found_flag, i;
-    char *token;
+    char *token, *lasts;
 
     i=0;
     memset(tcp6_smallbuf,0, 4096);
@@ -333,8 +333,8 @@ int build_tcp6_port_cache(int *socket_found, int port_to_find)
 	    perror ("read");
 	    return -1;
 	  }
-	token = strtok(tcp6_smallbuf, newline); //skip the first line (column headers)
-	while ((token = strtok(NULL, newline)) != NULL)
+	token = strtok_r(tcp6_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
 	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
@@ -362,7 +362,7 @@ int build_udp_port_cache(int *socket_found, int port_to_find)
     int bytesread_udp;
     char newline[2] = {'\n','\0'};
     int port, socket, found_flag, i;
-    char *token;
+    char *token, *lasts;
 
     i = 0;
     memset(udp_smallbuf,0, 4096);
@@ -376,8 +376,8 @@ int build_udp_port_cache(int *socket_found, int port_to_find)
 	    perror ("read");
 	    return -1;
 	  }
-	token = strtok(udp_smallbuf, newline); //skip the first line (column headers)
-	while ((token = strtok(NULL, newline)) != NULL)
+	token = strtok_r(udp_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
 	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
@@ -404,7 +404,7 @@ int build_udp6_port_cache(int *socket_found, int port_to_find)
     int bytesread_udp6;
     char newline[2] = {'\n','\0'};
     int port, socket, found_flag, i;
-    char *token;
+    char *token, *lasts;
 
     i = 0;
     memset(udp6_smallbuf,0, 4096);
@@ -418,8 +418,8 @@ int build_udp6_port_cache(int *socket_found, int port_to_find)
 	    perror ("read");
 	    return -1;
 	  }
-	token = strtok(udp6_smallbuf, newline); //skip the first line (column headers)
-	while ((token = strtok(NULL, newline)) != NULL)
+	token = strtok_r(udp6_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
 	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
@@ -1595,15 +1595,15 @@ rules_load()
   path[strlen ( path ) - 1] = 0; //remove newline
   if (!strcmp(path, "[GLOBAL]"))
     {
-      char *token;
+      char *token, *lasts;
       char direction[14];
       char ports[PATHSIZE - 100];
       while(strcmp(fgets ( path, PATHSIZE, stream ), newline))
 	{
 	  path[strlen ( path ) - 1] = 0; //remove newline
-	  token = strtok(path, " ");
+	  token = strtok_r(path, " ", &lasts);
 	  strncpy(direction, token, sizeof(direction));
-	  token = strtok(NULL, " ");
+	  token = strtok_r(NULL, " ", &lasts);
 	  strncpy(ports, token, sizeof(ports));
 	  global_rule_add(direction, ports);
 	}
@@ -2473,9 +2473,9 @@ do_fread:
 dont_fread:
   ;
   char newline[2] = {'\n','\0'};
-  char *token;
-  token = strtok(udp_membuf, newline); //skip the first line (column headers)
-  while ((token = strtok(NULL, newline)) != NULL)  //take a line until EOF
+  char *token, *lasts;
+  token = strtok_r(udp_membuf, newline, &lasts); //skip the first line (column headers)
+  while ((token = strtok_r(NULL, newline, &lasts)) != NULL)  //take a line until EOF
     {
       sscanf(token, "%*s %*8s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
       if (!strcmp (porthex, buffer))
@@ -2483,8 +2483,8 @@ dont_fread:
     }
   // else EOF reached with no match, check if it was IPv6 socket
 
-  token = strtok(udp6_membuf, newline); //skip the first line (column headers)
-  while ((token = strtok(NULL, newline)) != NULL)  //take a line until EOF
+  token = strtok_r(udp6_membuf, newline, &lasts); //skip the first line (column headers)
+  while ((token = strtok_r(NULL, newline, &lasts)) != NULL)  //take a line until EOF
     {
       sscanf(token, "%*s %*32s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
       if (!strcmp (porthex, buffer))
@@ -2553,9 +2553,9 @@ do_fread:
 dont_fread:
   ;
   char newline[2] = {'\n','\0'};
-  char *token;
-  token = strtok(tcp_membuf, newline); //skip the first line (column headers)
-  while ((token = strtok(NULL, newline)) != NULL)  //take a line until EOF
+  char *token, *lasts;
+  token = strtok_r(tcp_membuf, newline, &lasts); //skip the first line (column headers)
+  while ((token = strtok_r(NULL, newline, &lasts)) != NULL)  //take a line until EOF
     {
       sscanf(token, "%*s %*8s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer, &m_socketint);
       if (!strcmp (porthex, buffer))
@@ -2563,8 +2563,8 @@ dont_fread:
     }
   // else EOF reached with no match, check if it was IPv6 socket
 
-  token = strtok(tcp6_membuf, newline); //skip the first line (column headers)
-  while ((token = strtok(NULL, newline)) != NULL)  //take a line until EOF
+  token = strtok_r(tcp6_membuf, newline, &lasts); //skip the first line (column headers)
+  while ((token = strtok_r(NULL, newline, &lasts)) != NULL)  //take a line until EOF
     {
       sscanf(token, "%*s %*32s:%4s %*s %*s %*s %*s %*s %*s %*s %ld \n", buffer,& m_socketint);
       if (!strcmp (porthex, buffer))

@@ -39,7 +39,7 @@ void* f2dthread(void * ptr) {
 #endif
 	int size;
 	char sizestring[8];
-	char *token;
+	char *token, *lasts;
 	char *search = " ";
 
 	msg_struct msg;
@@ -51,7 +51,7 @@ void* f2dthread(void * ptr) {
 #ifdef DEBUG
 	printf ("f/e asked %s\n", line);
 #endif
-	token = strtok(line, search);
+	token = strtok_r(line, search, &lasts);
 	if (!strcmp(token, "F2DCOMM_LIST"))
 	{
 	    msg.item.command = F2DCOMM_LIST;
@@ -59,13 +59,13 @@ void* f2dthread(void * ptr) {
 	else if (!strcmp(token, "F2DCOMM_ADD"))
 	{
 	    msg.item.command = F2DCOMM_ADD;
-	    token = strtok(NULL, search); //take next element in line[]
+	    token = strtok_r(NULL, search, &lasts); //take next element in line[]
 	    if (!strcmp(token, KERNEL_PROCESS))
 	    {
 		strcpy (msg.item.path, KERNEL_PROCESS);
-		token = strtok(NULL, search);
+		token = strtok_r(NULL, search, &lasts);
 		strcpy (msg.item.pid, token);
-		token = strtok(NULL, search);
+		token = strtok_r(NULL, search, &lasts);
 		strcpy (msg.item.perms, token);
 	    }
 	    else strcpy (msg.item.perms, token);
@@ -73,9 +73,9 @@ void* f2dthread(void * ptr) {
 	else if (!strcmp(token, "F2DCOMM_DELANDACK"))
 	{
 	    msg.item.command = F2DCOMM_DELANDACK;
-	    token = strtok(NULL, search);
+	    token = strtok_r(NULL, search, &lasts);
 	    strcpy (msg.item.path, token);
-	    token = strtok(NULL, search);
+	    token = strtok_r(NULL, search, &lasts);
 	    strcpy (msg.item.pid, token);
 	}
 	else if (!strcmp(token, "F2DCOMM_WRT"))
