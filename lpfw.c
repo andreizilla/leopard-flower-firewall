@@ -830,7 +830,7 @@ dlist * dlist_copy()
   return copy_first;
 }
 
-//Add new element to dlist
+//Add new element to dlist and return new nfmark (if any)
 int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance)
 {
   static int rule_ordinal_count = 0;
@@ -1552,7 +1552,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
 // --------------------------
 // Here is how to determine if a process with the same PATH is either a new instance or a fork()ed process.
 //
-// 1. Get new process's(NP) PPID.
+// 1. Get new process's(NP) PPID.(parent PID)
 // 2. Is there an entry in dlist with the same PATH as NP AND PID == PPID?
 // 3. If no then we have a new instance, go to step A1
 // 4. If yes, we have a fork()ed process, go to step B1
@@ -1592,8 +1592,6 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
               strcpy ( tempperms, temp->perms );
               strcpy ( temppid, temp->pid );
               memcpy ( tempsha, temp->sha, DIGEST_SIZE );
-              int tempnfmark;
-              tempnfmark = temp->nfmark_out;
 
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be
 //two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
@@ -1696,19 +1694,17 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                       if ( !strcmp ( temp2->perms, ALLOW_ALWAYS ) )
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
-                          dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark ,FALSE);
+			  *nfmark_to_set = dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0 ,FALSE);
 			  if (fe_active_flag_get())
 			  {
 			    fe_list();
 			  }
-
-                          *nfmark_to_set = tempnfmark;
                           return NEW_INSTANCE_ALLOW;
                         }
                       else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
-                          dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, tempnfmark, FALSE );
+			  dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0, FALSE );
 			  if (fe_active_flag_get())
 			  {
 			    fe_list();

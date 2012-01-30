@@ -31,6 +31,12 @@ extern msg_struct msg_f2d; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2flist; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct msg_d2fdel; // = {MSGQNUM_F2D_CHAR, " "};
 extern msg_struct_creds msg_creds;
+extern gid_t lpfwuser_gid;
+extern char logstring[PATHSIZE];
+extern struct arg_file *cli_path, *gui_path, *pygui_path;
+extern pthread_mutex_t nfmark_count_mutex, msgq_mutex, logstring_mutex;
+extern int nfmark_count;
+
 extern int (*m_printf)(int loglevel, char *logstring);
 extern int dlist_add ( char *path, char *pid, char *perms, mbool current, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance );
 extern unsigned long long starttimeGet(int mypid);
@@ -38,12 +44,10 @@ extern void fe_active_flag_set (int boolean);
 extern void child_close_nfqueue();
 extern int sha512_stream(FILE *stream, void *resblock);
 extern dlist * dlist_copy();
-extern struct arg_file *cli_path, *gui_path, *pygui_path;
-extern pthread_mutex_t nfmark_count_mutex, msgq_mutex, logstring_mutex;
-extern int nfmark_count;
 extern void dlist_del ( char *path, char *pid );
-extern gid_t lpfwuser_gid;
-extern char logstring[PATHSIZE];
+extern void capabilities_modify(int capability, int set, int action);
+
+
 
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
@@ -438,6 +442,8 @@ void init_msgq()
   msgqid_creds = malloc(sizeof (struct msqid_ds));
   msgqid_d2ftraffic = malloc(sizeof (struct msqid_ds));
 
+  //TODO some capabilities may be needed here, in cases when TMPFILE was created by a different user
+  // or message queue with the same ID was created by a different user. Needs investigation.
 
   key_t ipckey_d2f, ipckey_f2d, ipckey_d2flist, ipckey_d2fdel, ipckey_creds, ipckey_d2ftraffic;
   if (remove(TMPFILE) != 0)
