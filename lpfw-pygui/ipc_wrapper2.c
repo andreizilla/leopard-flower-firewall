@@ -1,12 +1,13 @@
 #include <unistd.h>
 #include <stdio.h>
-#include "common/includes.h"
 #include <sys/ipc.h>
 #include <pthread.h>
 #include "stdio.h"
 #include "errno.h"
 #include <string.h>
 #include <stdlib.h>
+#include "../common/includes.h"
+
 
 void send_message (char *message)
 {
