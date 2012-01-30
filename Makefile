@@ -1,5 +1,5 @@
 DESTDIR = ./
-GCCFLAGS =
+GCCFLAGS = -g
 SOURCES 	=	lpfw.c \
 			msgq.c \
 			test.c \
@@ -28,9 +28,6 @@ lpfwpygui:
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfw lpfwcli lpfwpygui
-
-release: GCCFLAGS += -g
-release: lpfw
 
 install:
 	cp lpfw $(DESTDIR)

@@ -1,4 +1,4 @@
-GCCFLAGS =
+GCCFLAGS = -g
 DESTDIR = ./
 SOURCES 	=	lpfw-pygui.c \
 			../common/includes.h \
@@ -17,7 +17,7 @@ ipc_wrapper2: ipc_wrapper2.c
 	gcc ../common/includes.h ipc_wrapper2.c $(GCCFLAGS) -lpthread -o ipc_wrapper2
 
 lpfwpygui:  $(SOURCES)
-	gcc $(SOURCES) -o lpfwpygui
+	gcc $(SOURCES) $(GCCFLAGS) -o lpfwpygui
 
 install:
 	mv lpfwpygui $(DESTDIR)
