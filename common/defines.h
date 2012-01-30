@@ -23,7 +23,7 @@
 #define NFMARKIN_BASE  21331
 #define NFMARK_DELTA 10000 //fixed number NFMARKIN_BASE - NFMARKOUT_BASE. N.B. use a number here, see below
 //#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE //This doesn't work
-#define MEMBUF_SIZE 65536*3 //buffer size to fread() /proc/net/tcp*,udp*
+#define MEMBUF_SIZE 65536 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
 #define CT_ENTRIES_EXPORT_MAX 500
 #define REFRESH_INTERVAL 1
