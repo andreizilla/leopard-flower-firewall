@@ -1598,8 +1598,9 @@ rules_load()
       char *token, *lasts;
       char direction[14];
       char ports[PATHSIZE - 100];
-      while(strcmp(fgets ( path, PATHSIZE, stream ), newline))
+      while(fgets ( path, PATHSIZE, stream ))
 	{
+	  if (!strcmp (path, newline)) break;
 	  path[strlen ( path ) - 1] = 0; //remove newline
 	  token = strtok_r(path, " ", &lasts);
 	  strncpy(direction, token, sizeof(direction));
@@ -1654,7 +1655,8 @@ rules_load()
     }
 }
 
-//Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions
+//Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions and GLOBAL rules
+
 void rulesfileWrite()
 {
   FILE *fd;
@@ -1671,6 +1673,74 @@ void rulesfileWrite()
       M_PRINTF ( MLOG_INFO, "open: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return;
     }
+
+  //First write GLOBAL rules
+  int is_first_port=TRUE , is_first_rule=TRUE ;
+  char portsstring [PATHSIZE];
+  ports_list_t * ports_list;
+  for (i=0; i < 8; i++)
+  {
+      is_first_port = TRUE;
+      if (ports_list_array[i] == NULL) continue;
+      else
+      {
+	  if (is_first_rule == TRUE)
+	  {
+	      is_first_rule = FALSE;
+	      if ( fputs ( "[GLOBAL]", fd ) == EOF )
+		{
+		  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		}
+	      fputc ( '\n', fd );
+	  }
+	  if (i == TCP_IN_ALLOW) strcpy(portsstring, "TCP_IN_ALLOW ");
+	  else if (i == TCP_IN_DENY) strcpy(portsstring, "TCP_IN_DENY ");
+	  else if (i == TCP_OUT_ALLOW) strcpy(portsstring, "TCP_OUT_ALLOW ");
+	  else if (i == TCP_OUT_DENY) strcpy(portsstring, "TCP_OUT_DENY ");
+	  else if (i == UDP_IN_ALLOW) strcpy(portsstring, "UDP_IN_ALLOW ");
+	  else if (i == UDP_IN_DENY) strcpy(portsstring, "UDP_IN_DENY ");
+	  else if (i == UDP_OUT_ALLOW) strcpy(portsstring, "UDP_OUT_ALLOW ");
+	  else if (i == UDP_OUT_DENY) strcpy(portsstring, "UDP_OUT_DENY ");
+      }
+      ports_list = ports_list_array[i];
+      while (ports_list != NULL)
+      {
+	  if (ports_list_array[i]->is_range)
+	  {
+	      if (is_first_port)
+	      {
+		  is_first_port = FALSE;
+		  sprintf(&portsstring[strlen(portsstring)],"%d-%d", ports_list_array[i]->min_port,ports_list_array[i]->max_port);
+	      }
+	      else
+	      {
+		  sprintf(&portsstring[strlen(portsstring)],",%d-%d", ports_list_array[i]->min_port,ports_list_array[i]->max_port);
+	      }
+	  }
+	  else
+	  {
+	      if (is_first_port)
+	      {
+		  is_first_port = FALSE;
+		  sprintf(&portsstring[strlen(portsstring)],"%d", ports_list_array[i]->min_port);
+	      }
+	      else
+	      {
+		  sprintf(&portsstring[strlen(portsstring)],",%d", ports_list_array[i]->min_port);
+	      }
+	  }
+	  ports_list = ports_list->next;
+      }
+      if ( fputs ( portsstring, fd ) == EOF )
+	{
+	  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	}
+      fputc ( '\n', fd );
+  }
+  if (is_first_rule == FALSE)
+  {
+      fputc ( '\n', fd );
+  }
 
   pthread_mutex_lock ( &dlist_mutex );
   dlist* temp = first_rule->next;
