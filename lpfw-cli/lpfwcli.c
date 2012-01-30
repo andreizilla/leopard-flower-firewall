@@ -713,7 +713,7 @@ void check_own_gid()
     own_gid = getegid();
     if (own_gid != lpfwuser_gid)
     {
-	printf("Please set gid to lpfwuser on this file, owngid:%d    target: %d\n", (int)own_gid, (int)lpfwuser_gid);
+	printf("Please launch lpfw first \n", (int)own_gid, (int)lpfwuser_gid);
 	exit(0);
     }
 }
@@ -787,6 +787,11 @@ void parse_command_line(int argc, char* argv[])
 
 int main(int argc, char *argv[])
 {
+    if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
+      {
+	parse_command_line(argc, argv);
+	return 0;
+      }
     check_own_gid();
     parse_command_line(argc, argv);
 

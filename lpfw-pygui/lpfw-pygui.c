@@ -34,7 +34,7 @@ void check_own_gid()
     own_gid = getegid();
     if (own_gid != lpfwuser_gid)
     {
-	printf("Please set gid to lpfwuser on this file, current gid:%d ,need to set to: %d\n", (int)own_gid, (int)lpfwuser_gid);
+	printf("Please launch lpfw first \n", (int)own_gid, (int)lpfwuser_gid);
 	exit(0);
     }
 }
@@ -45,7 +45,7 @@ void parse_command_line(int argc, char* argv[])
     int nerrors;
 
     // Define argument table structs
-    python_folder = arg_file0 ( NULL, "py-folder", "<path to file>", "Path to folder (relative or absolute) that contains python script (default: lpfw-pygui" );
+    python_folder = arg_file0 ( NULL, "py-folder", "<path to file>", "Path to folder (relative or absolute) that contains python script (default: lpfw-pygui)" );
     log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Enable debug messages logging" );
 
     struct arg_lit *help = arg_lit0 ( NULL, "help", "Display this help screen" );
@@ -98,6 +98,11 @@ void parse_command_line(int argc, char* argv[])
 
 int main (int argc, char* argv[])
 {
+    if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
+      {
+	parse_command_line(argc, argv);
+	return 0;
+      }
     check_own_gid();
     parse_command_line(argc, argv);
     char system_call_string[PATHSIZE];
