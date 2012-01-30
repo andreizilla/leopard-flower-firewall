@@ -82,6 +82,9 @@ pthread_mutex_t msgq_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
+//two NFCT_Q_DUMP simultaneous operations can produce an error
+pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread,
@@ -475,10 +478,12 @@ void * conntrackexporthread( void *ptr)
         {
 	  ct_entries[i][1] = ct_entries[i][2] = ct_entries_export[i][0] = ct_entries_export[i][1] = ct_entries_export[i][2] = 0;
         }
+      pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1)
         {
           perror("query-DELETE");
         }
+      pthread_mutex_unlock(&ct_dump_mutex);
 //we get here only when dumping operation finishes and traffic_callback has created a new array of
 //conntrack entries
       for (i = 0; ct_entries[i][0] != 0; ++i)
@@ -609,10 +614,12 @@ void* conntrack_delete_thread ( void* ptr )
         }
       predicate = FALSE;
       pthread_mutex_unlock(&condvar_mutex);
+      pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1)
         {
           perror("query-DELETE");
         }
+      pthread_mutex_unlock(&ct_dump_mutex);
     }
 }
 
@@ -3279,7 +3286,7 @@ void pidfile_check()
     }
   else
     {
-      M_PRINTF ( MLOG_DEBUG, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      M_PRINTF ( MLOG_DEBUG, "stat TEMPFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
     }
 
 
