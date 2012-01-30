@@ -64,7 +64,7 @@ extern int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipa
 extern int fe_list();
 extern void init_msgq();
 extern int sha512_stream ( FILE *stream, void *resblock );
-extern int fe_awaiting_reply;
+extern int awaiting_reply_from_fe;
 extern int mqd_d2ftraffic;
 extern struct msqid_ds *msgqid_d2ftraffic;
 extern void* run_tests(void *);
@@ -93,9 +93,9 @@ pthread_t unittest_thread, rulesdump_thread;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
-//fe_was_busy_* is a flag to know whether frontend was processing some request
+//fe_was_busy_* is a flag to know whether frontend was processing another "add" request from lpfw
 //Normally, if path is not found in dlist, we send a request to frontend
-//But in case it was busy when we started iterating dlist, we assume FRONTEND_BUSY
+//But in case it was busy when we started packet_handle_*, we assume FRONTEND_BUSY
 //This prevents possible duplicate entries in dlist
 int fe_was_busy_in, fe_was_busy_out;
 
@@ -974,7 +974,6 @@ void* nfqoutrestthread ( void *ptr )
 
 
 }
-
 
 void* nfqinputthread ( void *ptr )
 {
@@ -2229,7 +2228,7 @@ void increase_allowed_traffic_out(int out_packet_size)
 }
 */
 
-int is_tcp_port_in_table (int port)
+int is_tcp_port_in_cache (int port)
 {
   int i = 0;
 
@@ -2456,6 +2455,37 @@ out:
     return retval;
 }
 
+int process_inkernel_socket(char *ipaddr, int *nfmark)
+{
+    pthread_mutex_lock(&dlist_mutex);
+    dlist *rule = first_rule;
+    while(rule->next != NULL)
+      {
+	rule = rule->next;
+	if (strcmp(rule->path, KERNEL_PROCESS)) continue;
+	else if (!strcmp(rule->pid, ipaddr))
+	  {
+	    if (!strcmp(rule->perms, ALLOW_ALWAYS) || !strcmp(rule->perms, ALLOW_ONCE))
+	      {
+		rule->is_active = TRUE;
+		*nfmark = rule->nfmark_out;
+		pthread_mutex_unlock(&dlist_mutex);
+		return INKERNEL_RULE_ALLOW;
+	      }
+	    else if (!strcmp(rule->perms, DENY_ALWAYS) || !strcmp(rule->perms, DENY_ONCE))
+	      {
+		pthread_mutex_unlock(&dlist_mutex);
+		return INKERNEL_RULE_DENY;
+	      }
+	  }
+      }
+    pthread_mutex_unlock(&dlist_mutex);
+    //not found in in-kernel list
+    return INKERNEL_IPADDRESS_NOT_IN_DLIST;
+}
+
+
+//all INput traffic is processed here
 int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
   pthread_mutex_lock(&lastpacket_mutex);
@@ -2473,11 +2503,12 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
   inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
 
   int verdict;
+  //source and destination ports in host and net byte order
   u_int16_t sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
   char path[PATHSIZE], pid[PIDLENGTH];
-  unsigned long long stime;
+  unsigned long long starttime;
   int proto;
-  int m_socketint;
+  int socket;
   switch ( ip->protocol )
     {
     case IPPROTO_TCP:
@@ -2490,54 +2521,37 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       sport_hostbo = ntohs ( tcp->source );
       dport_hostbo = ntohs ( tcp->dest );
 
-      if ((m_socketint = is_tcp_port_in_table(dport_hostbo)) == -1) //not found in cache
+      if ((socket = is_tcp_port_in_cache(dport_hostbo)) == -1) //not found in cache
         {
+	  //No need to rebuild the cache b/c likelihood is very high that port is not there
           verdict = PORT_NOT_FOUND;
-          goto kernel_verdict;
+	  break;
         }
 
-      fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-      if ((verdict = packet_handle_tcp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND)
-        {
-          if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
+      fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
+      verdict = packet_handle_tcp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
+	  if (verdict == INKERNEL_SOCKET_FOUND)
             {
-              pthread_mutex_lock(&dlist_mutex);
-	      dlist *temp = first_rule;
-              while(temp->next != NULL)
-                {
-                  temp = temp->next;
-                  if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-                  //else
-                  if (!strcmp(temp->pid, saddr))
-                    {
-                      if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE))
-                        {
-                          temp->is_active = TRUE;
-                          nfmark_to_set_in = temp->nfmark_out;
-                          verdict = INKERNEL_RULE_ALLOW;
-                          pthread_mutex_unlock(&dlist_mutex);
-                          goto kernel_verdict;
-                        }
-                      else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE))
-                        {
-                          verdict = INKERNEL_RULE_DENY;
-                          pthread_mutex_unlock(&dlist_mutex);
-                          goto kernel_verdict;
-                        }
-                    }
-                }
-              pthread_mutex_unlock(&dlist_mutex);
-              //not found in in-kernel list, drop the bumb
-              verdict = SOCKET_NONE_PIDFD;
-              goto kernel_verdict;
-            }
-          if (fe_was_busy_in)
-            {
-              verdict = FRONTEND_BUSY;
-              break;
-            }
-          else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
-        }
+	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
+	      if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
+	      {
+		  verdict = GOTO_NEXT_STEP;
+		  strcpy(path, KERNEL_PROCESS);
+		  strcpy(pid, saddr);
+		  starttime = sport_hostbo;
+	      }
+	  }
+	  if (verdict == GOTO_NEXT_STEP)
+	  {
+	      if (fe_was_busy_in)
+	      {
+		  verdict = FRONTEND_BUSY;
+	      }
+	      else
+	      {
+		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
+	      }
+	  }
       break;
 
     case IPPROTO_UDP:
@@ -2549,68 +2563,49 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       sport_hostbo = ntohs ( udp->source );
       dport_hostbo = ntohs ( udp->dest );
 
-      if ((m_socketint = is_udp_port_in_table(dport_hostbo)) == -1) //not found in cache
+      if ((socket = is_udp_port_in_table(dport_hostbo)) == -1) //not found in cache
         {
           verdict = PORT_NOT_FOUND;
-          goto kernel_verdict;
-        }
+	  break;
+	}
 
-      fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-      if ((verdict = packet_handle_udp_in ( m_socketint, &nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND)
-        {
-          if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
-            {
-              pthread_mutex_lock(&dlist_mutex);
-	      dlist *temp = first_rule;
-              while(temp->next != NULL)
-                {
-                  temp = temp->next;
-                  if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-                  //else
-                  if (!strcmp(temp->pid, saddr))
-                    {
-                      if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE))
-                        {
-                          temp->is_active = TRUE;
-                          nfmark_to_set_in = temp->nfmark_out;
-                          verdict = INKERNEL_RULE_ALLOW;
-                          pthread_mutex_unlock(&dlist_mutex);
-                          goto kernel_verdict;
-                        }
-                      else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE))
-                        {
-                          verdict = INKERNEL_RULE_DENY;
-                          pthread_mutex_unlock(&dlist_mutex);
-                          goto kernel_verdict;
-                        }
-                    }
-                }
-              pthread_mutex_unlock(&dlist_mutex);
-              //not found in in-kernel list, ask user reuse struct's fields
-              strcpy(path, KERNEL_PROCESS);
-              strcpy(pid, saddr);
-              stime = sport_hostbo;
-            }
-          if (fe_was_busy_in)
-            {
-              verdict = FRONTEND_BUSY;
-              break;
-            }
-          else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
-        }
+      fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
+      verdict = packet_handle_tcp_in ( socket, &nfmark_to_set_in, path, pid, &starttime );
+	  if (verdict == INKERNEL_SOCKET_FOUND)
+	    {
+	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
+	      if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
+	      {
+		  verdict = GOTO_NEXT_STEP;
+		  strcpy(path, KERNEL_PROCESS);
+		  strcpy(pid, saddr);
+		  starttime = sport_hostbo;
+	      }
+	  }
+	  if (verdict == GOTO_NEXT_STEP)
+	  {
+	      if (fe_was_busy_in)
+	      {
+		  verdict = FRONTEND_BUSY;
+	      }
+	      else
+	      {
+		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
+	      }
+	  }
       break;
+
     case IPPROTO_ICMP:
-      ;
       M_PRINTF ( MLOG_TRAFFIC, ">ICMP src %s ", saddr);
-      fe_was_busy_in = fe_awaiting_reply? TRUE: FALSE;
-      if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &stime )) == GOTO_NEXT_STEP)
+      fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
+      if ((verdict = packet_handle_icmp (&nfmark_to_set_in, path, pid, &starttime )) == GOTO_NEXT_STEP)
         {
           if (fe_was_busy_in)
             {
               verdict = FRONTEND_BUSY;
               break;
             }
-          else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&stime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
+	  else verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo) : FRONTEND_NOT_LAUNCHED;
         }
       break;
     default:
@@ -2619,9 +2614,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       verdict = UNSUPPORTED_PROTOCOL;
     }
 
-kernel_verdict:
   print_traffic_log(proto, DIRECTION_IN, daddr, sport_hostbo, dport_hostbo, path, pid, verdict);
-
   if (verdict < ALLOW_VERDICT_MAX)
     {
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
@@ -2687,7 +2680,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
   switch (ip->protocol)
     {
     case IPPROTO_ICMP:
-      fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
+      fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
       if ((verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime )) == GOTO_NEXT_STEP)
         {
           if (fe_was_busy_out)
@@ -2768,17 +2761,16 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
   char daddr[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
-  out_packet_size = ntohs(ip->tot_len);
   int verdict;
   u_int16_t sport_netbyteorder, dport_netbyteorder;
   char path[PATHSIZE], pid[PIDLENGTH];
-  unsigned long long stime;
+  unsigned long long starttime;
 
   int bytesread_udp, bytesread_udp6;
   char newline[2] = {'\n','\0'};
   int pause = 2;
   char *token;
-  int port, m_socketint, found_flag;
+  int port, socket, found_flag;
   int i = 0;
 
   struct udphdr *udp;
@@ -2786,13 +2778,10 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   sport_netbyteorder = udp->source;
   dport_netbyteorder = udp->dest;
   int srcudp = ntohs ( udp->source );
+  int dstudp = ntohs ( udp->dest );
 
-  if ((m_socketint = is_udp_port_in_table(srcudp)) != -1) //found in cache
+  if ((socket = is_udp_port_in_table(srcudp)) == -1) //not found in cache
     {
-      //   printf("udptable cache hit \n");
-      goto found2;
-    }
-
   struct timespec timer2,dummy2;
   timer2.tv_sec=0;
   timer2.tv_nsec=1000000000/pause;
@@ -2813,9 +2802,9 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       while ((token = strtok(NULL, newline)) != NULL)
         {
           //take a line until EOF
-          sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &m_socketint);
+	  sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %d \n", &port, &socket);
           udp_table[i*2] = port;
-          udp_table[i*2+1] = m_socketint;
+	  udp_table[i*2+1] = socket;
           if (srcudp != port)
             {
               i++;
@@ -2827,60 +2816,40 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         }
     }
   udp_table[i*2] = MAGIC_NO;
-  if (found_flag) goto found2;
-
+  if (!found_flag)
+  {
   nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
   return 0;
+  }
+  }
 
-found2:
-  ;
-
-  fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-  if ((verdict = packet_handle_udp_out ( m_socketint, &nfmark_to_set_out, path, pid, &stime ))
-      == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND)
-    {
-      if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
+  fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
+  verdict = packet_handle_udp_out ( socket, &nfmark_to_set_out, path, pid, &starttime );
+      if (verdict == INKERNEL_SOCKET_FOUND)
         {
-          pthread_mutex_lock(&dlist_mutex);
-	  dlist *temp = first_rule;
-          while(temp->next != NULL)
-            {
-              temp = temp->next;
-              if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-              //else
-              if (!strcmp(temp->pid, daddr))
-                {
-                  if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE))
-                    {
-                      temp->is_active = TRUE;
-                      nfmark_to_set_out = temp->nfmark_out;
-                      verdict = INKERNEL_RULE_ALLOW;
-                      pthread_mutex_unlock(&dlist_mutex);
-                      goto kernel_verdict;
-                    }
-                  else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE))
-                    {
-                      verdict = INKERNEL_RULE_DENY;
-                      pthread_mutex_unlock(&dlist_mutex);
-                      goto kernel_verdict;
-                    }
-                }
-            }
-          pthread_mutex_unlock(&dlist_mutex);
-          //not found in in-kernel list, ask user
-          strcpy(path, KERNEL_PROCESS);
-          strcpy(pid, daddr);
-          stime = ntohs (udp->dest);
-        }
-      if (fe_was_busy_out)
-        {
-          verdict = FRONTEND_BUSY;
-        }
-      else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
-    }
+	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
+	  if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
+	      {
+		  verdict = GOTO_NEXT_STEP;
+		  strcpy(path, KERNEL_PROCESS);
+		  strcpy(pid, daddr);
+		  starttime = dstudp;
+	      }
+	}
+      if (verdict == GOTO_NEXT_STEP)
+      {
+	  if (fe_was_busy_in)
+	  {
+	      verdict = FRONTEND_BUSY;
+	  }
+	  else
+	  {
+	  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, daddr, srcudp, dstudp )
+		      : FRONTEND_NOT_LAUNCHED;
+	  }
+      }
 
-kernel_verdict:
-  print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, ntohs ( udp->dest ), path, pid, verdict);
+  print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, dstudp, path, pid, verdict);
   if (verdict < ALLOW_VERDICT_MAX)
     {
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
@@ -2946,7 +2915,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   u_int16_t sport_netbyteorder, dport_netbyteorder;
   char path[PATHSIZE]= {0};
   char pid[PIDLENGTH]= {0};
-  unsigned long long stime;
+  unsigned long long starttime;
 
   int bytesread_tcp, bytesread_tcp6;
   char newline[2] = {'\n','\0'};
@@ -2960,13 +2929,11 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   sport_netbyteorder = tcp->source;
   dport_netbyteorder = tcp->dest;
   int srctcp = ntohs ( tcp->source );
+  int dsttcp = ntohs ( tcp->dest );
 
-  if ((socket = is_tcp_port_in_table(srctcp)) != -1) //found in cache
+
+  if ((socket = is_tcp_port_in_cache(srctcp)) == -1) //not found in cache
     {
-      // printf("tcptable cache hit \n");
-      goto found2;
-    }
-
   struct timespec timer2,dummy2;
   timer2.tv_sec=0;
   timer2.tv_nsec=1000000000/2;
@@ -3001,61 +2968,42 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         }
     }
   tcp_table[i*2] = MAGIC_NO;
-  if (found_flag) goto found2;
-
+  if (!found_flag)
+  {
   //the packet has no inode associated with it
   nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
   return 0;
+  }
+  }
 
-found2:
   //remember f/e's state before we process
-  fe_was_busy_out = fe_awaiting_reply? TRUE: FALSE;
-  if ((verdict = packet_handle_tcp_out ( socket, &nfmark_to_set_out, path, pid, &stime ))
-      == GOTO_NEXT_STEP || verdict == INKERNEL_SOCKET_FOUND)
+  fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
+  verdict = packet_handle_tcp_out ( socket, &nfmark_to_set_out, path, pid, &starttime );
+    if (verdict == INKERNEL_SOCKET_FOUND)
+      {
+	verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
+	if (verdict == INKERNEL_IPADDRESS_NOT_IN_DLIST)
+	    {
+		verdict = GOTO_NEXT_STEP;
+		strcpy(path, KERNEL_PROCESS);
+		strcpy(pid, daddr);
+		starttime = dsttcp;
+	    }
+	}
+    if (verdict == GOTO_NEXT_STEP)
     {
-      if (verdict == INKERNEL_SOCKET_FOUND)  //see if this is an inkernel rule
-        {
-
-          pthread_mutex_lock(&dlist_mutex);
-	  dlist *temp = first_rule;
-          while(temp->next != NULL)
-            {
-              temp = temp->next;
-              if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-              //else
-              if (!strcmp(temp->pid, daddr))
-                {
-                  if (!strcmp(temp->perms, ALLOW_ALWAYS) || !strcmp(temp->perms, ALLOW_ONCE))
-                    {
-                      temp->is_active = TRUE;
-                      nfmark_to_set_out = temp->nfmark_out;
-                      verdict = INKERNEL_RULE_ALLOW;
-                      pthread_mutex_unlock(&dlist_mutex);
-                      goto kernel_verdict;
-                    }
-                  else if (!strcmp(temp->perms, DENY_ALWAYS) || !strcmp(temp->perms, DENY_ONCE))
-                    {
-                      verdict = INKERNEL_RULE_DENY;
-                      pthread_mutex_unlock(&dlist_mutex);
-                      goto kernel_verdict;
-                    }
-                }
-            }
-          pthread_mutex_unlock(&dlist_mutex);
-          //not found in in-kernel list, drop
-          verdict = SOCKET_NONE_PIDFD;
-          goto kernel_verdict;
-        }
-      //drop if f/e was busy before we started processing
-      if (fe_was_busy_out)
-        {
-          verdict = FRONTEND_BUSY;
-        }
-      else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
+	if (fe_was_busy_in)
+	{
+	    verdict = FRONTEND_BUSY;
+	}
+	else
+	{
+	    verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, daddr, srctcp, dsttcp )
+			: FRONTEND_NOT_LAUNCHED;
+	}
     }
 
-kernel_verdict:
-  print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, ntohs ( tcp->dest ), path, pid, verdict);
+  print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
   if (verdict < ALLOW_VERDICT_MAX)
     {

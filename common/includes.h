@@ -13,7 +13,7 @@ typedef struct m_dlist
 {
   int command;
   char path[PATHSIZE]; //path to executable
-  char pid[PIDLENGTH]; //its pid
+  char pid[PIDLENGTH]; //its pid (or IP address for kernel processes)
   char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
   mbool is_active; //Has process already been seen sending/receiving packets?
   u_int32_t nfmark_out;
@@ -126,7 +126,8 @@ enum
   SRCPORT_NOT_FOUND_IN_PROC,
   INKERNEL_RULE_DENY,
   INKERNEL_SOCKET_FOUND,
-  SPOOFED_PID
+  INKERNEL_IPADDRESS_NOT_IN_DLIST,
+    SPOOFED_PID
 };
 
 //commands passed through msgq

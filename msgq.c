@@ -61,8 +61,8 @@ struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgq
 
 pthread_t command_thread, regfrontend_thread;
 
-//flag to show that fe is processing our query
-int fe_awaiting_reply = FALSE;
+//flag to show that frontend is already processing some "add" query
+int awaiting_reply_from_fe = FALSE;
 //struct of what was sent to f.e.dd
 dlist sent_to_fe_struct;
 
@@ -226,7 +226,7 @@ interrupted:
       if (fe_active_flag_get())
         {
           M_PRINTF(MLOG_INFO, "Frontend apparently crashed, unregistering...\n");
-          fe_awaiting_reply = FALSE;
+	  awaiting_reply_from_fe = FALSE;
           fe_active_flag_set(FALSE);
         }
       M_PRINTF(MLOG_INFO, "frontend exited\n");
@@ -328,7 +328,7 @@ interrupted:
           ;
           if (!strcmp(msg_f2d.item.perms,"IGNORED"))
             {
-              fe_awaiting_reply = FALSE;
+	      awaiting_reply_from_fe = FALSE;
               continue;
             }
 #ifdef DEBUG
@@ -354,7 +354,7 @@ interrupted:
           if (strcmp(exepathbuf, sent_to_fe_struct.path))
             {
               M_PRINTF(MLOG_INFO, "Frontend asked to add a process that is no longer running,%s,%d\n", __FILE__, __LINE__);
-              fe_awaiting_reply = FALSE;
+	      awaiting_reply_from_fe = FALSE;
               continue;
             }
 
@@ -383,7 +383,7 @@ interrupted:
           if ( sent_to_fe_struct.stime != stime )
             {
               M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
-              fe_awaiting_reply = FALSE;
+	      awaiting_reply_from_fe = FALSE;
               continue;
             }
 
@@ -394,7 +394,7 @@ interrupted:
           gettimeofday(&time_struct, NULL);
           M_PRINTF(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
 #endif
-          fe_awaiting_reply = FALSE;
+	  awaiting_reply_from_fe = FALSE;
           continue;
 
         case F2DCOMM_REG:
@@ -414,7 +414,7 @@ interrupted:
               continue;
             }
           fe_active_flag_set(FALSE);
-          fe_awaiting_reply = FALSE;
+	  awaiting_reply_from_fe = FALSE;
           M_PRINTF(MLOG_INFO, "Unregistered frontend\n");
           continue;
 
@@ -638,7 +638,7 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
 int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
 {
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
-  if (fe_awaiting_reply)
+  if (awaiting_reply_from_fe)
     {
       if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
       return FRONTEND_BUSY;
@@ -657,7 +657,7 @@ int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-  fe_awaiting_reply = TRUE;
+  awaiting_reply_from_fe = TRUE;
   if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
   return SENT_TO_FRONTEND;
 }
@@ -666,7 +666,7 @@ int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
 int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport)
 {
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
-  if (fe_awaiting_reply)
+  if (awaiting_reply_from_fe)
     {
       if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
       return FRONTEND_BUSY;
@@ -690,7 +690,7 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
-  fe_awaiting_reply = TRUE;
+  awaiting_reply_from_fe = TRUE;
   if (pthread_mutex_unlock(&msgq_mutex)) perror ("mutexunlock");
   return SENT_TO_FRONTEND;
 }
