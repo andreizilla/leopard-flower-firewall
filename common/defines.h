@@ -36,6 +36,15 @@
 #define PROTO_UDP 4
 #define PROTO_ICMP 5
 
+#define TCP_IN_ALLOW  0
+#define TCP_IN_DENY   1
+#define TCP_OUT_ALLOW 2
+#define TCP_OUT_DENY  3
+#define UDP_IN_ALLOW  4
+#define UDP_IN_DENY   5
+#define UDP_OUT_ALLOW 6
+#define UDP_OUT_DENY  7
+
 #define TMPFILE "/tmp/lpfw" //a file is needed to create IPC key for daemon <> frontend message queue
 #define LPFWCLI_LOG "/tmp/lpfwcli.log"
 #define PIDFILE "/tmp/lpfw.pid"

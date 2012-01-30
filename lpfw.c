@@ -161,6 +161,9 @@ int ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
   [8] total bytes out denied so far (export[4])
 */
 
+//array of global ports rules
+ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
+
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
@@ -168,6 +171,50 @@ int ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
     pthread_mutex_unlock(&logstring_mutex); \
  
 
+
+int global_rules_filter( int direction, int protocol, int port, int verdict)
+{
+    if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
+    if (direction = DIRECTION_OUT)
+    {
+	if (protocol = PROTO_TCP) direction = TCP_OUT_ALLOW;
+	else if (protocol = PROTO_UDP) direction =  UDP_OUT_ALLOW;
+    }
+    else if (direction = DIRECTION_IN)
+    {
+	if (protocol = PROTO_TCP) direction = TCP_IN_ALLOW;
+	else if (protocol = PROTO_UDP) direction =  UDP_IN_ALLOW;
+    }
+    ports_list_t *ports_list;
+    ports_list = ports_list_array[direction];
+    while (ports_list != NULL)
+    {
+	if (ports_list->is_range)
+	{
+	    if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_ALLOW;}
+	}
+	else
+	{
+	    if (ports_list->min_port == port) {return GLOBAL_RULE_ALLOW;}
+	}
+	ports_list = ports_list->next;
+    }
+
+    ports_list = ports_list_array[direction+1];
+    while (ports_list != NULL)
+    {
+	if (ports_list->is_range)
+	{
+	    if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_DENY;}
+	}
+	else
+	{
+	    if (ports_list->min_port == port) {return GLOBAL_RULE_DENY;}
+	}
+	ports_list = ports_list->next;
+    }
+    return verdict;
+}
 
 void denied_traffic_add (int direction, int mark, int bytes)
 {
@@ -1396,78 +1443,39 @@ void* refreshthread ( void* ptr )
     }
 }
 
-void global_rule_add( char *str_protocol, char *str_direction, char *str_permission, char *str_ports)
+
+void global_rule_add( char *str_direction, char *str_ports)
 {
-    int protocol, direction, permission;
-    global_rule_t *global_rule_to_add;
-    if ( ( global_rule_to_add = ( global_rule_t * ) malloc ( sizeof ( global_rule_t ) ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit(0);
-      }
+    int direction;
+    char *token, *token_range, *lasts_out, *lasts_in;
+    int port_min, port_max, is_range;
+    ports_list_t *m_ports_list = NULL, *m_ports_list_prev = NULL, *m_ports_list_to_add = NULL;
 
-    if (!strcmp(str_protocol, "TCP"))
-    {
-	protocol = PROTO_TCP;
-    }
-    else if (!strcmp(str_protocol, "UDP"))
-    {
-	protocol = PROTO_UDP;
-    }
-    else
-    {
-	printf ("A request to add an unknown protocol to the global rules detected \n");
+    if (!strcmp(str_direction, "TCP_IN_ALLOW")) direction = TCP_IN_ALLOW;
+    else if (!strcmp(str_direction, "TCP_IN_DENY")) direction = TCP_IN_DENY;
+    else if (!strcmp(str_direction, "TCP_OUT_ALLOW")) direction = TCP_OUT_ALLOW;
+    else if (!strcmp(str_direction, "TCP_OUT_DENY")) direction = TCP_OUT_DENY;
+    else if (!strcmp(str_direction, "UDP_IN_ALLOW")) direction = UDP_IN_ALLOW;
+    else if (!strcmp(str_direction, "UDP_IN_DENY")) direction = UDP_IN_DENY;
+    else if (!strcmp(str_direction, "UDP_OUT_ALLOW")) direction = UDP_OUT_ALLOW;
+    else if (!strcmp(str_direction, "UDP_OUT_DENY")) direction = UDP_OUT_DENY;
+    else{
+	printf ("Invalid format of rulesfile \n");
 	return;
     }
-    if (!strcmp(str_direction, "OUT"))
-    {
-	direction = DIRECTION_OUT;
-    }
-    else if (!strcmp(str_direction, "IN"))
-    {
-	direction = DIRECTION_IN;
-    }
-    else
-    {
-	printf ("A request to add an unknown direction to the global rules detected \n");
-	return;
-    }
-    if (!strcmp(str_permission, "ALLOW"))
-    {
-	permission = PERM_ALLOW;
-    }
-    else if (!strcmp(str_permission, "DENY"))
-    {
-	permission = PERM_DENY;
-    }
-    else
-    {
-	printf ("A request to add an unknown permission to the global rules detected \n");
-	return;
-    }
-    global_rule_to_add->protocol = protocol;
-    global_rule_to_add->direction = direction;
-    global_rule_to_add->permission = permission;
-
-    char *token, *token_range;
-    global_rule_t *global_rule, *global_rule_prev;
-    int port, port_min, port_max, is_range, is_first;
-    ports_list_t *m_ports_list = NULL, *m_ports_list_prev = NULL, *m_ports_list_first = NULL;
-
-//First check that the ports and/or port ranges to be added don't overlap each other
-
-    while ((token = strtok(str_ports, ",")) != NULL)
+    token = strtok_r(str_ports, ",", &lasts_out);
+    while (token != NULL)
     {
 	if (strstr(token, "-") == NULL){
 	    is_range = FALSE;
-	    port = atoi(token);
+	    port_min = atoi(token);
 	}
 	else
 	{
 	    is_range = TRUE;
-	    token_range = strtok(token,"-");
+	    token_range = strtok_r(token,"-",&lasts_in);
 	    port_min = atoi(token_range);
-	    token_range = strtok(NULL,"-");
+	    token_range = strtok_r(NULL,"-", &lasts_in);
 	    port_max = atoi(token_range);
 	    if (port_min >= port_max)
 	    {
@@ -1476,161 +1484,68 @@ void global_rule_add( char *str_protocol, char *str_direction, char *str_permiss
 	    }
 	}
 
-	m_ports_list = m_ports_list_first;
-	while (m_ports_list != NULL)
+	int i, delta;
+	if (direction % 2 == 0) delta = 1;
+	else delta = -1;
+	//scan both ALLOW and DENY port_lists - there should be no overlap in either
+	for (i = 0; i < 2; i++)
 	{
-	    if (m_ports_list->is_range)
+	    m_ports_list = ports_list_array[direction + delta*i];
+	    while (m_ports_list != NULL)
 	    {
-		if (is_range)
+		if (m_ports_list->is_range)
 		{
-		    if ((m_ports_list->min_port = port_min) ||
-			((m_ports_list->min_port > port_min) && (m_ports_list->min_port <= port_max)) ||
-			((m_ports_list->min_port < port_min) && (m_ports_list->max_port >= port_min)))
-			goto error;
+		    if (is_range)
+		    {
+			if ((m_ports_list->min_port = port_min) ||
+			    ((m_ports_list->min_port > port_min) && (m_ports_list->min_port <= port_max)) ||
+			    ((m_ports_list->min_port < port_min) && (m_ports_list->max_port >= port_min)))
+			    goto error;
+		    }
+		    else //not a range
+		    {
+			if ((m_ports_list->min_port <= port_min) && (m_ports_list->max_port >= port_min))
+			    goto error;
+		    }
 		}
-		else //not a range
+		else // not a range
 		{
-		    if ((m_ports_list->min_port <= port) && (m_ports_list->max_port >= port))
-			goto error;
+		    if (is_range)
+		    {
+			if ((port_min <= m_ports_list->min_port) && (port_max>= m_ports_list->min_port))
+			    goto error;
+		    }
+		    else //not a range
+		    {
+			if (m_ports_list->min_port == port_min)
+			    goto error;
+		    }
 		}
+	     m_ports_list_prev = m_ports_list;
+	     m_ports_list = m_ports_list->next;
 	    }
-	    else // not a range
-	    {
-		if (is_range)
-		{
-		    if ((port_min <= m_ports_list->min_port) && (port_max>= m_ports_list->min_port))
-			goto error;
-		}
-		else //not a range
-		{
-		    if (m_ports_list->min_port == port)
-			goto error;
-		}
-	    }
-	 m_ports_list = m_ports_list->next;
 	}
 
-	if (m_ports_list_first == NULL) is_first = TRUE;
-
-	m_ports_list = m_ports_list_first;
-	while (m_ports_list != NULL)
-	{
-	    m_ports_list_prev = m_ports_list;
-	    m_ports_list = m_ports_list->next;
-	}
-	if ((m_ports_list = ( ports_list_t * ) malloc ( sizeof ( ports_list_t ) ) ) == NULL )
+	if ((m_ports_list_to_add = ( ports_list_t * ) malloc ( sizeof ( ports_list_t ) ) ) == NULL )
 	{
 	    M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	    exit(0);
 	}
-	if (is_first)
+	m_ports_list_to_add->is_range = is_range;
+	m_ports_list_to_add->min_port = port_min;
+	m_ports_list_to_add->max_port = port_max;
+	m_ports_list_to_add->next = NULL;
+	m_ports_list_to_add->prev = m_ports_list_prev;
+	//if it's the very first element of array
+	if (m_ports_list_prev == NULL)
 	{
-	    m_ports_list_first = m_ports_list;
+	    ports_list_array[direction] = m_ports_list_to_add;
 	}
 	else
 	{
-	    m_ports_list_prev->next = m_ports_list;
+	    m_ports_list_prev->next = m_ports_list_to_add;
 	}
-	m_ports_list->next = NULL;
-	m_ports_list->prev = m_ports_list_prev;
-
-	if (is_range)
-	{
-	    m_ports_list->is_range = TRUE;
-	    m_ports_list->min_port = port_min;
-	    m_ports_list->max_port = port_max;
-	}
-	else
-	{
-	    m_ports_list->is_range = FALSE;
-	    m_ports_list->min_port = port;
-	}
-    }
-
-//Secondly, check that ports don't overlap those already in global rules list
-
-    global_rule = first_global_rule;
-    ports_list_t *ports_list, *ports_list_prev;
-
-    m_ports_list = m_ports_list_first;
-    while (m_ports_list != NULL)
-    {
-
-	while ((global_rule != NULL) && (global_rule->protocol == protocol)
-	       && (global_rule->direction == direction) && (global_rule->permission == permission))
-    {
-	ports_list = global_rule->ports_list;
-	while (ports_list == NULL)
-	{
-	    if (ports_list->is_range)
-	    {
-		if (m_ports_list->is_range)
-		{
-		    if ((ports_list->min_port = m_ports_list->min_port) ||
-			((ports_list->min_port > m_ports_list->min_port) && (ports_list->min_port <= m_ports_list->max_port)) ||
-			((ports_list->min_port < m_ports_list->min_port) && (ports_list->max_port >= m_ports_list->min_port)))
-			goto error;
-		}
-		else //not a range
-		{
-		    if ((ports_list->min_port <= m_ports_list->min_port) && (ports_list->max_port >= m_ports_list->min_port))
-			goto error;
-		}
-	    }
-	    else // not a range
-	    {
-		if (m_ports_list->is_range)
-		{
-		    if ((m_ports_list->min_port <= ports_list->min_port) && (m_ports_list->max_port >= ports_list->min_port))
-			goto error;
-		}
-		else //not a range
-		{
-		    if (ports_list->min_port == m_ports_list->min_port)
-			goto error;
-		}
-	    }
-	 ports_list = ports_list->next;
-	}
-	global_rule = global_rule->next;
-    }
-  }
-//Now add a rule to global rules list
-    global_rule_to_add->ports_list = m_ports_list;
-
-    if (first_global_rule == NULL)
-    {
-	global_rule_to_add->prev = NULL;
-	global_rule_to_add->next = NULL;
-	first_global_rule = global_rule_to_add;
-    }
-    else
-    {
-	global_rule = first_global_rule;
-	while ((global_rule != NULL) && (global_rule->protocol == protocol) &&
-	       (global_rule->direction == direction) && (global_rule->permission == permission))
-	{
-	    global_rule_prev = global_rule;
-	    global_rule = global_rule->next;
-	}
-	if (global_rule == NULL)
-	{
-	    global_rule_to_add->prev = global_rule_prev;
-	    global_rule_to_add->next = NULL;
-	    global_rule = global_rule_to_add;
-	}
-	else
-	{
-	    ports_list = global_rule->ports_list;
-	    while (ports_list != NULL)
-	    {
-		ports_list_prev = ports_list;
-		ports_list = ports_list->next;
-	    }
-	    ports_list_prev->next = m_ports_list_first;
-	    m_ports_list_first->prev = ports_list_prev;
-	}
-
+	token = strtok_r(NULL, ",", &lasts_out);
     }
     return;
 
@@ -1641,7 +1556,8 @@ void global_rule_add( char *str_protocol, char *str_direction, char *str_permiss
 
 
 //Read RULESFILE into dlist
-void rules_load()
+void
+rules_load()
 {
   FILE *stream;
   char path[PATHSIZE];
@@ -1678,25 +1594,24 @@ void rules_load()
   if ( fgets ( path, PATHSIZE, stream ) == 0 ) return;
   path[strlen ( path ) - 1] = 0; //remove newline
   if (!strcmp(path, "[GLOBAL]"))
-{
+    {
       char *token;
-      char protocol[4];
-      char direction[4];
-      char permission[6];
+      char direction[14];
       char ports[PATHSIZE - 100];
       while(strcmp(fgets ( path, PATHSIZE, stream ), newline))
-  {
+	{
+	  path[strlen ( path ) - 1] = 0; //remove newline
 	  token = strtok(path, " ");
-	  strncpy(protocol, token, sizeof(protocol));
-	  token = strtok(NULL, " ");
 	  strncpy(direction, token, sizeof(direction));
-	  token = strtok(path, " ");
-	  strncpy(permission, token, sizeof(permission));
 	  token = strtok(NULL, " ");
 	  strncpy(ports, token, sizeof(ports));
-	  global_rule_add(protocol, direction, permission, ports);
+	  global_rule_add(direction, ports);
+	}
+    }
+  else
+  {
+      fseek(stream, 0, SEEK_SET);
   }
-}
 
   //Now process all the non-global, i.e. per-application rules
   while ( 1 )
@@ -1858,7 +1773,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 {
                   M_PRINTF ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                   pthread_mutex_unlock ( &dlist_mutex );
-                  return DROP;
+		  return CANT_READ_EXE;
                 }
               if ( temp->exesize != exestat.st_size )
                 {
@@ -1874,7 +1789,7 @@ int path_find_in_dlist ( int *nfmark_to_set, char *path, char *pid, unsigned lon
                 {
                   M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
                   pthread_mutex_unlock ( &dlist_mutex );
-                  return DROP;
+		  return CANT_READ_EXE;
                 }
               sha512_stream ( stream, ( void * ) sha );
               fclose ( stream );
@@ -2284,7 +2199,7 @@ int socket_find_in_proc ( int *mysocket, char *m_path, char *m_pid, unsigned lon
     }
   while ( proc_dirent );
   closedir ( proc_DIR );
-  return SOCKET_NONE_PIDFD;
+  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
 }
 
 //if there are more than one entry in /proc/net/raw for icmp then it's impossible to tell which app is sending the packet
@@ -2380,7 +2295,7 @@ int socket_check_kernel_udp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-          return SOCKET_NONE_PIDFD;
+	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
@@ -2414,11 +2329,11 @@ int socket_check_kernel_udp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-          return SOCKET_NONE_PIDFD;
+	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
-  return SOCKET_NONE_PIDFD;
+  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
 }
 
 
@@ -2473,7 +2388,7 @@ int socket_check_kernel_tcp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-          return SOCKET_NONE_PIDFD;
+	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
@@ -2507,11 +2422,11 @@ int socket_check_kernel_tcp(int *socket)
       free(membuf);
       if (uid != '0')
         {
-          return SOCKET_NONE_PIDFD;
+	  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
         }
       else return INKERNEL_SOCKET_FOUND;
     }
-  return SOCKET_NONE_PIDFD;
+  return SOCKET_NOT_FOUND_IN_PROCPIDFD;
 }
 
 
@@ -2685,7 +2600,7 @@ int packet_handle_tcp_in ( int socketint, int *nfmark_to_set, char *path, char *
     }
   if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
   retval = socket_find_in_proc ( &socketint, path, pid, stime );
-  if (retval == SOCKET_NONE_PIDFD)
+  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
       retval = socket_check_kernel_tcp(&socketint);
       goto out;
@@ -2709,7 +2624,7 @@ int packet_handle_tcp_out ( int socket, int *nfmark_to_set, char *path, char *pi
     }
   if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set ) ) != GOTO_NEXT_STEP ) goto out;
   retval = socket_find_in_proc ( &socket, path, pid, stime );
-  if (retval == SOCKET_NONE_PIDFD)
+  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
       retval = socket_check_kernel_tcp(&socket);
       goto out;
@@ -2733,7 +2648,7 @@ int packet_handle_udp_in ( int socketint, int *nfmark_to_set, char *path, char *
     }
   if ( (retval = socket_find_from_pids_in_dlist ( &socketint, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
   retval = socket_find_in_proc ( &socketint, path, pid, stime );
-  if (retval == SOCKET_NONE_PIDFD)
+  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
       retval = socket_check_kernel_udp(&socketint);
       goto out;
@@ -2759,7 +2674,7 @@ int packet_handle_udp_out ( int socket, int *nfmark_to_set, char *path, char *pi
     }
   if ( (retval = socket_find_from_pids_in_dlist ( &socket, path, pid, nfmark_to_set )) != GOTO_NEXT_STEP) goto out;
   retval = socket_find_in_proc ( &socket, path, pid, stime );
-  if (retval == SOCKET_NONE_PIDFD)
+  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
       retval = socket_check_kernel_udp(&socket);
       goto out;
@@ -2943,12 +2858,13 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
       strcat (m_logstring, "allow\n");
       break;
 
-
-    case DROP:
-      strcat (m_logstring, "drop\n");
+    case GLOBAL_RULE_ALLOW:
+      strcat (m_logstring, "(global rule) allow\n");
       break;
-    case PORT_NOT_FOUND:
-      strcat (m_logstring, "(port not found in /proc/net/*) drop \n" );
+
+
+    case CANT_READ_EXE:
+      strcat (m_logstring, "(can't read executable file) drop\n");
       break;
     case SENT_TO_FRONTEND:
       strcat (m_logstring,  "(asking frontend) drop\n" );
@@ -2961,7 +2877,10 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
     case INKERNEL_RULE_DENY:
       strcat (m_logstring,  "deny\n" );
       break;
-    case SOCKET_NONE_PIDFD:
+    case GLOBAL_RULE_DENY:
+      strcat (m_logstring, "(global rule) deny \n");
+      break;
+    case SOCKET_NOT_FOUND_IN_PROCPIDFD:
       strcat (m_logstring,  "(no process associated with packet) drop\n" );
       break;
     case FRONTEND_NOT_LAUNCHED:
@@ -2987,9 +2906,6 @@ void print_traffic_log(int proto, int direction, char *ip, int srcport, int dstp
       break;
     case EXESIZE_DONT_MATCH:
       strcat (m_logstring, "Red alert. Executable's size don't match the records\n" );
-      break;
-    case INODE_HAS_CHANGED:
-      strcat (m_logstring, "Process inode has changed, This means that a process was killed and another with the same PID was immediately started. Smacks of somebody trying to hack your system\n" );
       break;
     case EXE_HAS_BEEN_CHANGED:
       strcat (m_logstring, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" );
@@ -3084,7 +3000,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       if ((socket = is_tcp_port_in_cache(dport_hostbo)) == -1) //not found in cache
         {
 	  //No need to rebuild the cache b/c likelihood is very high that port is not there
-          verdict = PORT_NOT_FOUND;
+	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
 	  break;
         }
 
@@ -3094,6 +3010,9 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
             {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
 	  }
+
+	  verdict = global_rules_filter(DIRECTION_IN, PROTO_TCP, dport_hostbo, verdict);
+
 	  if (verdict == GOTO_NEXT_STEP)
 	  {
 	      if (fe_was_busy_in)
@@ -3118,7 +3037,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 
       if ((socket = is_udp_port_in_table(dport_hostbo)) == -1) //not found in cache
         {
-          verdict = PORT_NOT_FOUND;
+	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
 	  break;
 	}
 
@@ -3128,6 +3047,9 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	    {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
 	  }
+
+	  verdict = global_rules_filter(DIRECTION_IN, PROTO_UDP, dport_hostbo, verdict);
+
 	  if (verdict == GOTO_NEXT_STEP)
 	  {
 	      if (fe_was_busy_in)
@@ -3350,6 +3272,9 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         {
 	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
 	}
+
+      verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
+
       if (verdict == GOTO_NEXT_STEP)
       {
 	  if (fe_was_busy_in)
@@ -3467,9 +3392,12 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
   verdict = packet_handle_tcp_out ( socket_found, &nfmark_to_set_out, path, pid, &starttime );
     if (verdict == INKERNEL_SOCKET_FOUND)
-      {
+    {
 	verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
-	}
+    }
+
+    verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dsttcp, verdict);
+
     if (verdict == GOTO_NEXT_STEP)
     {
 	if (fe_was_busy_in)
@@ -3482,6 +3410,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 			: FRONTEND_NOT_LAUNCHED;
 	}
     }
+
 
   print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
