@@ -3466,32 +3466,29 @@ int parse_command_line(int argc, char* argv[])
 
 #ifndef WITHOUT_SYSVIPC
   cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
-  gui_path = arg_file0 ( NULL, "gui-path", "<path to file>", "Path to GUI frontend" );
   pygui_path = arg_file0 ( NULL, "pygui-path", "<path to file>", "Path to Python-based GUI frontend" );
 #endif
 
   log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
   log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
   log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
+
 #ifdef DEBUG
   struct arg_lit *test = arg_lit0 ( NULL, "test", "Run unit test" );
 #endif
-  struct arg_lit *cli = arg_lit0 ( NULL, "cli", "Start ncurses frontend" );
-  struct arg_lit *gui = arg_lit0 ( NULL, "gui", "Start standalone GUI frontend" );
-  struct arg_lit *pygui = arg_lit0 ( NULL, "pygui", "Start Python-based frontend" );
 
   struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
   struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
   void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
 #ifndef WITHOUT_SYSVIPC
-                      cli_path, gui_path, pygui_path,
+		      cli_path, pygui_path,
 #endif
                       log_info, log_traffic, log_debug, help, version,
 #ifdef DEBUG
                       test,
 #endif
-                      cli, gui, pygui, end
+		     end
                      };
 
   // Set default values
@@ -3518,12 +3515,6 @@ int parse_command_line(int argc, char* argv[])
   strcpy (clipath, owndir);
   strcat(clipath, "lpfwcli");
   cli_path->filename[0] = clipath;
-
-  char *guipath;
-  guipath = malloc(PATHSIZE-16);
-  strcpy (guipath, owndir);
-  strcat(guipath, "lpfwgui");
-  gui_path->filename[0] = guipath;
 
   char *pyguipath;
   pyguipath = malloc(PATHSIZE -16);

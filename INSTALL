@@ -5,33 +5,19 @@
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
 The following packaged must be installed for lpfw daemon to compile:
-libnetfilter-queue-dev
-libnetfilter-conntrack-dev
-libcap-dev
-Issue "make" in the source root directory
-
+    libnetfilter-queue-dev
+    libnetfilter-conntrack-dev
+    libcap-dev
 The following packaged must be installed for lpfwcli frontend to compile:
-libncurses5-dev
-optional: zenity(for popup notifications)
-Issue "make" from within lpfw-cli directory
-
+    libncurses5-dev
+    optional: zenity(for popup notifications)
 The following packaged must be installed for python frontend to compile:
-libpython2.6
-python2.6-dev
-Additionally the following packages must be installed for python frontend to run:
-libqtcore4
-libqtgui4
-python (v2.6)
-python-qt4
-Issue "make" from within lpfw-pygui directory
+    libpython2.6
+    python2.6-dev
 
-lpfw,lpfwcli, and lpfwpygui should be placed into the same folder, unless overriden by command line options.
-Run lpfw as root or user with capabilities CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID
-Run lpfw --cli or lpfw --pygui as regular user.
+!!! Additional packages are required to run lpfw properly, please see README for extra packages and usage info
 
-
-
-Refer to README for instructions on how to use lpfw and technical information.
+Simply type "make" and you will get lpfw/lpfwcli/lpfwpygui in one folder
 
   On some systems after typing "make", you may get a warning similar to the one below:
   lpfw.c:1230:32: warning: passing argument 2 of ‘nfq_get_payload’ from
