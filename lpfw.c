@@ -52,6 +52,9 @@ dlist *first_rule;
 dlist*copy_first;
 #endif
 
+global_rule_t *first_global_rule = NULL;
+
+
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 msg_struct msg_d2f = {1, 0};
 msg_struct msg_f2d = {1, 0};
@@ -1393,6 +1396,198 @@ void* refreshthread ( void* ptr )
     }
 }
 
+void global_rule_add( char *str_protocol, char *str_direction, char *str_ports)
+{
+    int protocol, direction;
+    global_rule_t *global_rule_to_add;
+    if ( ( global_rule_to_add = ( global_rule_t * ) malloc ( sizeof ( global_rule_t ) ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit(0);
+      }
+
+    if (!strcmp(str_protocol, "TCP"))
+    {
+	protocol = PROTO_TCP;
+    }
+    else if (!strcmp(str_protocol, "UDP"))
+    {
+	protocol = PROTO_UDP;
+    }
+    else
+    {
+	printf ("A request to add an unknown protocol to the global rules detected \n");
+	return;
+    }
+    if (!strcmp(str_direction, "OUT"))
+    {
+	direction = DIRECTION_OUT;
+    }
+    else if (!strcmp(str_direction, "IN"))
+    {
+	direction = DIRECTION_IN;
+    }
+    else
+    {
+	printf ("A request to add an unknown direction to the global rules detected \n");
+	return;
+    }
+    global_rule_to_add->protocol = protocol;
+    global_rule_to_add->direction = direction;
+
+    char *token, *token_range;
+    global_rule_t *global_rule;
+    int port, port_min, port_max, is_range, is_first;
+    ports_list_t *m_ports_list = NULL, *m_ports_list_prev = NULL, *m_ports_list_first = NULL;
+
+    //First check that the ports and/or port ranges to be added don't overlap each other
+
+    while ((token = strtok(str_ports, ",")) != NULL)
+    {
+	if (strstr(token, "-") == NULL){
+	    is_range = FALSE;
+	    port = atoi(token);
+	}
+	else
+	{
+	    is_range = TRUE;
+	    token_range = strtok(token,"-");
+	    port_min = atoi(token_range);
+	    token_range = strtok(NULL,"-");
+	    port_max = atoi(token_range);
+	    if (port_min >= port_max)
+	    {
+		printf ("In global rules: port range is specified incorrectly \n");
+		return;
+	    }
+	}
+
+	m_ports_list = m_ports_list_first;
+	while (m_ports_list != NULL)
+	{
+	    if (m_ports_list->is_range)
+	    {
+		if (is_range)
+		{
+		    if ((m_ports_list->min_port = port_min) ||
+			((m_ports_list->min_port > port_min) && (m_ports_list->min_port <= port_max)) ||
+			((m_ports_list->min_port < port_min) && (m_ports_list->max_port >= port_min)))
+			goto error;
+		}
+		else //not a range
+		{
+		    if ((m_ports_list->min_port <= port) && (m_ports_list->max_port >= port))
+			goto error;
+		}
+	    }
+	    else // not a range
+	    {
+		if (is_range)
+		{
+		    if ((port_min <= m_ports_list->min_port) && (port_max>= m_ports_list->min_port))
+			goto error;
+		}
+		else //not a range
+		{
+		    if (m_ports_list->min_port == port)
+			goto error;
+		}
+	    }
+	 m_ports_list = m_ports_list->next;
+	}
+
+	if (m_ports_list_first == NULL) is_first = TRUE;
+
+	m_ports_list = m_ports_list_first;
+	while (m_ports_list != NULL)
+	{
+	    m_ports_list_prev = m_ports_list;
+	    m_ports_list = m_ports_list->next;
+	}
+	if ((m_ports_list = ( ports_list_t * ) malloc ( sizeof ( ports_list_t ) ) ) == NULL )
+	{
+	    M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	    exit(0);
+	}
+	if (is_first)
+	{
+	    m_ports_list_first = m_ports_list;
+	}
+	else
+	{
+	    m_ports_list_prev->next = m_ports_list;
+	}
+	m_ports_list->next = NULL;
+	m_ports_list->prev = m_ports_list_prev;
+
+	if (is_range)
+	{
+	    m_ports_list->is_range = TRUE;
+	    m_ports_list->min_port = port_min;
+	    m_ports_list->max_port = port_max;
+	}
+	else
+	{
+	    m_ports_list->is_range = FALSE;
+	    m_ports_list->min_port = port;
+	}
+    }
+
+//Secondly, check that ports don't overlap those already in global rules list
+
+    global_rule = first_global_rule;
+    ports_list_t *ports_list, *ports_list_prev;
+
+    m_ports_list = m_ports_list_first;
+    while (m_ports_list != NULL)
+    {
+
+	while ((global_rule != NULL) && (global_rule->protocol == protocol)
+	       && (global_rule->direction == direction))
+    {
+	ports_list = global_rule->ports_list;
+	while (ports_list == NULL)
+	{
+	    if (ports_list->is_range)
+	    {
+		if (m_ports_list->is_range)
+		{
+		    if ((ports_list->min_port = m_ports_list->min_port) ||
+			((ports_list->min_port > m_ports_list->min_port) && (ports_list->min_port <= m_ports_list->max_port)) ||
+			((ports_list->min_port < m_ports_list->min_port) && (ports_list->max_port >= m_ports_list->min_port)))
+			goto error;
+		}
+		else //not a range
+		{
+		    if ((ports_list->min_port <= m_ports_list->min_port) && (ports_list->max_port >= m_ports_list->min_port))
+			goto error;
+		}
+	    }
+	    else // not a range
+	    {
+		if (m_ports_list->is_range)
+		{
+		    if ((m_ports_list->min_port <= ports_list->min_port) && (m_ports_list->max_port >= ports_list->min_port))
+			goto error;
+		}
+		else //not a range
+		{
+		    if (ports_list->min_port == m_ports_list->min_port)
+			goto error;
+		}
+	    }
+	 ports_list = ports_list->next;
+	}
+	global_rule = global_rule->next;
+    }
+  }
+    //Now add a rule to global rules list (TO BE CONTINUED....)
+
+    error:
+    ;
+}
+
+
 //Read RULESFILE into dlist
 void rules_load()
 {
@@ -1409,6 +1604,7 @@ void rules_load()
   struct stat m_stat;
   unsigned char digest[DIGEST_SIZE];
   unsigned char hexchar[3] = "";
+  char newline[2] = {'\n','\0'};
 
 
   if ( stat ( rules_file->filename[0], &m_stat ) == -1 )
@@ -1426,6 +1622,28 @@ void rules_load()
       return;
     }
 
+//First read the global rules
+  if ( fgets ( path, PATHSIZE, stream ) == 0 ) return;
+  path[strlen ( path ) - 1] = 0; //remove newline
+  if (!strcmp(path, "[GLOBAL]"))
+{
+      char *token;
+      char protocol[4];
+      char direction[4];
+      char ports[PATHSIZE - 100];
+      while(strcmp(fgets ( path, PATHSIZE, stream ), newline))
+  {
+	  token = strtok(path, " ");
+	  strncpy(protocol, token, sizeof(protocol));
+	  token = strtok(NULL, " ");
+	  strncpy(direction, token, sizeof(direction));
+	  token = strtok(NULL, " ");
+	  strncpy(ports, token, sizeof(ports));
+	  global_rule_add(protocol, direction, ports);
+  }
+}
+
+  //Now process all the non-global, i.e. per-application rules
   while ( 1 )
     {
       //fgets reads <newline> into the string and terminates with /0

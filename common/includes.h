@@ -3,11 +3,28 @@
 #include <sys/types.h> //for ino_t
 #include <dirent.h> //for DIR*
 
-
 #ifndef INCLUDES_H_
 #define INCLUDES_H_
 
 typedef char mbool;
+
+typedef struct m_ports_list
+{
+    mbool is_range;
+    int min_port; //when !is_range, contains port number
+    int max_port;
+    struct m_ports_list *next;
+    struct m_ports_list *prev;
+} ports_list_t;
+
+typedef struct m_global_rule
+{
+    struct m_global_rule *next;
+    struct m_global_rule *prev;
+    int protocol;
+    int direction;
+    ports_list_t *ports_list;
+} global_rule_t;
 
 typedef struct m_dlist
 {
