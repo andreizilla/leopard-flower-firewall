@@ -145,6 +145,13 @@ pid_t fe_pid;
     pthread_mutex_unlock(&logstring_mutex); \
  
 
+void fe_active_flag_set ( int boolean )
+{
+  pthread_mutex_lock ( &fe_active_flag_mutex );
+  fe_active_flag = boolean;
+  pthread_mutex_unlock ( &fe_active_flag_mutex );
+}
+
 void capabilities_modify(int capability, int set, int action)
 {
     //enable CAP_SETGID in effective set
@@ -689,12 +696,6 @@ void child_close_nfqueue()
   return;
 }
 
-void fe_active_flag_set ( int boolean )
-{
-  pthread_mutex_lock ( &fe_active_flag_mutex );
-  fe_active_flag = boolean;
-  pthread_mutex_unlock ( &fe_active_flag_mutex );
-}
 
 int fe_active_flag_get()
 {
@@ -782,19 +783,19 @@ int m_printf_syslog ( int loglevel, char * logstring)
     case MLOG_INFO:
       // check if INFO logging enabled
       if ( !* ( log_info->ival ) ) return 0;
-      syslog ( LOG_INFO, logstring );
+      syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_TRAFFIC:
       if ( !* ( log_traffic->ival ) ) return 0;
-      syslog ( LOG_INFO, logstring );
+      syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_DEBUG:
       if ( !* ( log_debug->ival ) ) return 0;
-      syslog ( LOG_INFO, logstring );
+      syslog ( LOG_INFO, "%s", logstring );
       return 0;
     case MLOG_ALERT: //Alerts get logget unconditionally to all log channels
       syslog ( LOG_INFO, "ALERT: " );
-      syslog ( LOG_INFO, logstring );
+      syslog ( LOG_INFO, "%s", logstring );
       return 0;
     }
 }
