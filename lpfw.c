@@ -83,7 +83,7 @@ ct_dump_thr, ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, front
 nfq_gid_thr;
 
 #ifdef DEBUG
-pthread_t unittest_thread, rulesdump_thread;
+pthread_t unittest_thr, rules_dump_thr;
 #endif
 
 //flag which shows whether frontend is running
@@ -1323,7 +1323,7 @@ void* nfq_out_rest_thread ( void *ptr )
     }
 }
 
-void* nfq_in_thr ( void *ptr )
+void* nfq_in_thread ( void *ptr )
 {
   ptr = 0;
 //endless loop of receiving packets and calling a handler on each packet
@@ -4645,17 +4645,17 @@ int main ( int argc, char *argv[] )
   if (pthread_create ( &ct_delete_nfmark_thr, NULL, ct_delete_nfmark_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &frontend_poll_thr, NULL, frontend_poll_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
-  if (pthread_create ( &nfq_in_thr, NULL, nfq_in_thr, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_in_thr, NULL, nfq_in_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfq_out_udp_thr, NULL, nfq_out_udp_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfq_out_rest_thr, NULL, nfq_out_rest_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfq_gid_thr, NULL, nfq_gid_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 
 #ifdef DEBUG
-  pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
+  pthread_create ( &rules_dump_thr, NULL, rules_dump_thread, NULL );
 
   if (argc > 1 && !strcmp (argv[1], "--test"))
     {
-      pthread_create ( &unittest_thread, NULL, run_tests, NULL );
+     //  pthread_create ( &unittest_thr, NULL, unittest_thread, NULL );
     }
 #endif
 

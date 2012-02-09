@@ -35,7 +35,7 @@ debug: DEBUG = debug
 debug: lpfw install lpfwcli lpfwpygui
 
 install:
-	mv lpfw $(DESTDIR)
+	cp lpfw $(DESTDIR)
 
 #lpfw2: $(SOURCES)
 #we link against our own -lnetfiler_conntrack library v. 0.9.1

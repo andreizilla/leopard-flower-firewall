@@ -1,6 +1,7 @@
 import sys, os, thread, time, string, threading, subprocess
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator
 import resource
+import wingdbstub
 from PyQt4.QtCore import pyqtSignal, Qt
 from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
@@ -174,8 +175,8 @@ def stdoutthread(stdout):
             perms = msglist[3]
             print "calling emitaskuserIN"
             window.emitAskUserIN()            
-            
-                   
+
+
 def msgq_init(): 
     print "in msgq_init"
     global proc
@@ -426,7 +427,7 @@ if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     #I don't know how to redirect output to /dev/null so just make a tmp file until I figure out
     logfile = open("/dev/null", "w")
     sys.stdout = logfile
-    
+      
 app=QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(True)
 window = myMainWindow()

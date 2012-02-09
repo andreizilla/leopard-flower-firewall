@@ -19,10 +19,11 @@ ipc_wrapper2: ipc_wrapper2.c
 lpfwpygui:  $(SOURCES)
 	gcc $(SOURCES) $(GCCFLAGS) -o lpfwpygui
 
-install:
-	mv lpfwpygui $(DESTDIR)
+dummy: lpfwpygui ipc_wrapper2 resource.py prefs.py popup_out.py popup_in.py lpfwgui.py frontend.py
+	touch dummy
+	cp lpfwpygui $(DESTDIR)
 	mkdir -p $(DESTDIR)/lpfw-pygui
-	mv ipc_wrapper2 $(DESTDIR)/lpfw-pygui
+	cp ipc_wrapper2 $(DESTDIR)/lpfw-pygui
 	cp resource.py $(DESTDIR)/lpfw-pygui
 	cp prefs.py $(DESTDIR)/lpfw-pygui
 	cp popup_out.py $(DESTDIR)/lpfw-pygui
@@ -30,7 +31,7 @@ install:
 	cp lpfwgui.py $(DESTDIR)/lpfw-pygui
 	cp frontend.py $(DESTDIR)/lpfw-pygui
 
-
+install: dummy
 
 debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: ipc_wrapper2 lpfwpygui

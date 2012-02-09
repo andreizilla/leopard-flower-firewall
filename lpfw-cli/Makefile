@@ -22,4 +22,4 @@ debug: lpfwcli
 
 
 install:
-	mv lpfwcli $(DESTDIR)
+	cp lpfwcli $(DESTDIR)
