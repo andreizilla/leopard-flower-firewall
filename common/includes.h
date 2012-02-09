@@ -33,6 +33,7 @@ typedef struct m_global_rule
 typedef struct m_dlist
 {
   int command;
+  int rules_number; //used only by the first member list to keep track
   char path[PATHSIZE]; //path to executable
   char pid[PIDLENGTH]; //its pid (or IP address for kernel processes)
   char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
@@ -89,7 +90,7 @@ typedef struct
 typedef struct
 {
   long type;
-  credentials creds;
+  credentials item;
 } msg_struct_creds;
 
 //not in use ATM, cache is part of dlist, until there arises a need to separate cache from dlist due to excessive mutex locking/unlocking

@@ -175,7 +175,7 @@ void* d2flistthread(void * ptr) {
 	strcat (message, "RULESLIST ");
 	while (1)
 	{
-	    if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0, 0) == -1) {
+	    if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0, 0) == -1) {
 	    printf("msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    };
 	    if (!strcmp(msg_d2flist.item.path, "EOF"))

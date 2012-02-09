@@ -47,9 +47,6 @@ FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
 dlist *first_rule;
-#ifndef WITHOUT_SYSVIPC
-dlist*copy_first;
-#endif
 
 global_rule_t *first_global_rule = NULL;
 char ownpath[PATHSIZE];
@@ -163,7 +160,7 @@ int global_rules_filter(const int m_direction, const int protocol, const int por
 	if (protocol == PROTO_TCP) direction = TCP_OUT_ALLOW;
 	else if (protocol == PROTO_UDP) direction =  UDP_OUT_ALLOW;
     }
-    else if (m_direction = DIRECTION_IN)
+    else if (m_direction == DIRECTION_IN)
     {
 	if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
 	else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
@@ -955,56 +952,39 @@ unsigned long long starttimeGet ( int mypid )
   return starttime;
 }
 
-//make a copy of dlist for future iterations. We don't iterate through dlist itself because that would require to lock a mutex for too long
+//make a copy of dlist for future iterations.
+//We don't iterate through dlist itself because that would require to lock a mutex for too long
 dlist * dlist_copy()
-{
+{   
+  dlist *copy_rule;
   pthread_mutex_lock ( &dlist_mutex );
-  dlist* del;
-  dlist *temp = first_rule->next;
-  dlist *copy_temp = copy_first;
-  while ( temp != 0 )
+  if (( copy_rule = malloc ( (sizeof(dlist))*first_rule->rules_number )) == NULL )
     {
-
-      if ( !copy_temp->next )
-        {
-          //grow copy of dlist
-          if ( ( copy_temp->next = malloc ( sizeof ( dlist ) ) ) == NULL )
-            {
-              M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              die();
-            }
-          copy_temp->next->prev = copy_temp;
-          copy_temp->next->next = NULL;
-        }
-      copy_temp = copy_temp->next;
-      copy_temp->path[0] = 0;
-      strcpy ( copy_temp->path, temp->path );
-      strcpy ( copy_temp->perms, temp->perms );
-      strcpy ( copy_temp->pid, temp->pid );
-      copy_temp->is_active = temp->is_active;
-      copy_temp->nfmark_out = temp->nfmark_out;
-
-      temp = temp->next;
+      M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      exit(0);
     }
+
+  copy_rule[0].rules_number = first_rule->rules_number;
+  dlist *rule = first_rule->next;
+  int i = 1;
+  for (i; i < first_rule->rules_number; i++)
+  {
+      strcpy ( copy_rule[i].path, rule->path );
+      strcpy ( copy_rule[i].perms, rule->perms );
+      strcpy ( copy_rule[i].pid, rule->pid );
+      copy_rule[i].is_active = rule->is_active;
+      copy_rule[i].nfmark_out = rule->nfmark_out;
+      rule = rule->next;
+  }
   pthread_mutex_unlock ( &dlist_mutex );
-  //lets see if copy dlist needs to be shrunk
-  copy_temp = copy_temp->next;
-  while ( copy_temp != 0 )
-    {
-      del = copy_temp;
-      //prev element should point not to us but to the next element
-      copy_temp->prev->next = copy_temp->next;
-      copy_temp = copy_temp->next;
-      free ( del );
-    }
-  return copy_first;
+
+  return copy_rule;
 }
 
 //Add new element to dlist and return new nfmark (if any)
 int dlist_add ( const char *path, const char *pid, const char *perms, const mbool active, const char *sha,
 		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance)
 {
-  static int rule_ordinal_count = 0;
   int retnfmark;
 
   pthread_mutex_lock ( &dlist_mutex );
@@ -1070,7 +1050,7 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
         }
       nfmark_count++;
     }
-  temp->first_instance = first_instance; //obsolete member,can be purged
+  temp->first_instance = first_instance;
   if (temp->is_active && strcmp(temp->path, KERNEL_PROCESS))
     {
       strcpy(temp->pidfdpath,"/proc/");
@@ -1106,6 +1086,7 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
     }
   *temp->sockets_cache = MAGIC_NO;
 
+  first_rule->rules_number = first_rule->rules_number + 1;
   pthread_mutex_unlock ( &dlist_mutex );
   return retnfmark;
 }
@@ -1132,6 +1113,7 @@ void dlist_del ( char *path, char *pid )
           nfmark_to_delete_out = temp->nfmark_out;
           was_active = temp->is_active;
           free ( temp );
+	  first_rule->rules_number--;
 
           //remove tracking for this app's active connection only if this app was active
           if (was_active)
@@ -3865,7 +3847,7 @@ int frontend_mode ( int argc, char *argv[] )
       exit ( 0 );
     };
 
-  if ( ( msg.creds.uid = getuid() ) == 0 )
+  if ( ( msg.item.uid = getuid() ) == 0 )
     {
 #ifndef DEBUG
       printf ( "You are trying to run lpfw's frontend as root. Such possibility is disabled due to securitty reasons. Please rerun as a non-priviledged user\n" );
@@ -3873,8 +3855,8 @@ int frontend_mode ( int argc, char *argv[] )
 #endif
     }
 
-  strncpy ( msg.creds.tty, ttyname ( 0 ), TTYNAME - 1 );
-  if ( !strncmp ( msg.creds.tty, "/dev/tty", 8 ) )
+  strncpy ( msg.item.tty, ttyname ( 0 ), TTYNAME - 1 );
+  if ( !strncmp ( msg.item.tty, "/dev/tty", 8 ) )
     {
       printf ( "You are trying to run lpfw's frontend from a tty terminal. Such possibility is disabled in this version of lpfw due to security reasons. Try to rerun this command from within an X terminal\n" );
       return -1;
@@ -3886,22 +3868,22 @@ int frontend_mode ( int argc, char *argv[] )
       printf ( "DISPLAY environment variable is not set (tip:usually it looks like  :0.0\n" );
       return -1;
     }
-  strncpy ( msg.creds.display, display, DISPLAYNAME - 1 );
+  strncpy ( msg.item.display, display, DISPLAYNAME - 1 );
 
   int cli_args; //number of arguments that need to be passed to frontend
   cli_args = argc-2; //first two parms are path and --cli/--gui/--guipy
-  strncpy (msg.creds.params[0], argv[1], 16);
+  strncpy (msg.item.params[0], argv[1], 16);
 
   int i =0;
   if ( cli_args > 0 && cli_args < 5 ) //4 parms max - the last parm should be 0
     {
-      msg.creds.params[1][0] = cli_args; //first parm has the total number of parms for lpfwcli (itself excluding)
+      msg.item.params[1][0] = cli_args; //first parm has the total number of parms for lpfwcli (itself excluding)
       for ( i=0; i<cli_args; ++i )
 	{
-	  strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
+	  strncpy ( msg.item.params[i+2], argv[2+i], 16 );
 	}
     }
-  msg.creds.params[i+2][0] = 0; //the last parm should be 0
+  msg.item.params[i+2][0] = 0; //the last parm should be 0
 
   if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
     {
@@ -4533,17 +4515,7 @@ void init_dlist()
       }
     first_rule->prev = NULL;
     first_rule->next = NULL;
-
-  #ifndef WITHOUT_SYSVIPC
-    //initialze dlist copy's first(reference) element
-    if ( ( copy_first = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	die();
-      }
-    copy_first->prev = NULL;
-    copy_first->next = NULL;
-  #endif
+    first_rule->rules_number = 1;
 }
 
 void open_proc_net_files()

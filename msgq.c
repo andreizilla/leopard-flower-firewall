@@ -47,7 +47,7 @@ void*  fe_reg_thread(void* ptr)
 
   //block until message is received
 interrupted:
-  if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_struct_creds), 0, 0) == -1)
+  if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_creds), 0, 0) == -1)
     {
       M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       goto interrupted;
@@ -80,14 +80,14 @@ interrupted:
     }
   //The following checks are already performed by frontend_register(). This is redundant, but again, those hackers are unpredictable
 #ifndef DEBUG
-  if (msg_creds.creds.uid  == 0)
+  if (msg_creds.item.uid  == 0)
     {
       M_PRINTF (LOG_INFO, "You are trying to run lpfw's frontend as root. Such possibility is disabled due to security reasons. Please rerun as an unpriviledged user\n");
       return ;
     }
 #endif
 
-  if (!strncmp(msg_creds.creds.tty, "/dev/tty", 8))
+  if (!strncmp(msg_creds.item.tty, "/dev/tty", 8))
     {
       M_PRINTF (LOG_INFO, "You are trying to run lpfw's frontend from a tty terminal. Such possibility is disabled in this version of lpfw due to security reasons. Try to rerun this command from within an X terminal\n");
       return ;
@@ -121,7 +121,7 @@ interrupted:
           M_PRINTF(MLOG_INFO, "cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         }
       //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
-      if (setuid(msg_creds.creds.uid) == -1)
+      if (setuid(msg_creds.item.uid) == -1)
         {
           M_PRINTF(MLOG_INFO, "setuid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         }
@@ -157,7 +157,7 @@ interrupted:
           M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         }
 	*/
-      if (!strcmp (msg_creds.creds.params[0], "--gui"))
+      if (!strcmp (msg_creds.item.params[0], "--gui"))
         {
           if (stat(gui_path->filename[0], &path_stat) == -1 )
             {
@@ -173,7 +173,7 @@ interrupted:
           //if exec returns here it means there was an error
           M_PRINTF(MLOG_INFO, "execl: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         }
-      else if (!strcmp (msg_creds.creds.params[0], "--pygui"))
+      else if (!strcmp (msg_creds.item.params[0], "--pygui"))
         {
           if (stat(pygui_path->filename[0], &path_stat) == -1 )
             {
@@ -221,14 +221,14 @@ interrupted:
 void* commandthread(void* ptr)
 {
   ptr = 0;
-  dlist *temp;
+  dlist *rule;
 
   // N.B. continue statement doesn't apply to switch it causes to jump to while()
   while (1)
     {
       //block until message is received from frontend:
 interrupted:
-      if (msgrcv(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0, 0) == -1)
+      if (msgrcv(mqd_f2d, (void*) &msg_f2d, sizeof (msg_f2d), 0, 0) == -1)
         {
           M_PRINTF(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
           sleep(1); //avoid overwhelming the log
@@ -245,43 +245,38 @@ interrupted:
         {
         case F2DCOMM_LIST:
           ;
-          //TODO a memory leak here, because dlist_copy mallocs memory that is never freed
-          temp = (dlist *) dlist_copy();
-
-          temp = temp->next;
+	  rule = (dlist *) dlist_copy();
           //check if the list is empty and let frontend know
-          if (temp == NULL)
+	  if (rule[0].rules_number == 1)
             {
               strcpy(msg_d2flist.item.path, "EOF");
-              if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1)
+	      if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0) == -1)
                 {
                   M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 }
               M_PRINTF(MLOG_DEBUG, "sent EOF\n");
+	      free(rule);
               continue;
             }
-          while (temp != NULL)
-            {
-              strcpy(msg_d2flist.item.path, temp->path);
-              strcpy(msg_d2flist.item.pid, temp->pid);
-              strcpy(msg_d2flist.item.perms, temp->perms);
-              msg_d2flist.item.is_active = temp->is_active;
-              msg_d2flist.item.nfmark_out = temp->nfmark_out;
-              if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1)
+	  int i = 1;
+	  for (i; i < rule[0].rules_number; i++)
+	  {
+	      strcpy(msg_d2flist.item.path, rule[i].path);
+	      strcpy(msg_d2flist.item.pid, rule[i].pid);
+	      strcpy(msg_d2flist.item.perms, rule[i].perms);
+	      msg_d2flist.item.is_active = rule[i].is_active;
+	      msg_d2flist.item.nfmark_out = rule[i].nfmark_out;
+	      if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0) == -1)
                 {
                   M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
                 }
-              if (temp->next == NULL)
-                {
-                  strcpy(msg_d2flist.item.path, "EOF");
-                  if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0) == -1)
-                    {
-                      M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-                    }
-                  break;
-                }
-              temp = temp->next;
             };
+	  strcpy(msg_d2flist.item.path, "EOF");
+	  if (msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0) == -1)
+	    {
+	      M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+	    }
+	  free(rule);
           continue;
 
         case F2DCOMM_DELANDACK:
@@ -358,7 +353,7 @@ interrupted:
           stime = starttimeGet ( atoi ( sent_to_fe_struct.pid ) );
           if ( sent_to_fe_struct.stime != stime )
             {
-              M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", temp->path,  __FILE__, __LINE__ );
+	      M_PRINTF ( MLOG_INFO, "Red alert!!!Start times don't match %s %s %d", rule->path,  __FILE__, __LINE__ );
 	      awaiting_reply_from_fe = FALSE;
               continue;
             }
