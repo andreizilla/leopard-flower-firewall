@@ -2205,7 +2205,7 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
 }
 
 //scan /proc to find which PID the socket belongs to
-int socket_procfs_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
+int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
   //vars for scanning through /proc dir
   struct dirent *proc_dirent, *fd_dirent;
@@ -2340,7 +2340,7 @@ int icmp_check_only_one_inode ( long *socket )
   return ICMP_ONLY_ONE_ENTRY;
 }
 
-int socket_check_kernel_udp(const long *socket)
+int socket_check_kernel_udp(const int *port)
 {
 //The only way to distinguish kernel sockets is that they have inode=0 and uid=0
 //But regular process's sockets sometimes also have inode=0 (I don't know why)
@@ -2351,6 +2351,7 @@ int socket_check_kernel_udp(const long *socket)
     char newline[2] = {'\n','\0'};
     char uid[2] = {'0','\0'};
     long socket_next;
+    int port_next;
     char *token, *lasts;
     FILE *m_udpinfo, *m_udp6info;
     int m_udpinfo_fd, m_udp6info_fd;
@@ -2375,16 +2376,20 @@ int socket_check_kernel_udp(const long *socket)
 	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
-	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
-	    if (socket_next != *socket) continue;
+	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %s %*s %ld", &port_next, uid, &socket_next);
+	    if (port_next != *port ) continue;
 	    else{
-		if (!strcmp (uid, "0")){
+		if (socket_next != 0){
+		    fclose(m_udpinfo);
+		    return SOCKET_CHANGED_FROM_ZERO;
+		}
+		else if (!strcmp (uid, "0")){
 		    fclose(m_udpinfo);
 		    return INKERNEL_SOCKET_FOUND;
 		}
 		else{
 		  fclose(m_udpinfo);
-		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		  return SOCKET_ZERO_BUT_UID_NOT_ZERO;
 		}
 	    }
 	  }
@@ -2412,16 +2417,20 @@ int socket_check_kernel_udp(const long *socket)
 	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
-	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
-	    if (socket_next != *socket) continue;
+	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %s %*s %ld", &port_next, uid, &socket_next);
+	    if (port_next != *port ) continue;
 	    else{
-		if (!strcmp (uid, "0")){
+		if (socket_next != 0){
+		    fclose(m_udp6info);
+		    return SOCKET_CHANGED_FROM_ZERO;
+		}
+		else if (!strcmp (uid, "0")){
 		    fclose(m_udp6info);
 		    return INKERNEL_SOCKET_FOUND;
 		}
 		else{
 		  fclose(m_udp6info);
-		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		  return SOCKET_ZERO_BUT_UID_NOT_ZERO;
 		}
 	    }
 	  }
@@ -2431,7 +2440,7 @@ int socket_check_kernel_udp(const long *socket)
  }
 
 
-int socket_check_kernel_tcp(const long *socket)
+int socket_check_kernel_tcp(const int *port)
 {
 //The only way to distinguish kernel sockets is that they have inode=0 and uid=0
 //But regular process's sockets sometimes also have inode=0 (I don't know why)
@@ -2442,6 +2451,7 @@ int socket_check_kernel_tcp(const long *socket)
     char newline[2] = {'\n','\0'};
     char uid[2] = {'0','\0'};
     long socket_next;
+    int port_next;
     char *token, *lasts;
     FILE *m_tcpinfo, *m_tcp6info;
     int m_tcpinfo_fd, m_tcp6info_fd;
@@ -2466,16 +2476,20 @@ int socket_check_kernel_tcp(const long *socket)
 	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
-	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
-	    if (socket_next != *socket) continue;
+	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %s %*s %ld", &port_next, uid, &socket_next);
+	    if (port_next != *port ) continue;
 	    else{
-		if (!strcmp (uid, "0")){
+		if (socket_next != 0){
+		    fclose(m_tcpinfo);
+		    return SOCKET_CHANGED_FROM_ZERO;
+		}
+		else if (!strcmp (uid, "0")){
 		    fclose(m_tcpinfo);
 		    return INKERNEL_SOCKET_FOUND;
 		}
 		else{
 		  fclose(m_tcpinfo);
-		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		  return SOCKET_ZERO_BUT_UID_NOT_ZERO;
 		}
 	    }
 	  }
@@ -2503,16 +2517,20 @@ int socket_check_kernel_tcp(const long *socket)
 	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
 	  {
 	    //take a line until EOF
-	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
-	    if (socket_next != *socket) continue;
+	    sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %s %*s %ld", &port_next, uid, &socket_next);
+	    if (port_next != *port ) continue;
 	    else{
-		if (!strcmp (uid, "0")){
+		if (socket_next != 0){
+		    fclose(m_tcp6info);
+		    return SOCKET_CHANGED_FROM_ZERO;
+		}
+		else if (!strcmp (uid, "0")){
 		    fclose(m_tcp6info);
 		    return INKERNEL_SOCKET_FOUND;
 		}
 		else{
 		  fclose(m_tcp6info);
-		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		  return SOCKET_ZERO_BUT_UID_NOT_ZERO;
 		}
 	    }
 	  }
@@ -2696,10 +2714,9 @@ int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, c
     {
 	return retval;
     }
-    retval = socket_procfs_search ( socket, path, pid, stime );
+    retval = socket_procpidfd_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_tcp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2714,24 +2731,19 @@ int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, 
 {
   int retval;
   retval = socket_cache_out_search(socket, path, pid);
-  if (retval != SOCKETS_CACHE_NOT_FOUND)
-  {
+  if (retval != SOCKETS_CACHE_NOT_FOUND){
       M_PRINTF (MLOG_DEBUG2, "(cache)");
       return retval;
   }
   retval = socket_active_processes_search ( socket, path, pid, nfmark_to_set );
-  if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND )
-  {
+  if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND ){
       return retval;
   }
-  retval = socket_procfs_search ( socket, path, pid, stime );
-  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
-  {
-    retval = socket_check_kernel_tcp(socket);
+  retval = socket_procpidfd_search ( socket, path, pid, stime );
+  if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD){
     return retval;
   }
-  else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
-  {
+  else if (retval == SOCKET_FOUND_IN_PROCPIDFD){
     retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
     return retval;
   }
@@ -2752,10 +2764,9 @@ int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, c
     {
 	return retval;
     }
-    retval = socket_procfs_search ( socket, path, pid, stime );
+    retval = socket_procpidfd_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_udp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -2780,10 +2791,9 @@ int packet_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, 
     {
 	return retval;
     }
-    retval = socket_procfs_search ( socket, path, pid, stime );
+    retval = socket_procpidfd_search ( socket, path, pid, stime );
     if (retval == SOCKET_NOT_FOUND_IN_PROCPIDFD)
     {
-      retval = socket_check_kernel_udp(socket);
       return retval;
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
@@ -3020,13 +3030,22 @@ void print_traffic_log(const int proto, const int direction, const char *ip, con
       strcat (m_logstring, "While process was running, someone changed his binary file on disk. Definitely an attempt to compromise the firewall\n" );
       break;
     case SRCPORT_NOT_FOUND_IN_PROC:
-      strcat (m_logstring, "source port not found in procfs, drop\n" );
+      strcat (m_logstring, "(source port not found in procfs) drop\n" );
+      break;
+    case INKERNEL_SOCKET_NOT_FOUND:
+      strcat (m_logstring, "(no process associated with socket) drop\n" );
       break;
     case INKERNEL_IPADDRESS_NOT_IN_DLIST:
       strcat (m_logstring, "(kernel process without a rule) drop\n" );
       break;
+    case SOCKET_ZERO_BUT_UID_NOT_ZERO:
+      strcat (m_logstring, "(socket==0 but uid!=0) drop\n" );
+      break;
+    case SOCKET_CHANGED_FROM_ZERO:
+      strcat (m_logstring, "(socket changed from zero while we were scanning) drop\n" );
+      break;
     default:
-      strcat (m_logstring, "unknown verdict detected " );
+      strcat (m_logstring, "unknown verdict detected \n" );
       printf ("verdict No %d \n", verdict);
       break;
     }
@@ -3041,7 +3060,7 @@ int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long 
   if (retval != ICMP_ONLY_ONE_ENTRY) {return retval;}
   retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND) {return retval;}
-  retval = socket_procfs_search ( &socket, path, pid, stime );
+  retval = socket_procpidfd_search ( &socket, path, pid, stime );
   if (retval != SOCKET_FOUND_IN_PROCPIDFD) {return retval;}
   retval = path_find_in_dlist (nfmark_to_set, path, pid, stime);
   return retval;
@@ -3214,14 +3233,17 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
 	  break;
         }
-
-      fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
-	  if (verdict == INKERNEL_SOCKET_FOUND)
-            {
+      if (socket == 0){
+	  verdict = socket_check_kernel_tcp(&dport_hostbo);
+	  if (verdict == INKERNEL_SOCKET_FOUND) {
 	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
 	  }
-
+	  else break;
+      }
+      else{
+      fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
+      verdict = packet_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
+      }
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_TCP, dport_hostbo, verdict);
 
 	  if (verdict == PATH_IN_DLIST_NOT_FOUND)
@@ -3251,14 +3273,17 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	  verdict = DSTPORT_NOT_FOUND_IN_PROC;
 	  break;
 	}
-
+      if (socket == 0){
+	  verdict = socket_check_kernel_tcp(&dport_hostbo);
+	  if (verdict == INKERNEL_SOCKET_FOUND) {
+	      verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+	  }
+	  else break;
+      }
+      else{
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
       verdict = packet_handle_udp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
-	  if (verdict == INKERNEL_SOCKET_FOUND)
-	    {
-	      verdict = process_inkernel_socket(saddr, &nfmark_to_set_in);
-	  }
-
+      }
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_UDP, dport_hostbo, verdict);
 
 	  if (verdict == PATH_IN_DLIST_NOT_FOUND)
@@ -3478,14 +3503,20 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	goto execute_verdict;
       }
   }
-}
+    }
 
+  if (socket_found == 0){
+      verdict = socket_check_kernel_udp(&srcudp);
+      if (verdict == INKERNEL_SOCKET_FOUND) {
+	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+      }
+      else {goto execute_verdict;}
+  }
+  else{
+  //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
   verdict = packet_handle_udp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
-      if (verdict == INKERNEL_SOCKET_FOUND)
-        {
-	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
-	}
+  }
 
       verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
 
@@ -3596,19 +3627,22 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	      {
 	      //the packet has no inode associated with it
 		verdict = PORT_NOT_FOUND_IN_PROCNET;
-	      goto execute_verdict;
+		goto execute_verdict;
 	      }
 	  }
       }
-
-  //remember f/e's state before we process
-  fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
-
-    if (verdict == INKERNEL_SOCKET_FOUND)
-    {
-	verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
-    }
+  if (socket_found == 0){
+      verdict = socket_check_kernel_tcp(&srctcp);
+      if (verdict == INKERNEL_SOCKET_FOUND) {
+	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+      }
+      else {goto execute_verdict;}
+  }
+  else{
+      //remember f/e's state before we process
+      fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
+      verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
+  }
 
     verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dsttcp, verdict);
 
