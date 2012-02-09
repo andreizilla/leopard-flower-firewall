@@ -1,8 +1,8 @@
 import sys, os, thread, time, string, threading, subprocess
-from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator
+from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem
 import resource
 import wingdbstub
-from PyQt4.QtCore import pyqtSignal, Qt
+from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex
 from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
@@ -421,13 +421,32 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.actionPreferences_2.triggered.connect(self.showPrefs)
         self.actionExit.triggered.connect(self.realQuit)
         self.actionSave.triggered.connect(self.saveRules)
+   
+class CustomDelegate (QStyledItemDelegate):
+    def __init__ (self):
+        QStyledItemDelegate.__init__(self)
+    def paint (self, painter, option, index):
+        item = QStandardItem()
+        item = modelAll.item(index.row, index.column)
+        text = item.text()
+        if (len(text) > 6):
+            # take only megabytes -->12<--345678
+            mb = text[:len(text)-6]
+            painter.setPen (Qt.blue)
+            painter.drawText (0,0, mb) 
+            
+            
+        
+        
+                      
         
     #don't clutter console with debuginfo
 if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     #I don't know how to redirect output to /dev/null so just make a tmp file until I figure out
     logfile = open("/dev/null", "w")
     sys.stdout = logfile
-      
+  
+    
 app=QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(True)
 window = myMainWindow()
@@ -447,12 +466,14 @@ tray.show()
 actionShow.triggered.connect(window.show)
 actionExit.triggered.connect(window.realQuit)
 
- 
+delegate = CustomDelegate()
+
 modelAll = QStandardItemModel()
 modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path","Incoming allowed","Outgoing allowed","Incoming denied","Outgoing denied"))
 modelActive = QStandardItemModel()
 modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path","Incoming allowed","Outgoing allowed","Incoming denied","Outgoing denied"))
 window.tableView.setModel(modelAll)
+window.tableView.setItemDelegate(delegate)
 dialogOut = myDialogOut()
 dialogOut.setWindowTitle("Leopard Flower firewall")
 dialogIn = myDialogIn()
