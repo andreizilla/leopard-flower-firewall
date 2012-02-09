@@ -95,7 +95,6 @@ void parse_command_line(int argc, char* argv[])
 }
 
 
-
 int main (int argc, char* argv[])
 {
     if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))

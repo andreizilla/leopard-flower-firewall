@@ -2342,188 +2342,184 @@ int icmp_check_only_one_inode ( long *socket )
 
 int socket_check_kernel_udp(const long *socket)
 {
-  //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
-  //The ony diffrnc is they have uid=0 (but so are root's)
-  //rescan /proc/net to see if this socket might be kernel's or (root's)
+//The only way to distinguish kernel sockets is that they have inode=0 and uid=0
+//But regular process's sockets sometimes also have inode=0 (I don't know why)
+//+ root's sockets have uid == 0
+//So we just assume that if inode==0 and uid==0 - it's a kernel socket
 
-  char sockstr[32];
-  int sockstr_sz;
+    int bytesread_udp,bytesread_udp6;
+    char newline[2] = {'\n','\0'};
+    char uid[2] = {'0','\0'};
+    long socket_next;
+    char *token, *lasts;
+    FILE *m_udpinfo, *m_udp6info;
+    int m_udpinfo_fd, m_udp6info_fd;
+    char m_udp_smallbuf[4096], m_udp6_smallbuf[4096];
 
-  sprintf(sockstr,"%ld", *socket);
-  //add space to the end of string for easier strcmp
-  sockstr_sz = strlen(sockstr);
-  sockstr[sockstr_sz] = 32;
-  sockstr[sockstr_sz+1] = 0;
+    if ( ( m_udpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    m_udpinfo_fd = fileno(m_udpinfo);
 
-  char uid;
-  FILE *mudpinfo, *mudp6info;
-  char * membuf;
-  int bytesread;
+    memset(m_udp_smallbuf,0, 4096);
+    while ((bytesread_udp = read(m_udpinfo_fd, m_udp_smallbuf, 4060)) > 0)
+      {
+	if (bytesread_udp == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok_r(m_udp_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
+	    if (socket_next != *socket) continue;
+	    else{
+		if (!strcmp (uid, "0")){
+		    fclose(m_udpinfo);
+		    return INKERNEL_SOCKET_FOUND;
+		}
+		else{
+		  fclose(m_udpinfo);
+		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		}
+	    }
+	  }
+      }
+    fclose(m_udpinfo);
 
-  if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-  memset(membuf,0, MEMBUF_SIZE);
-  if ( ( mudpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  fseek(mudpinfo,0,SEEK_SET);
-  errno = 0;
-  if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mudpinfo))
-    {
-      if (errno != 0) perror("fread udpinfo");
-    }
-  fclose(mudpinfo);
-  int i = 0;
-  char proc_sockstr[12];
-  proc_sockstr[0] = 1; //initialize
+//not found in /proc/net/udp, search in /proc/net/udp6
 
-  while(proc_sockstr[0] != 0)
-    {
-      memcpy(proc_sockstr, &membuf[220+128*i], 12);
-      if (strncmp(proc_sockstr, sockstr, sockstr_sz))
-        {
-          i++;
-          continue;
-        }
-      //else match
-      memcpy(&uid, &membuf[209+128*i],1);
-      free(membuf);
-      if (uid != '0')
-        {
-	  return INKERNEL_SOCKET_NOT_FOUND;
-        }
-      else return INKERNEL_SOCKET_FOUND;
-    }
-  //not found in /proc/net/tcp, search in /proc/net/tcp6
+    if ( ( m_udp6info = fopen ( UDP6INFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    m_udp6info_fd = fileno(m_udp6info);
 
-  memset(membuf,0, MEMBUF_SIZE);
-  if ( ( mudp6info = fopen ( UDP6INFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  fseek(mudp6info,0,SEEK_SET);
-  errno = 0;
-  if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mudp6info))
-    {
-      if (errno != 0) perror("fread tcpinfo");
-    }
-  fclose(mudp6info);
-  i = 0;
-  proc_sockstr[0] = 1;
-  while(proc_sockstr[0] != 0)
-    {
-      memcpy(proc_sockstr, &membuf[284+171*i], 12);
-      if (strncmp(proc_sockstr, sockstr, sockstr_sz))
-        {
-          i++;
-          continue;
-        }
-      //else match
-      memcpy(&uid, &membuf[273+171*i],1);
-      free(membuf);
-      if (uid != '0')
-        {
-	  return INKERNEL_SOCKET_NOT_FOUND;
-        }
-      else return INKERNEL_SOCKET_FOUND;
-    }
-  return INKERNEL_SOCKET_NOT_FOUND;
-}
+    memset(m_udp6_smallbuf,0, 4096);
+    while ((bytesread_udp6 = read(m_udp6info_fd, m_udp6_smallbuf, 4060)) > 0)
+      {
+	if (bytesread_udp6 == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok_r(m_udp6_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
+	    if (socket_next != *socket) continue;
+	    else{
+		if (!strcmp (uid, "0")){
+		    fclose(m_udp6info);
+		    return INKERNEL_SOCKET_FOUND;
+		}
+		else{
+		  fclose(m_udp6info);
+		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		}
+	    }
+	  }
+      }
+    fclose(m_udp6info);
+    return INKERNEL_SOCKET_NOT_FOUND;
+ }
 
 
 int socket_check_kernel_tcp(const long *socket)
 {
-  //sometimes kernel sockets have inode numbers and are indistinguishable from user sockets.
-  //The ony diffrnc is they have uid=0 (but so are root's)
-  //rescan /proc/net to see if this socket might be kernel's or (root's)
+//The only way to distinguish kernel sockets is that they have inode=0 and uid=0
+//But regular process's sockets sometimes also have inode=0 (I don't know why)
+//+ root's sockets have uid == 0
+//So we just assume that if inode==0 and uid==0 - it's a kernel socket
 
-  char sockstr[32];
-  int sockstr_sz;
+    int bytesread_tcp,bytesread_tcp6;
+    char newline[2] = {'\n','\0'};
+    char uid[2] = {'0','\0'};
+    long socket_next;
+    char *token, *lasts;
+    FILE *m_tcpinfo, *m_tcp6info;
+    int m_tcpinfo_fd, m_tcp6info_fd;
+    char m_tcp_smallbuf[4096], m_tcp6_smallbuf[4096];
 
-  sprintf(sockstr,"%ld", *socket);
-  //add space to the end of string for easier strcmp
-  sockstr_sz = strlen(sockstr);
-  sockstr[sockstr_sz] = 32;
-  sockstr[sockstr_sz+1] = 0;
+    if ( ( m_tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    m_tcpinfo_fd = fileno(m_tcpinfo);
 
-  char uid;
-  FILE *mtcpinfo, *mtcp6info;
-  char * membuf;
-  int bytesread;
+    memset(m_tcp_smallbuf,0, 4096);
+    while ((bytesread_tcp = read(m_tcpinfo_fd, m_tcp_smallbuf, 4060)) > 0)
+      {
+	if (bytesread_tcp == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok_r(m_tcp_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
+	    if (socket_next != *socket) continue;
+	    else{
+		if (!strcmp (uid, "0")){
+		    fclose(m_tcpinfo);
+		    return INKERNEL_SOCKET_FOUND;
+		}
+		else{
+		  fclose(m_tcpinfo);
+		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		}
+	    }
+	  }
+      }
+    fclose(m_tcpinfo);
 
-  if ((membuf=(char*)malloc(MEMBUF_SIZE)) == NULL) perror("malloc");
-  memset(membuf,0, MEMBUF_SIZE);
-  if ( ( mtcpinfo = fopen ( TCPINFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  fseek(mtcpinfo,0,SEEK_SET);
-  errno = 0;
-  if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mtcpinfo))
-    {
-      if (errno != 0) perror("fread tcpinfo");
-    }
-  fclose(mtcpinfo);
-  int i = 0;
-  char proc_sockstr[12];
-  proc_sockstr[0] = 1; //initialize
+//not found in /proc/net/tcp, search in /proc/net/tcp6
 
-  while(proc_sockstr[0] != 0)
-    {
-      memcpy(proc_sockstr, &membuf[165+150*i+76], 12);
-      if (strncmp(proc_sockstr, sockstr, sockstr_sz))
-        {
-          i++;
-          continue;
-        }
-      //else match
-      memcpy(&uid, &membuf[230+150*i],1);
-      free(membuf);
-      if (uid != '0')
-        {
-	  return   INKERNEL_SOCKET_NOT_FOUND;
-        }
-      else return INKERNEL_SOCKET_FOUND;
-    }
-  //not found in /proc/net/tcp, search in /proc/net/tcp6
+    if ( ( m_tcp6info = fopen ( TCP6INFO, "r" ) ) == NULL )
+      {
+	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (PROCFS_ERROR);
+      }
+    m_tcp6info_fd = fileno(m_tcp6info);
 
-  memset(membuf,0, MEMBUF_SIZE);
-  if ( ( mtcp6info = fopen ( TCP6INFO, "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return PROCFS_ERROR;
-    }
-  fseek(mtcp6info,0,SEEK_SET);
-  errno = 0;
-  if (bytesread = fread(membuf, sizeof(char), MEMBUF_SIZE , mtcp6info))
-    {
-      if (errno != 0) perror("fread tcpinfo");
-    }
-  fclose(mtcp6info);
-  i = 0;
-  proc_sockstr[0] = 1;
-  while(proc_sockstr[0] != 0)
-    {
-      memcpy(proc_sockstr, &membuf[284+171*i], 12);
-      if (strncmp(proc_sockstr, sockstr, sockstr_sz))
-        {
-          i++;
-          continue;
-        }
-      //else match
-      memcpy(&uid, &membuf[273+171*i],1);
-      free(membuf);
-      if (uid != '0')
-        {
-	  return   INKERNEL_SOCKET_NOT_FOUND;
-        }
-      else return INKERNEL_SOCKET_FOUND;
-    }
-  return   INKERNEL_SOCKET_NOT_FOUND;
-}
+    memset(m_tcp6_smallbuf,0, 4096);
+    while ((bytesread_tcp6 = read(m_tcp6info_fd, m_tcp6_smallbuf, 4060)) > 0)
+      {
+	if (bytesread_tcp6 == -1)
+	  {
+	    perror ("read");
+	    return -1;
+	  }
+	token = strtok_r(m_tcp6_smallbuf, newline, &lasts); //skip the first line (column headers)
+	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
+	  {
+	    //take a line until EOF
+	    sscanf(token, "%*s %*s %*s %*s %*s %*s %*s %s %*s %ld", uid, &socket_next);
+	    if (socket_next != *socket) continue;
+	    else{
+		if (!strcmp (uid, "0")){
+		    fclose(m_tcp6info);
+		    return INKERNEL_SOCKET_FOUND;
+		}
+		else{
+		  fclose(m_tcp6info);
+		  return SOCKET_FOUND_BUT_NOT_INKERNEL;
+		}
+	    }
+	  }
+      }
+    fclose(m_tcp6info);
+    return INKERNEL_SOCKET_NOT_FOUND;
+ }
 
 
 //NEEDED BY THE TEST SUITE, don't comment out yetfind in procfs which socket corresponds to source port
