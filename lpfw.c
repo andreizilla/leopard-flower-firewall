@@ -9,6 +9,7 @@
 #include <sys/time.h>
 #include <sys/capability.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -4595,6 +4596,12 @@ void chown_and_setgid_frontend()
 
 int main ( int argc, char *argv[] )
 {
+    struct rlimit core_limit;
+    core_limit.rlim_cur = RLIM_INFINITY;
+    core_limit.rlim_max = RLIM_INFINITY;
+    if(setrlimit(RLIMIT_CORE, &core_limit) < 0){
+    printf("setrlimit: %s\nWarning: core dumps may be truncated or non-existant\n", strerror(errno));}
+
 
 #ifndef WITHOUT_SYSVIPC
   //argv[0] is the  path of the executable
@@ -4616,6 +4623,9 @@ int main ( int argc, char *argv[] )
   capabilities_setup();
   setuid_root();
   setgid_lpfwuser();
+  if (prctl(PR_SET_DUMPABLE, 1) == -1){
+      perror("prctl SET_DUMPABLE");
+  }
   setup_signal_handlers();
 
 #ifndef WITHOUT_SYSVIPC
