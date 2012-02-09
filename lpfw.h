@@ -3,11 +3,11 @@
 
 #include "common/defines.h"
 #include "common/includes.h"
+#include <stdio.h>
 
 extern char ownpath[PATHSIZE];
 extern char owndir[PATHSIZE];
 
-extern msg_struct msg_d2f;
 extern msg_struct msg_f2d;
 extern msg_struct msg_d2fdel;
 extern msg_struct msg_d2flist;

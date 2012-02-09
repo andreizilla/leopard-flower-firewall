@@ -2,8 +2,11 @@ DESTDIR = ./
 DEBUG =
 GCCFLAGS = -g
 SOURCES 	=	lpfw.c \
+			lpfw.h \
 			msgq.c \
+			msgq.h \
 			test.c \
+			test.h \
 			sha512/sha.c \
 			argtable/arg_end.c \
 			argtable/arg_file.c \

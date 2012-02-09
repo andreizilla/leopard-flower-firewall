@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <sys/types.h> //for ino_t
 #include <dirent.h> //for DIR*
+#include <netinet/ip.h> //for INET_ADDRSTRLEN
+
 
 
 typedef char mbool;
@@ -40,21 +42,14 @@ typedef struct m_dlist
   unsigned char first_instance; //TRUE for a first instance of an app or a parent process
   //sha must be a uchar, otherwise if it's just char, printf "%x" will promote it to int and cause a lot of pain, SIGV
   unsigned char sha[65]; //sha512sum digest
-  unsigned long long stime; //obsolete: start time of the process
+  unsigned long long stime; // start time of the process
   ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
   off_t exesize; //executable's size
-  char cpuhog; //flag to show that ann app generates too many new connections and thus lpfw uses certain workarounds to decrease CPU consumption
   struct m_dlist *prev; //previous element in dlist
   struct m_dlist *next; // next element in dlist
   int *sockets_cache;//pointer to 2D array of cache
   DIR *dirstream; //a constantly open stream to /proc/PID/fd
   char pidfdpath[32];
-  int ordinal_number; //each rule gets assigned a consecutive number
-  //traffic counters
-  ulong out_allow_counter;
-  ulong out_block_counter;
-  ulong in_allow_counter;
-  ulong in_block_counter;
 } dlist;
 
 //structures used in msgq for communication daemon<>frontend
@@ -65,8 +60,23 @@ typedef struct
   dlist item;
 } msg_struct;
 
-//this structure is populated when invoking lpfw --cli
+typedef struct
+{
+    int command;
+    char path[PATHSIZE]; //path to executable
+    char pid[PIDLENGTH]; //its pid (or IP address for kernel processes)
+    char addr[INET_ADDRSTRLEN];
+    int sport;
+    int dport;
+} d2f_item;
 
+typedef struct
+{
+    long type;
+    d2f_item item;
+} d2f_msg;
+
+//this structure is populated when invoking lpfw --cli
 typedef struct
 {
   uid_t uid;

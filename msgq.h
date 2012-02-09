@@ -1,8 +1,11 @@
 #ifndef MSGQ_H
 #define MSGQ_H
 
-int fe_ask_out ( char*, char*, unsigned long long* );
-int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
+#include <stdio.h>
+
+int fe_ask_out ( char*, char*, unsigned long long* , char*, int*, int*);
+int fe_ask_in(const char *path, const char *pid, const unsigned long long *stime, const char *ipaddr,
+	      const int *sport, const int *dport);
 int fe_list();
 void init_msgq();
 void* unit_test_thread(void *);

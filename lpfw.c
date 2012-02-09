@@ -1069,7 +1069,6 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
         }
       nfmark_count++;
     }
-  temp->ordinal_number = ++rule_ordinal_count;
   temp->first_instance = first_instance; //obsolete member,can be purged
   if (temp->is_active && strcmp(temp->path, KERNEL_PROCESS))
     {
@@ -1177,7 +1176,6 @@ int socket_cache_in_search(const long *socket, char *path, char *pid, int *nfmar
               strcpy(pid, temp->pid);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
 	      *nfmark_to_set_in = temp->nfmark_out;
-              rule_ordinal_in = temp->ordinal_number;
               pthread_mutex_unlock(&dlist_mutex);
               return retval;
             }
@@ -1211,8 +1209,7 @@ int socket_cache_out_search(const long *socket, char *path, char *pid, int *nfma
               strcpy(pid, temp->pid);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
 	      *nfmark_to_set_out = temp->nfmark_out;
-              rule_ordinal_out = temp->ordinal_number;
-              pthread_mutex_unlock(&dlist_mutex);
+	      pthread_mutex_unlock(&dlist_mutex);
               return retval;
             }
           i++;
@@ -3257,7 +3254,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	      }
 	      else
 	      {
-		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
+		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, &sport_hostbo, &dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
 	      }
 	  }
       break;
@@ -3297,7 +3294,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
 	      }
 	      else
 	      {
-		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, sport_hostbo, dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
+		  verdict = fe_active_flag_get() ? fe_ask_in(path,pid,&starttime, saddr, &sport_hostbo, &dport_hostbo ) : FRONTEND_NOT_LAUNCHED;
 	      }
 	  }
       break;
@@ -3404,7 +3401,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
               verdict = FRONTEND_BUSY;
               break;
             }
-          else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime) : FRONTEND_NOT_LAUNCHED;
+	  else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime, daddr, 0,0) : FRONTEND_NOT_LAUNCHED;
         }
       break;
     default:
@@ -3531,7 +3528,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	  }
 	  else
 	  {
-	  verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime)
+	  verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime, daddr, &srcudp, &dstudp)
 		      : FRONTEND_NOT_LAUNCHED;
 	  }
       }
@@ -3657,7 +3654,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	}
 	else
 	{
-	    verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime)
+	    verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&starttime, daddr, &srctcp, &dsttcp)
 			: FRONTEND_NOT_LAUNCHED;
 	}
     }

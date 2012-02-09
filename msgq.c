@@ -590,6 +590,7 @@ void init_msgq()
 }
 
 //obsolete func
+/*
 int notify_frontend(int command, char *path, char *pid, unsigned long long stime)
 {
 
@@ -617,9 +618,10 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
       return -1;
     }
 }
+*/
 
 //Ask frontend
-int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
+int  fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, int *sport, int*dport)
 {
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
   if (awaiting_reply_from_fe)
@@ -634,10 +636,16 @@ int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
   sent_to_fe_struct.stime = *stime;
 
   //prepare a msg and send it to frontend
-  strcpy(msg_d2f.item.path, path);
-  strcpy(msg_d2f.item.pid, pid);
-  msg_d2f.item.command = D2FCOMM_ASK_OUT;
-  if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
+  d2f_msg msg;
+  strcpy(msg.item.path, path);
+  strcpy(msg.item.pid, pid);
+  strcpy(msg.item.addr, daddr);
+  msg.item.sport = *sport;
+  msg.item.dport = *dport;
+  msg.item.command = D2FCOMM_ASK_OUT;
+  msg.type = 1;
+
+  if (msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
@@ -647,7 +655,8 @@ int  fe_ask_out(char *path, char *pid, unsigned long long *stime)
 }
 
 //Ask frontend if new incoming connection should be allowed
-int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport)
+int fe_ask_in(const char *path, const char *pid, const unsigned long long *stime, const char *saddr,
+	      const int *sport, const int *dport)
 {
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
   if (awaiting_reply_from_fe)
@@ -662,15 +671,16 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
   sent_to_fe_struct.stime = *stime;
 
   //prepare a msg and send it to frontend
-  strcpy(msg_d2f.item.path, path);
-  strcpy(msg_d2f.item.pid, pid);
-  msg_d2f.item.command = D2FCOMM_ASK_IN;
-  //the following fields of struct will be simply re-used. Not nice, but what's wrong with re-cycling?
-  strncpy(msg_d2f.item.perms, ipaddr, sizeof(msg_d2f.item.perms));
-  msg_d2f.item.stime = sport;
-  msg_d2f.item.inode = dport;
+  d2f_msg msg;
+  strcpy(msg.item.path, path);
+  strcpy(msg.item.pid, pid);
+  strcpy(msg.item.addr, saddr);
+  msg.item.sport = *sport;
+  msg.item.dport = *dport;
+  msg.item.command = D2FCOMM_ASK_IN;
+  msg.type = 1;
 
-  if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
+  if (msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
@@ -681,8 +691,11 @@ int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, in
 
 int fe_list()
 {
-  msg_d2f.item.command = D2FCOMM_LIST;
-  if (msgsnd(mqd_d2f, &msg_d2f, sizeof (msg_struct), IPC_NOWAIT) == -1)
+  d2f_msg msg;
+  memset(&msg, 0, sizeof(msg));
+  msg.item.command = D2FCOMM_LIST;
+  msg.type = 1;
+  if (msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }

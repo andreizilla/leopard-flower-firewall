@@ -115,15 +115,16 @@ void* d2fthread(void * ptr) {
 	exit(0);
     };
 
-    msg_struct msg_d2f;
+    d2f_msg msg;
     char message[MAX_LINE_LENGTH];
     while (1)
     {
 	memset(message, 0, sizeof(message));
-	if (msgrcv(mqd_d2f, &msg_d2f, sizeof (msg_struct), 0, 0) == -1) {
+	memset(&msg, 0, sizeof(msg));
+	if (msgrcv(mqd_d2f, &msg, sizeof (msg.item), 0, 0) == -1) {
 	    printf("msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	};
-	switch (msg_d2f.item.command) {
+	switch (msg.item.command) {
 	    case D2FCOMM_ASK_OUT:
 		strcpy(message, "D2FCOMM_ASK_OUT ");
 		break;
@@ -137,11 +138,18 @@ void* d2fthread(void * ptr) {
 		printf("Received an invalid command. Please report %s,%d\n",__FILE__, __LINE__);
 		break;
 	}
-	strcat (message, msg_d2f.item.path);
+	strcat (message, msg.item.path);
 	strcat (message, " ");
-	strcat (message, msg_d2f.item.pid);
+	strcat (message, msg.item.pid);
 	strcat (message, " ");
-	strcat (message, msg_d2f.item.perms);
+	strcat (message, msg.item.addr);
+	strcat (message, " ");
+	char port[16];
+	sprintf(port, "%d", msg.item.sport);
+	strcat (message, port);
+	strcat (message, " ");
+	sprintf(port, "%d", msg.item.dport);
+	strcat (message, port);
 	send_message(message);
     }
 }

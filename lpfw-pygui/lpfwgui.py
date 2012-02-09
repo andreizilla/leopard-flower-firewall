@@ -22,7 +22,7 @@ F2DCOMM_UNREG = 9
 
 #global vars
 proc = 0
-path=pid=perms=0
+path=pid=addr=sport=dport=0
 ruleslock = 0
 
 def send_to_backend(message):
@@ -135,7 +135,9 @@ def stdoutthread(stdout):
     "receive commands from backend"
     global path
     global pid
-    global perms
+    global addr
+    global sport
+    global dport
     while 1:
         message = stdout.readline() #readline needs \n to unblock, it doesnt clear that \n though        
         msglist = []
@@ -167,12 +169,15 @@ def stdoutthread(stdout):
         elif msglist[0] == "D2FCOMM_ASK_OUT":
             path = msglist[1]
             pid = msglist[2]
+            addr = msglist[3]
+            dport = msglist[5]
             print "calling emitaskuserOUT"
             window.emitAskUserOUT()
         elif msglist[0] == "D2FCOMM_ASK_IN":
             path = msglist[1]
             pid = msglist[2]
-            perms = msglist[3]
+            addr = msglist[3]
+            sport = msglist[5]
             print "calling emitaskuserIN"
             window.emitAskUserIN()            
 
@@ -321,18 +326,21 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         print "In askUserOut"
         global path
         global pid
+        global addr
+        global dport
         dialogOut.label_name.setText(path)
-        dialogOut.label_pid.setText(pid)
+        dialogOut.label_ip.setText(addr)
+        dialogOut.label_port.setText(dport)
         dialogOut.show()
         
     def askUserIN(self):
         print "In askUserIn"
         global path
-        global pid
-        global perms
+        global addr
+        global dport
         dialogIn.label_name.setText(path)
-        dialogIn.label_pid.setText(pid)
-        dialogIn.label_ip.setText(str(perms))
+        dialogIn.label_port.setText(dport)
+        dialogIn.label_ip.setText(str(addr))
         dialogIn.show()
         
     def rulesMenuTriggered(self):
