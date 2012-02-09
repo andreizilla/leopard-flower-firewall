@@ -154,15 +154,16 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
     pthread_mutex_unlock(&logstring_mutex); \
  
 
-int global_rules_filter( int direction, int protocol, int port, int verdict)
+int global_rules_filter(const int m_direction, const int protocol, const int port, const int verdict)
 {
+    int direction;
     if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
-    if (direction == DIRECTION_OUT)
+    if (m_direction == DIRECTION_OUT)
     {
 	if (protocol == PROTO_TCP) direction = TCP_OUT_ALLOW;
 	else if (protocol == PROTO_UDP) direction =  UDP_OUT_ALLOW;
     }
-    else if (direction = DIRECTION_IN)
+    else if (m_direction = DIRECTION_IN)
     {
 	if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
 	else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
