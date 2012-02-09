@@ -211,7 +211,7 @@ void* d2flistthread(void * ptr) {
 typedef struct
 {
     long type;
-    int ct_entries_export[CT_ENTRIES_EXPORT_MAX][5];
+    ulong ct_entries_export[CT_ENTRIES_EXPORT_MAX][5];
 } mymsg;
 
 void* d2ftrafficthread(void * ptr) {
@@ -238,26 +238,25 @@ void* d2ftrafficthread(void * ptr) {
 	    printf("msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    exit(0);
 	};
-
 	strcpy(message, "TRAFFIC ");
 
 	int i;
 	char int2str[16];
 	for (i=0; msg_d2ftraffic.ct_entries_export[i][0] != 0; ++i)
 	{
-	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][0]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][0]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][1]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][1]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][2]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][2]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][3]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][3]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%d", msg_d2ftraffic.ct_entries_export[i][4]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][4]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
 	}

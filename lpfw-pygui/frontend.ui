@@ -107,8 +107,22 @@
     <addaction name="separator"/>
     <addaction name="actionSave"/>
    </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>&amp;View</string>
+    </property>
+    <addaction name="separator"/>
+    <addaction name="actionProcess_ID"/>
+    <addaction name="actionPermission"/>
+    <addaction name="actionFull_path"/>
+    <addaction name="actionIN_allowed"/>
+    <addaction name="actionIN_denied"/>
+    <addaction name="actionOUT_allowed"/>
+    <addaction name="actionOUT_denied"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuRules"/>
+   <addaction name="menuView"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionExit">
@@ -166,7 +180,89 @@
     <string>Preferences</string>
    </property>
   </action>
+  <action name="actionProcess_ID">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Process ID</string>
+   </property>
+  </action>
+  <action name="actionPermission">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>P&amp;ermission</string>
+   </property>
+  </action>
+  <action name="actionFull_path">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Full path</string>
+   </property>
+  </action>
+  <action name="actionIN_allowed">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>IN &amp;allowed</string>
+   </property>
+  </action>
+  <action name="actionIN_denied">
+   <property name="text">
+    <string>IN &amp;denied</string>
+   </property>
+  </action>
+  <action name="actionOUT_allowed">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>&amp;OUT allowed</string>
+   </property>
+  </action>
+  <action name="actionOUT_denied">
+   <property name="text">
+    <string>O&amp;UT denied</string>
+   </property>
+  </action>
  </widget>
  <resources/>
- <connections/>
+ <connections>
+  <connection>
+   <sender>actionProcess_ID</sender>
+   <signal>changed()</signal>
+   <receiver>actionProcess_ID</receiver>
+   <slot>toggle()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
 </ui>

@@ -127,9 +127,9 @@ int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZ
 tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 
 //this array is used internally by lpfw to
-int ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
+ulong ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
 //this array is built for export to frontend based on ct_entries
-int ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
+ulong ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 /*
   [0] nfmark (export[0])
   [1] bytes in allowed
