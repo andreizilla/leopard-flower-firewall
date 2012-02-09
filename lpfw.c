@@ -95,7 +95,7 @@ int fe_active_flag = 0;
 int fe_was_busy_in, fe_was_busy_out;
 
 //netfilter mark to be put on an ALLOWed packet
-int nfmark_to_set_out, nfmark_to_set_in;
+int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_to_set_in;
 int nfmark_to_delete_in, nfmark_to_delete_out;
 //numbers of rules to which current process belongs
 int rule_ordinal_out, rule_ordinal_in;
@@ -712,19 +712,19 @@ void* ct_delete_nfmark_thread ( void* ptr )
 
 int setmark_out_tcp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_tcp);
   nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 int setmark_out_udp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_udp);
   nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 int setmark_out_icmp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
-  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out_icmp);
   nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
@@ -1152,7 +1152,7 @@ void dlist_del ( char *path, char *pid )
   pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int socket_cache_in_search(const long *socket, char *path, char *pid)
+int socket_cache_in_search(const long *socket, char *path, char *pid, int *nfmark_to_set_in)
 {
   int i;
   int retval;
@@ -1174,7 +1174,7 @@ int socket_cache_in_search(const long *socket, char *path, char *pid)
               strcpy(path, temp->path);
               strcpy(pid, temp->pid);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
-              nfmark_to_set_in = temp->nfmark_out;
+	      *nfmark_to_set_in = temp->nfmark_out;
               rule_ordinal_in = temp->ordinal_number;
               pthread_mutex_unlock(&dlist_mutex);
               return retval;
@@ -1186,7 +1186,7 @@ int socket_cache_in_search(const long *socket, char *path, char *pid)
   return SOCKETS_CACHE_NOT_FOUND;
 }
 
-int socket_cache_out_search(const long *socket, char *path, char *pid)
+int socket_cache_out_search(const long *socket, char *path, char *pid, int *nfmark_to_set_out)
 {
   int i;
   int retval;
@@ -1208,7 +1208,7 @@ int socket_cache_out_search(const long *socket, char *path, char *pid)
               strcpy(path, temp->path);
               strcpy(pid, temp->pid);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
-              nfmark_to_set_out = temp->nfmark_out;
+	      *nfmark_to_set_out = temp->nfmark_out;
               rule_ordinal_out = temp->ordinal_number;
               pthread_mutex_unlock(&dlist_mutex);
               return retval;
@@ -2703,7 +2703,7 @@ endloop:
 int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_in_search(socket, path, pid);
+    retval = socket_cache_in_search(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -2730,7 +2730,7 @@ int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, c
 int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval;
-  retval = socket_cache_out_search(socket, path, pid);
+  retval = socket_cache_out_search(socket, path, pid, nfmark_to_set);
   if (retval != SOCKETS_CACHE_NOT_FOUND){
       M_PRINTF (MLOG_DEBUG2, "(cache)");
       return retval;
@@ -2753,7 +2753,7 @@ int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, 
 int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_out_search(socket, path, pid);
+    retval = socket_cache_in_search(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -2780,7 +2780,7 @@ int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, c
 int packet_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_out_search(socket, path, pid);
+    retval = socket_cache_out_search(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -3276,7 +3276,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       if (socket == 0){
 	  verdict = socket_check_kernel_tcp(&dport_hostbo);
 	  if (verdict == INKERNEL_SOCKET_FOUND) {
-	      verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+	      verdict = process_inkernel_socket(daddr, &nfmark_to_set_in);
 	  }
 	  else break;
       }
@@ -3393,7 +3393,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
     {
     case IPPROTO_ICMP:
       fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_icmp (&nfmark_to_set_out, path, pid, &stime );
+      verdict = packet_handle_icmp (&nfmark_to_set_out_icmp, path, pid, &stime );
       if (verdict  == PATH_IN_DLIST_NOT_FOUND)
         {
           if (fe_was_busy_out)
@@ -3508,14 +3508,14 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   if (socket_found == 0){
       verdict = socket_check_kernel_udp(&srcudp);
       if (verdict == INKERNEL_SOCKET_FOUND) {
-	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out_udp);
       }
       else {goto execute_verdict;}
   }
   else{
   //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_udp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
+  verdict = packet_handle_udp_out ( &socket_found, &nfmark_to_set_out_udp, path, pid, &starttime );
   }
 
       verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
@@ -3570,7 +3570,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
   else if (verdict < DENY_VERDICT_MAX)
   {
-      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out, ip->tot_len );
+      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out_udp, ip->tot_len );
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
       return 0;
   }
@@ -3634,14 +3634,14 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   if (socket_found == 0){
       verdict = socket_check_kernel_tcp(&srctcp);
       if (verdict == INKERNEL_SOCKET_FOUND) {
-	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out);
+	  verdict = process_inkernel_socket(daddr, &nfmark_to_set_out_tcp);
       }
       else {goto execute_verdict;}
   }
   else{
       //remember f/e's state before we process
       fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out, path, pid, &starttime );
+      verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out_tcp, path, pid, &starttime );
   }
 
     verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dsttcp, verdict);
@@ -3697,7 +3697,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
   else if (verdict < DENY_VERDICT_MAX)
   {
-      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out, ip->tot_len );
+      denied_traffic_add(DIRECTION_OUT, nfmark_to_set_out_tcp, ip->tot_len );
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
       return 0;
   }
