@@ -7,13 +7,11 @@
 extern char ownpath[PATHSIZE];
 extern char owndir[PATHSIZE];
 
-//type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
 extern msg_struct msg_d2f;
 extern msg_struct msg_f2d;
 extern msg_struct msg_d2fdel;
 extern msg_struct msg_d2flist;
 extern msg_struct_creds msg_creds;
-
 extern gid_t lpfwuser_gid;
 
 extern char logstring[PATHSIZE];

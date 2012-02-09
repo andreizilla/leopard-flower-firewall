@@ -78,9 +78,9 @@ pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread,
-conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread, frontend_poll_thread,
-nfq_gid_thread;
+pthread_t refresh_thr, nfq_in_thr, cache_build_thr, nfq_out_udp_thr, nfq_out_rest_thr,
+ct_dump_thr, ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, frontend_poll_thr,
+nfq_gid_thr;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
@@ -110,7 +110,7 @@ int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 
 struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
 struct nfct_handle *dummy_handle_delete, *dummy_handle_setmark_out, *dummy_handle_setmark_in;
-struct nfct_handle *setmark_handle_out, *setmark_handle_in;
+struct nfct_handle *setmark_handle_out_tcp, *setmark_handle_in, *setmark_handle_out_udp, *setmark_handle_out_icmp;
 
 int nfqfd_input, nfqfd_tcp, nfqfd_udp, nfqfd_rest, nfqfd_gid;
 
@@ -122,11 +122,9 @@ struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int nfmark_count = 0;
-
 int tcp_stats, udp_stats;
-int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE], tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
-
-
+int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE],
+tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 
 //this array is used internally by lpfw to
 int ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
@@ -153,7 +151,6 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex); \
  
-
 
 int global_rules_filter( int direction, int protocol, int port, int verdict)
 {
@@ -447,7 +444,6 @@ void * readstatsthread( void *ptr)
       old_tcp_stats = tcp_stats;
       old_udp_stats = udp_stats;
     }
-
 }
 
 //Both in and out conntrack entrien get deleted when process exits
@@ -474,7 +470,6 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
   ulong in_bytes, out_bytes;
   if ((mark = nfct_get_attr_u32(mct, ATTR_MARK)) == 0)
     {
-      //printf ("nfmark 0 detected \n");
       return NFCT_CB_CONTINUE;
     }
   out_bytes = nfct_get_attr_u32(mct, ATTR_ORIG_COUNTER_BYTES);
@@ -531,7 +526,7 @@ typedef struct
 
 
 //dump all conntrack entries every second, extract the traffic statistics and send it to frontend
-void * conntrackexporthread( void *ptr)
+void * ct_dump_thread( void *ptr)
 {
   u_int8_t family = AF_INET;
   struct nfct_handle *traffic_handle;
@@ -650,8 +645,8 @@ next:
     }
 }
 
-//Register callback that gets triggered when conntrack deletes entry. Then listen forever.
-void * conntrackdestroythread( void *ptr)
+//Register a hook that gets triggered whenever conntrack tries to destroy a connection
+void * ct_destroy_hook_thread( void *ptr)
 {
   struct nfct_handle *traffic_handle;
   if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL)
@@ -666,7 +661,7 @@ void * conntrackdestroythread( void *ptr)
   res = nfct_catch(traffic_handle); //the thread should block here
 }
 
-void* frontendpoll_thread ( void* ptr )
+void* frontend_poll_thread ( void* ptr )
 {
     capabilities_modify( CAP_KILL, CAP_EFFECTIVE, CAP_SET);
     while(1)
@@ -682,7 +677,7 @@ void* frontendpoll_thread ( void* ptr )
     }
 }
 //Register callback to delete nfmark and wait on condition to be triggered.
-void* conntrack_delete_thread ( void* ptr )
+void* ct_delete_nfmark_thread ( void* ptr )
 {
   u_int8_t family = AF_INET; //used by conntrack
   struct nfct_handle *deletemark_handle;
@@ -715,13 +710,24 @@ void* conntrack_delete_thread ( void* ptr )
 
 
 
-int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+int setmark_out_tcp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
   nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
-
+int setmark_out_udp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+{
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
+  return NFCT_CB_CONTINUE;
+}
+int setmark_out_icmp (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+{
+  nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
+  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
+  return NFCT_CB_CONTINUE;
+}
 int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   nfmark_to_set_in += NFMARK_DELTA;
@@ -765,7 +771,15 @@ void  init_conntrack()
     {
       perror("nfct_open");
     }
-  if ((setmark_handle_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+  if ((setmark_handle_out_tcp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+    {
+      perror("nfct_open");
+    }
+  if ((setmark_handle_out_udp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+    {
+      perror("nfct_open");
+    }
+  if ((setmark_handle_out_icmp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
       perror("nfct_open");
     }
@@ -773,7 +787,15 @@ void  init_conntrack()
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(setmark_handle_out, NFCT_T_ALL, setmark_out, NULL) == -1))
+  if ((nfct_callback_register(setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL) == -1))
+    {
+      perror("cb_reg");
+    }
+  if ((nfct_callback_register(setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL) == -1))
+    {
+      perror("cb_reg");
+    }
+  if ((nfct_callback_register(setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -1199,7 +1221,7 @@ int socket_cache_out_search(const long *socket, char *path, char *pid)
 }
 
 //scan active /proc/pid entries (ignoring kernel processes) and build a correlation of PIDs to sockets
-void* cachebuildthread ( void *pid )
+void* cache_build_thread ( void *pid )
 {
   DIR *mdir;
   struct dirent *m_dirent;
@@ -1264,7 +1286,7 @@ void* cachebuildthread ( void *pid )
     }
 }
 
-void* nfqoutudpthread ( void *ptr )
+void* nfq_out_udp_thread ( void *ptr )
 {
   ptr = 0;
   //endless loop of receiving packets and calling a handler on each packet
@@ -1276,7 +1298,7 @@ void* nfqoutudpthread ( void *ptr )
     }
 }
 
-void* nfqgidthread ( void *ptr )
+void* nfq_gid_thread ( void *ptr )
 {
   ptr = 0;
   //endless loop of receiving packets and calling a handler on each packet
@@ -1289,7 +1311,7 @@ void* nfqgidthread ( void *ptr )
 }
 
 
-void* nfqoutrestthread ( void *ptr )
+void* nfq_out_rest_thread ( void *ptr )
 {
   ptr = 0;
   //endless loop of receiving packets and calling a handler on each packet
@@ -1301,7 +1323,7 @@ void* nfqoutrestthread ( void *ptr )
     }
 }
 
-void* nfqinputthread ( void *ptr )
+void* nfq_in_thr ( void *ptr )
 {
   ptr = 0;
 //endless loop of receiving packets and calling a handler on each packet
@@ -1313,7 +1335,7 @@ void* nfqinputthread ( void *ptr )
     }
 }
 
-void* rulesdumpthread ( void *ptr )
+void* rules_dump_thread ( void *ptr )
 {
   ptr = 0;
   mkfifo ( "/tmp/lpfwrulesdump.fifo", 0777 );
@@ -1367,7 +1389,7 @@ dump:
 }
 
 //scan procfs and remove/mark inactive in dlist those apps that are no longer running
-void* refreshthread ( void* ptr )
+void* refresh_thread ( void* ptr )
 {
   dlist *rule, *prev, *temp_rule;
   ptr = 0;     //to prevent gcc warnings of unused variable
@@ -3384,7 +3406,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
       // nfct_set_attr_u16(ct_out_icmp, ATTR_PORT_DST, dport_netbyteorder) ;
 
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
-      while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out_icmp) == -1)
+      while (nfct_query(setmark_handle_out_icmp, NFCT_Q_GET, ct_out_icmp) == -1)
         {
           if (errno == EBUSY)
             {
@@ -3498,7 +3520,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       nfct_set_attr_u16(ct_out_udp, ATTR_PORT_DST, dport_netbyteorder) ;
 
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
-      while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out_udp) == -1)
+      while (nfct_query(setmark_handle_out_udp, NFCT_Q_GET, ct_out_udp) == -1)
         {
           if (errno == EBUSY)
             {
@@ -3622,7 +3644,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
       nfct_set_attr_u16(ct_out_tcp, ATTR_PORT_DST, dport_netbyteorder) ;
 
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
-      while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out_tcp) == -1)
+      while (nfct_query(setmark_handle_out_tcp, NFCT_Q_GET, ct_out_tcp) == -1)
 	{
 	  if (errno == EBUSY)
 	    {
@@ -4616,17 +4638,17 @@ int main ( int argc, char *argv[] )
   rules_load();
   open_proc_net_files();
 
-  if (pthread_create ( &refresh_thread, NULL, refreshthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &cachebuild_thread, NULL, cachebuildthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &conntrack_export_thread, NULL, conntrackexporthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &conntrackdestroy_thread, NULL, conntrackdestroythread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &ct_del_thread, NULL, conntrack_delete_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &frontend_poll_thread, NULL, frontendpoll_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &refresh_thr, NULL, refresh_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &cache_build_thr, NULL, cache_build_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_dump_thr, NULL, ct_dump_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_destroy_hook_thr, NULL, ct_destroy_hook_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_delete_nfmark_thr, NULL, ct_delete_nfmark_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &frontend_poll_thr, NULL, frontend_poll_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
-  if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &nfqout_rest_thread, NULL, nfqoutrestthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &nfq_gid_thread, NULL, nfqgidthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_in_thr, NULL, nfq_in_thr, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_out_udp_thr, NULL, nfq_out_udp_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_out_rest_thr, NULL, nfq_out_rest_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_gid_thr, NULL, nfq_gid_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 
 #ifdef DEBUG
   pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );

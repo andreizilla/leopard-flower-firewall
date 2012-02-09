@@ -5,7 +5,7 @@ int fe_ask_out ( char*, char*, unsigned long long* );
 int fe_ask_in(char *path, char *pid, unsigned long long *stime, char *ipaddr, int sport, int dport);
 int fe_list();
 void init_msgq();
-void* run_tests(void *);
+void* unit_test_thread(void *);
 int sha512_stream ( FILE *stream, void *resblock );
 
 extern int awaiting_reply_from_fe;

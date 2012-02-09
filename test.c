@@ -154,7 +154,7 @@ int test2 ()
 }
 
 
-void * run_tests(void *ptr)
+void * unit_test_thread(void *ptr)
 {
   int test1retval, test2retval;
   //let all other threads in main initialize
