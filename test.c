@@ -37,7 +37,7 @@ FILE *test_log_stream;
 
 
 
-int test1()
+int test_refresh_thread()
 {
   //	Test if refresh_thread is working:
   //1. create a new process
@@ -104,7 +104,7 @@ int test1()
 }
 
 
-int test2 ()
+int test_send_tcp ()
 {
 
   //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
@@ -169,35 +169,94 @@ int test2 ()
     }
 }
 
+int test_send_udp ()
+{
+
+  //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
+  int sock;
+  struct sockaddr_in server;
+  const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
+    .sin_port = htons(48878)};
+
+  if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+    {
+      fprintf ( test_log_stream, "socket: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return -1;
+    }
+  if (bind(sock, ( const struct sockaddr *) &client, sizeof(client)) < 0)
+    {
+      fprintf ( test_log_stream, "bind: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return -1;
+    }
+
+  memset(&server, 0, sizeof(server));
+  server.sin_family = AF_INET;
+  server.sin_addr.s_addr = inet_addr("1.1.1.1");
+  server.sin_port = htons(1);
+  char buf[12];
+
+  if (sendto(sock, buf, sizeof(buf), 0, (struct sockaddr *) &server, sizeof(server)) < 0)
+    {
+      fprintf ( test_log_stream, "connect: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    }
+  sleep(1);
+
+  //now make sure it is our process who owns sport
+  long socket;
+  int port = 48878;
+  if ((socket = is_udp_port_in_cache(&port)) == -1)
+    {
+      fprintf ( test_log_stream, "is_udp_port_in_cache not found\n");
+      return -1;
+    }
+  char path[PATHSIZE];
+  char pid[PIDLENGTH];
+  char perms[PERMSLENGTH];
+  long long unsigned int stime;
+
+  if (socket_procpidfd_search ( &socket, path, pid, &stime ) != SOCKET_FOUND_IN_PROCPIDFD)
+  {
+      fprintf ( test_log_stream, "socket_procpidfd_search not found\n");
+      return -1;
+  }
+
+  close(sock);
+
+  int foundpid;
+  foundpid = atoi(pid);
+  if (getpid() != foundpid)
+    {
+      fprintf ( test_log_stream, "pids dont match \n");
+      return -1;
+    }
+  else
+    {
+      return 1;
+    }
+}
+
+
 
 void * unittest_thread(void *ptr)
 {
-  int test1retval, test2retval;
+  int retval;
   if ( ( test_log_stream = fopen ( test_log_path->filename[0], "w") ) == NULL )
     {
       perror ( "open testlog" );
     }
-  //let all other threads in main initialize
-  sleep(1);
-  test1retval = test1();
-  if (test1retval == 1)
-    {
-      fprintf(test_log_stream, "Test 1 passed \n");
-    }
-  else
-    {
-      fprintf(test_log_stream,"Test 1 FAILED \n");
-    }
 
-  test2retval = test2();
-  if (test2retval == 1)
-    {
-      fprintf(test_log_stream, "Test 2 passed \n");
-    }
-  else
-    {
-      fprintf(test_log_stream, "Test 2 FAILED \n");
-    }
+  retval = test_refresh_thread();
+  if (retval == 1){fprintf(test_log_stream, "Test 1 passed \n");}
+  else{fprintf(test_log_stream,"Test 1 FAILED \n");}
+
+  retval = test_send_tcp();
+  if (retval == 1){fprintf(test_log_stream, "Test 2 passed \n");}
+  else{fprintf(test_log_stream, "Test 2 FAILED \n");}
+
+  retval = test_send_udp();
+  if (retval == 1){fprintf(test_log_stream, "Test 3 passed \n");}
+  else{fprintf(test_log_stream, "Test 3 FAILED \n");}
+
 
   exit(0);
 }
