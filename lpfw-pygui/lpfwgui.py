@@ -1,8 +1,8 @@
 import sys, os, thread, time, string, threading, subprocess
-from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem
+from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont
 import resource
 import wingdbstub
-from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex
+from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect
 from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
@@ -426,14 +426,27 @@ class CustomDelegate (QStyledItemDelegate):
     def __init__ (self):
         QStyledItemDelegate.__init__(self)
     def paint (self, painter, option, index):
+        model = index.model()
         item = QStandardItem()
-        item = modelAll.item(index.row, index.column)
+        item = model.item(index.row(), index.column())
         text = item.text()
         if (len(text) > 6):
             # take only megabytes -->12<--345678
             mb = text[:len(text)-6]
-            painter.setPen (Qt.blue)
-            painter.drawText (0,0, mb) 
+            bytes = text[len(text)-6:]
+            painter.setPen (Qt.red)
+            painter.drawText (option.rect,Qt.AlignHCenter and Qt.AlignVCenter, mb)
+            painter.setPen (Qt.black)
+            rect = QRect()
+            rect = option.rect
+            rect.setX(rect.x()+8*(len(mb)))  
+            painter.drawText (rect, Qt.AlignHCenter and Qt.AlignVCenter, bytes)
+        else:
+            # painter.setPen (Qt.black)
+            #font = QFont("Arial",15)
+            #painter.setFont(font)
+            painter.drawText (option.rect, Qt.AlignHCenter and Qt.AlignVCenter, text)
+        
             
             
         
@@ -473,7 +486,11 @@ modelAll.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path
 modelActive = QStandardItemModel()
 modelActive.setHorizontalHeaderLabels(("Name","Process ID","Permissions","Full path","Incoming allowed","Outgoing allowed","Incoming denied","Outgoing denied"))
 window.tableView.setModel(modelAll)
-window.tableView.setItemDelegate(delegate)
+window.tableView.setItemDelegateForColumn(4,delegate)
+window.tableView.setItemDelegateForColumn(5,delegate)
+window.tableView.setItemDelegateForColumn(6,delegate)
+window.tableView.setItemDelegateForColumn(7,delegate)
+
 dialogOut = myDialogOut()
 dialogOut.setWindowTitle("Leopard Flower firewall")
 dialogIn = myDialogIn()
