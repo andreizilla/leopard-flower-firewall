@@ -8,6 +8,7 @@
 #include <sys/socket.h> //required for netfilter.h
 #include <sys/time.h>
 #include <sys/capability.h>
+#include <sys/prctl.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -32,13 +33,14 @@
 #include "version.h" //for version string during packaging
 #include "lpfw.h"
 #include "msgq.h"
+#include "test.h"
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in, *globalh_gid;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
-struct arg_file *rules_file, *pid_file, *log_file;
+struct arg_file *rules_file, *pid_file, *log_file, *test_log_path;
 struct arg_int *log_info, *log_traffic, *log_debug;
 
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
@@ -1391,6 +1393,7 @@ dump:
 //scan procfs and remove/mark inactive in dlist those apps that are no longer running
 void* refresh_thread ( void* ptr )
 {
+  prctl(PR_SET_NAME,"refresh",0,0,0);
   dlist *rule, *prev, *temp_rule;
   ptr = 0;     //to prevent gcc warnings of unused variable
   char proc_pid_exe[32] = "/proc/";
@@ -4007,6 +4010,7 @@ int parse_command_line(int argc, char* argv[])
 
 #ifdef DEBUG
   struct arg_lit *test = arg_lit0 ( NULL, "test", "Run unit test" );
+  test_log_path = arg_file0 ( NULL, "test-log-path", "<path to file>", "Where to print test log" );
 #endif
 
   struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
@@ -4018,7 +4022,7 @@ int parse_command_line(int argc, char* argv[])
 #endif
 		      log_info, log_traffic, log_debug, help, version,
 #ifdef DEBUG
-		      test,
+		      test, test_log_path,
 #endif
 		     end
 		     };
@@ -4053,6 +4057,14 @@ int parse_command_line(int argc, char* argv[])
   strcpy (pyguipath, owndir);
   strcat(pyguipath,"lpfwpygui");
   pygui_path->filename[0] = pyguipath;
+
+  char *testlogpath;
+  testlogpath = malloc(PATHSIZE -16);
+  strcpy (testlogpath, "/tmp/lpfw.testlog");
+  test_log_path->filename[0] = testlogpath;
+
+
+
 #endif
 
   * ( log_info->ival ) = 1;
@@ -4685,7 +4697,7 @@ int main ( int argc, char *argv[] )
 
   if (argc > 1 && !strcmp (argv[1], "--test"))
     {
-     //  pthread_create ( &unittest_thr, NULL, unittest_thread, NULL );
+       pthread_create ( &unittest_thr, NULL, unittest_thread, NULL );
     }
 #endif
 

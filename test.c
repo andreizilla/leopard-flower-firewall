@@ -8,6 +8,9 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <fcntl.h>
+#include "test.h"
+#include "argtable/argtable2.h"
+
 
 
 extern int ( *m_printf ) ( int loglevel, char *logstring);
@@ -16,6 +19,13 @@ extern pthread_mutex_t dlist_mutex;
 extern dlist *first_rule;
 extern char logstring[PATHSIZE];
 extern pthread_mutex_t logstring_mutex;
+extern int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime );
+extern long is_tcp_port_in_cache (const int *port);
+
+
+extern struct arg_file *test_log_path;
+FILE *test_log_stream;
+
 
 
 #define M_PRINTF(loglevel, ...) \
@@ -46,7 +56,7 @@ int test1()
 
   if ((childpid = fork()) == -1)
     {
-      M_PRINTF ( MLOG_DEBUG, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      fprintf ( test_log_stream, "fork: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return -1;
     }
   if (childpid == 0) //child
@@ -54,7 +64,7 @@ int test1()
       pid_t ownpid;
       ownpid = getpid();
       sprintf(pidstr, "%d", (int)ownpid);
-      printf ("Forked a child with PID: %s\n", pidstr);
+      fprintf (test_log_stream, "Forked a child with PID: %s\n", pidstr);
       //lookup own name
       char exelink[32] = "/proc/";
       strcat(exelink, pidstr);
@@ -63,12 +73,12 @@ int test1()
       //readlink fails if PID isn't running
       if ( readlink ( exelink, exepath, PATH_MAX ) == -1 )
         {
-          M_PRINTF ( MLOG_DEBUG, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	  fprintf ( test_log_stream, "readlink: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
           return -1;
         }
-      printf ("Own path is %s\n", exepath);
+      fprintf (test_log_stream, "Own path is %s\n", exepath);
       dlist_add(exepath, pidstr, DENY_ALWAYS, TRUE, "0", 0 , 0, 0, 0 );
-      return;
+      exit(0);
     }
   if (childpid > 0) //parent
     {
@@ -83,7 +93,7 @@ int test1()
           temp = temp->next;
           if (!strcmp(temp->pid, pidstr))
             {
-              printf("PID is still in dlist\n");
+	      fprintf(test_log_stream, "PID is still in dlist\n");
               pthread_mutex_unlock(&dlist_mutex);
               return -1;
             }
@@ -101,20 +111,16 @@ int test2 ()
   int sock;
   struct sockaddr_in server;
   const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
-    .sin_port = htons(48879)
-              };
-
-
-
+    .sin_port = htons(48879)};
 
   if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
     {
-      strerror(errno);
+      fprintf ( test_log_stream, "socket: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return -1;
     }
   if (bind(sock, ( const struct sockaddr *) &client, sizeof(client)) < 0)
     {
-      strerror(errno);
+      fprintf ( test_log_stream, "bind: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       return -1;
     }
 
@@ -125,58 +131,73 @@ int test2 ()
   fcntl(sock, F_SETFL, O_NONBLOCK);  //dont block on connect
   if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0)
     {
-      strerror(errno);
-      return -1;
+      fprintf ( test_log_stream, "connect: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
     }
+  sleep(1);
 
   //now make sure it is our process who owns sport
-  int socket;
+  long socket;
   int port = 48879;
-  if (port2socket_tcp(&port, &socket) != 0)
+  if ((socket = is_tcp_port_in_cache(&port)) == -1)
     {
+      fprintf ( test_log_stream, "is_tcp_port_in_cache not found\n");
       return -1;
     }
   char path[PATHSIZE];
   char pid[PIDLENGTH];
   char perms[PERMSLENGTH];
-  //if (socket_find_in_proc(&socket, path, pid, perms) != 0){return -1;}
+  long long unsigned int stime;
+
+  if (socket_procpidfd_search ( &socket, path, pid, &stime ) != SOCKET_FOUND_IN_PROCPIDFD)
+  {
+      fprintf ( test_log_stream, "socket_procpidfd_search not found\n");
+      return -1;
+  }
+
+  close(sock);
+
   int foundpid;
   foundpid = atoi(pid);
   if (getpid() != foundpid)
     {
+      fprintf ( test_log_stream, "pids dont match \n");
       return -1;
     }
   else
     {
       return 1;
     }
-  close(sock);
 }
 
 
-void * unit_test_thread(void *ptr)
+void * unittest_thread(void *ptr)
 {
   int test1retval, test2retval;
+  if ( ( test_log_stream = fopen ( test_log_path->filename[0], "w") ) == NULL )
+    {
+      perror ( "open testlog" );
+    }
   //let all other threads in main initialize
   sleep(1);
   test1retval = test1();
   if (test1retval == 1)
     {
-      printf("Test 1 passed \n");
+      fprintf(test_log_stream, "Test 1 passed \n");
     }
   else
     {
-      printf("Test 1 FAILED \n");
+      fprintf(test_log_stream,"Test 1 FAILED \n");
     }
 
   test2retval = test2();
   if (test2retval == 1)
     {
-      printf("Test 2 passed \n");
+      fprintf(test_log_stream, "Test 2 passed \n");
     }
   else
     {
-      printf("Test 2 FAILED \n");
+      fprintf(test_log_stream, "Test 2 FAILED \n");
     }
+
   exit(0);
 }
