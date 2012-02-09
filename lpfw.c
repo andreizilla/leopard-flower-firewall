@@ -3356,7 +3356,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     }
   else if (verdict < DENY_VERDICT_MAX)
   {
-      denied_traffic_add(DIRECTION_IN, nfmark_to_set_out, ip->tot_len );
+      denied_traffic_add(DIRECTION_IN, nfmark_to_set_in, ip->tot_len );
       nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
       return 0;
   }
