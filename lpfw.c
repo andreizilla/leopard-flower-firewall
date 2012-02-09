@@ -674,8 +674,8 @@ void* frontend_poll_thread ( void* ptr )
 	if (kill(fe_pid,0) != 0)
 	{
 	    M_PRINTF (MLOG_DEBUG, "kill: pid== %d %s,%s,%d\n", fe_pid, strerror ( errno ), __FILE__, __LINE__ );
-	    awaiting_reply_from_fe = FALSE;
 	    fe_active_flag_set(FALSE);
+	    awaiting_reply_from_fe = FALSE;
 	}
     }
 }
@@ -3523,7 +3523,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
       if (verdict == PATH_IN_DLIST_NOT_FOUND)
       {
-	  if (fe_was_busy_in)
+	  if (fe_was_busy_out)
 	  {
 	      verdict = FRONTEND_BUSY;
 	  }
@@ -3649,7 +3649,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
     if (verdict == PATH_IN_DLIST_NOT_FOUND)
     {
-	if (fe_was_busy_in)
+	if (fe_was_busy_out)
 	{
 	    verdict = FRONTEND_BUSY;
 	}
