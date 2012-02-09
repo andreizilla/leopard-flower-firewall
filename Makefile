@@ -18,6 +18,7 @@ SOURCES 	=	lpfw.c \
 ifeq ($(DESTDIR), ./)
     DESTDIR = $(shell pwd)
 endif
+
 all: lpfw install lpfwcli lpfwpygui
 
 lpfw: $(SOURCES)
@@ -34,11 +35,7 @@ debug: DESTDIR = $(shell pwd)
 debug: DEBUG = debug
 debug: lpfw install lpfwcli lpfwpygui
 
-install:
+install: dummy
+dummy: lpfw
 	cp lpfw $(DESTDIR)
-
-#lpfw2: $(SOURCES)
-#we link against our own -lnetfiler_conntrack library v. 0.9.1
-#during runtime we search our own directory first for .so files, hence -Wl,-rpath,./
-#UPDATE: no it's not fully broken, sometimes it works, sometimes it doesnt
-#	gcc $(LPFWSOURCES) $(GCCFLAGS) -lnetfilter_queue -L/sda/newrepo/libnetfilter_conntrack-0.9.1/src/.libs -lnetfilter_conntrack -lpthread -o lpfw -Wl,-rpath,./
+	touch dummy

@@ -21,5 +21,7 @@ debug: GCCFLAGS += -g -DDEBUG2 -DDEBUG -DDEBUG3
 debug: lpfwcli
 
 
-install:
+install: dummy
+dummy: lpfwcli
 	cp lpfwcli $(DESTDIR)
+	touch dummy
