@@ -6,6 +6,7 @@
 #include "errno.h"
 #include <string.h>
 #include <stdlib.h>
+#include <sys/resource.h>
 #include "../common/includes.h"
 
 
@@ -268,6 +269,12 @@ void* d2ftrafficthread(void * ptr) {
 
 int main ( int argc, char *argv[] )
 {    
+    struct rlimit core_limit;
+    core_limit.rlim_cur = RLIM_INFINITY;
+    core_limit.rlim_max = RLIM_INFINITY;
+    if(setrlimit(RLIMIT_CORE, &core_limit) < 0){
+    printf("setrlimit: %s\nWarning: core dumps may be truncated or non-existant\n", strerror(errno));}
+
     pthread_t f2d_thread, d2f_thread, d2flist_thread, d2fdel_thread, d2ftraffic_thread;
     if (pthread_create (&f2d_thread, NULL, f2dthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
     if (pthread_create (&d2f_thread, NULL, d2fthread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
