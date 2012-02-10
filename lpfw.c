@@ -2953,6 +2953,7 @@ void print_traffic_log(const int proto, const int direction, const char *ip, con
     case SOCKET_NOT_FOUND_IN_PROCPIDFD:
       strcat (m_logstring,  "(no process associated with packet) drop\n" );
       break;
+    case DSTPORT_NOT_FOUND_IN_PROC:
     case PORT_NOT_FOUND_IN_PROCNET:
       strcat (m_logstring,  "(no process associated with port) drop\n" );
       break;
@@ -2985,6 +2986,13 @@ void print_traffic_log(const int proto, const int direction, const char *ip, con
       break;
     case SRCPORT_NOT_FOUND_IN_PROC:
       strcat (m_logstring, "source port not found in procfs, drop\n" );
+      break;
+    case INKERNEL_IPADDRESS_NOT_IN_DLIST:
+      strcat (m_logstring, "(kernel process without a rule) drop\n" );
+      break;
+    default:
+      strcat (m_logstring, "unknown verdict detected " );
+      printf ("verdict No %d \n", verdict);
       break;
     }
   M_PRINTF(MLOG_TRAFFIC, "%s", m_logstring);
