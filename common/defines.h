@@ -18,6 +18,7 @@
 #define NFQNUM_OUTPUT_UDP 11222 //arbitrary number used for iptables rule
 #define NFQNUM_OUTPUT_REST 11223 //arbitrary number used for iptables rule
 #define NFQNUM_INPUT 11221
+#define NFQNUM_GID 22222
 #define MAX_LINE_LENGTH 1024 //max lc ength of a line in configfile/rulesfile
 #define DIGEST_SIZE 64
 #define TTYNAME 16

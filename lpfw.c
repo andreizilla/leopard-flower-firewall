@@ -34,7 +34,7 @@
 #include "msgq.h"
 
 //should be available globally to call nfq_close from sigterm handler
-struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in;
+struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in, *globalh_gid;
 
 //command line arguments available globally
 struct arg_str *ipc_method, *logging_facility, *frontend;
@@ -79,7 +79,8 @@ pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thread, nfqinput_thread, cachebuild_thread, nfqout_udp_thread, nfqout_rest_thread,
-conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread, frontend_poll_thread;
+conntrack_export_thread, conntrackdestroy_thread, read_stats_thread, ct_del_thread, frontend_poll_thread,
+nfq_gid_thread;
 
 #ifdef DEBUG
 pthread_t unittest_thread, rulesdump_thread;
@@ -111,8 +112,7 @@ struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
 struct nfct_handle *dummy_handle;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
-int nfqfd_input,
-nfqfd_tcp, nfqfd_udp, nfqfd_rest;
+int nfqfd_input, nfqfd_tcp, nfqfd_udp, nfqfd_rest, nfqfd_gid;
 
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -1266,9 +1266,20 @@ void* nfqoutudpthread ( void *ptr )
     {
       nfq_handle_packet ( globalh_out_udp, buf, rv );
     }
-
-
 }
+
+void* nfqgidthread ( void *ptr )
+{
+  ptr = 0;
+  //endless loop of receiving packets and calling a handler on each packet
+  int rv;
+  char buf[4096] __attribute__ ( ( aligned ) );
+  while ( ( rv = recv ( nfqfd_gid, buf, sizeof ( buf ), 0 ) ) && rv >= 0 )
+    {
+      nfq_handle_packet ( globalh_gid, buf, rv );
+    }
+}
+
 
 void* nfqoutrestthread ( void *ptr )
 {
@@ -1280,8 +1291,6 @@ void* nfqoutrestthread ( void *ptr )
     {
       nfq_handle_packet ( globalh_out_rest, buf, rv );
     }
-
-
 }
 
 void* nfqinputthread ( void *ptr )
@@ -3041,6 +3050,101 @@ int process_inkernel_socket(char *ipaddr, int *nfmark)
     return INKERNEL_IPADDRESS_NOT_IN_DLIST;
 }
 
+int  nfq_handle_gid ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
+{
+  struct iphdr *ip;
+  int id;
+  struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr ( ( struct nfq_data * ) nfad );
+  if ( ph ) id = ntohl ( ph->packet_id );
+  nfq_get_payload ( ( struct nfq_data * ) nfad, (char**)&ip );
+
+  char daddr[INET_ADDRSTRLEN], saddr[INET_ADDRSTRLEN];
+  inet_ntop(AF_INET, &(ip->daddr), daddr, INET_ADDRSTRLEN);
+  inet_ntop(AF_INET, &(ip->saddr), saddr, INET_ADDRSTRLEN);
+
+  //source and destination ports in host and net byte order
+  int sport_netbo, dport_netbo, sport_hostbo, dport_hostbo;
+  int proto;
+  int verdict;
+  switch ( ip->protocol )
+    {
+    case IPPROTO_TCP:
+      proto = PROTO_TCP;
+      // ihl is IP header length in 32bit words, multiply a word by 4 to get length in bytes
+      struct tcphdr *tcp;
+      tcp = ( struct tcphdr* ) ( (char*)ip + ( 4 * ip->ihl ) );
+      sport_netbo = tcp->source;
+      dport_netbo = tcp->dest;
+      sport_hostbo = ntohs ( tcp->source );
+      dport_hostbo = ntohs ( tcp->dest );
+      break;
+
+    case IPPROTO_UDP:
+      proto = PROTO_UDP;
+      struct udphdr *udp;
+      udp = ( struct udphdr * ) ( (char*)ip + ( 4 * ip->ihl ) );
+      sport_netbo = udp->source;
+      dport_netbo = udp->dest;
+      sport_hostbo = ntohs ( udp->source );
+      dport_hostbo = ntohs ( udp->dest );
+      break;
+
+    default:
+      M_PRINTF ( MLOG_INFO, "IN unsupported protocol detected No. %d (lookup in /usr/include/netinet/in.h)\n", ip->protocol );
+      M_PRINTF ( MLOG_INFO, "see FAQ on how to securely let this protocol use the internet \n" );
+    }
+
+  verdict = GID_MATCH_ALLOW;
+  //print_traffic_log(proto, DIRECTION_IN, saddr, sport_hostbo, dport_hostbo, path, pid, verdict);
+  if (verdict == GID_MATCH_ALLOW)
+    {
+      printf ("allowed gid match /n");
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_ACCEPT, 0, NULL );
+
+      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_DST, ip->daddr);
+      nfct_set_attr_u32(ct_in, ATTR_ORIG_IPV4_SRC, ip->saddr);
+      nfct_set_attr_u8 (ct_in, ATTR_L4PROTO, ip->protocol);
+      nfct_set_attr_u8 (ct_in, ATTR_L3PROTO, AF_INET);
+      nfct_set_attr_u16(ct_in, ATTR_PORT_SRC, sport_netbo);
+      nfct_set_attr_u16(ct_in, ATTR_PORT_DST, dport_netbo) ;
+
+	nfmark_to_set_in = 22222;
+      //EBUSY returned, when there's too much activity in conntrack. Requery the packet
+      while (nfct_query(setmark_handle_in, NFCT_Q_GET, ct_in) == -1)
+	{
+	  if (errno == EBUSY)
+	    {
+	      M_PRINTF ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	      break;
+	    }
+	  if (errno == EILSEQ)
+	    {
+	      M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	      break;
+	    }
+	  else
+	    {
+	      M_PRINTF ( MLOG_INFO, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	      break;
+	    }
+	}
+      return 0;
+    }
+  else if (verdict == GID_MATCH_DENY)
+  {
+      printf ("denied gid match /n");
+      denied_traffic_add(DIRECTION_IN, 22222, ip->tot_len );
+      nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+      return 0;
+  }
+  else
+  {
+  nfq_set_verdict ( ( struct nfq_q_handle * ) qh, id, NF_DROP, 0, NULL );
+  return 0;
+  }
+}
+
+
 
 //all INput traffic is processed here
 int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
@@ -3420,7 +3524,6 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   }
 }
 
-
 //this function is invoked each time a packet arrives to OUTPUT NFQUEUE
 int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
@@ -3512,23 +3615,23 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
       while (nfct_query(setmark_handle_out, NFCT_Q_GET, ct_out_tcp) == -1)
-        {
-          if (errno == EBUSY)
-            {
-              M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	{
+	  if (errno == EBUSY)
+	    {
+	      M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	      break;
-            }
-          if (errno == EILSEQ)
-            {
-              M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	    }
+	  if (errno == EILSEQ)
+	    {
+	      M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	      break;
-            }
-          else
-            {
-              M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-              break;
-            }
-        }
+	    }
+	  else
+	    {
+	      M_PRINTF ( MLOG_DEBUG, "nfct_query GET %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	      break;
+	    }
+	}
 
       return 0;
     }
@@ -3605,45 +3708,45 @@ void pidfile_check()
   if ( stat ( pid_file->filename[0], &m_stat ) == 0 )
     {
       if ( ( pidfd = fopen ( pid_file->filename[0], "r" ) ) == NULL )
-        {
-          M_PRINTF ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-          exit(0);
-        };
+	{
+	  M_PRINTF ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	  exit(0);
+	};
       fgets ( pidbuf, 8, pidfd );
       fclose ( pidfd );
       pidbuf[7] = 0;
       pid = atoi ( pidbuf );
       if ( pid > 0 )
-        {
-          if ( kill ( pid, 0 ) == 0 ) //PID is running
-            {
-              // check that this pid belongs to lpfw
-              strcpy ( procstring, "/proc/" );
-              strcat ( procstring, pidbuf );
-              strcat ( procstring, "/comm" );
-              if ( ( procfd = fopen ( procstring, "r" )) == NULL)
-                {
-                  M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-                  exit(0);
-                }
-              //let's replace 0x0A with 0x00
-              fgets ( procbuf, 19, procfd );
-              fclose(procfd);
-              ptr = strstr ( procbuf, srchstr );
-              *ptr = 0;
-              //compare the actual string, if found => carry on
-              if ( !strcmp ( "lpfw", procbuf ) )
-                {
-                  //make sure that the running instance is NOT out instance
-                  //(can happen when PID of previously crashed lpfw coincides with ours)
-                  if ( ( pid_t ) pid != getpid() )
-                    {
-                      M_PRINTF ( MLOG_INFO, "lpfw is already running\n" );
-                      die();
-                    }
-                }
-            }
-        }
+	{
+	  if ( kill ( pid, 0 ) == 0 ) //PID is running
+	    {
+	      // check that this pid belongs to lpfw
+	      strcpy ( procstring, "/proc/" );
+	      strcat ( procstring, pidbuf );
+	      strcat ( procstring, "/comm" );
+	      if ( ( procfd = fopen ( procstring, "r" )) == NULL)
+		{
+		  M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+		  exit(0);
+		}
+	      //let's replace 0x0A with 0x00
+	      fgets ( procbuf, 19, procfd );
+	      fclose(procfd);
+	      ptr = strstr ( procbuf, srchstr );
+	      *ptr = 0;
+	      //compare the actual string, if found => carry on
+	      if ( !strcmp ( "lpfw", procbuf ) )
+		{
+		  //make sure that the running instance is NOT out instance
+		  //(can happen when PID of previously crashed lpfw coincides with ours)
+		  if ( ( pid_t ) pid != getpid() )
+		    {
+		      M_PRINTF ( MLOG_INFO, "lpfw is already running\n" );
+		      die();
+		    }
+		}
+	    }
+	}
     }
   else
     {
@@ -3733,9 +3836,9 @@ int frontend_mode ( int argc, char *argv[] )
     {
       msg.creds.params[1][0] = cli_args; //first parm has the total number of parms for lpfwcli (itself excluding)
       for ( i=0; i<cli_args; ++i )
-        {
-          strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
-        }
+	{
+	  strncpy ( msg.creds.params[i+2], argv[2+i], 16 );
+	}
     }
   msg.creds.params[i+2][0] = 0; //the last parm should be 0
 
@@ -3824,9 +3927,9 @@ int parse_command_line(int argc, char* argv[])
   // Define argument table structs
   logging_facility = arg_str0 ( NULL, "logging-facility",
 #ifndef WITHOUT_SYSLOG
-                                "<file>,<stdout>,<syslog>"
+				"<file>,<stdout>,<syslog>"
 #else
-                                "<file>,<stdout>"
+				"<file>,<stdout>"
 #endif
 				, "Divert loggin to..." );
   rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
@@ -3853,12 +3956,12 @@ int parse_command_line(int argc, char* argv[])
 #ifndef WITHOUT_SYSVIPC
 		      cli_path, pygui_path,
 #endif
-                      log_info, log_traffic, log_debug, help, version,
+		      log_info, log_traffic, log_debug, help, version,
 #ifdef DEBUG
-                      test,
+		      test,
 #endif
 		     end
-                     };
+		     };
 
   // Set default values
   char *stdout_pointer = malloc(strlen("stdout")+1);
@@ -3911,16 +4014,16 @@ int parse_command_line(int argc, char* argv[])
   if ( nerrors == 0 )
     {
       if ( help->count == 1 )
-        {
-          printf ( "Leopard Flower:\n Syntax and help:\n" );
-          arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
-          exit (0);
-        }
+	{
+	  printf ( "Leopard Flower:\n Syntax and help:\n" );
+	  arg_print_glossary ( stdout, argtable, "%-43s %s\n" );
+	  exit (0);
+	}
       else if ( version->count == 1 )
-        {
-          printf ( "%s\n", VERSION );
-          exit (0);
-        }
+	{
+	  printf ( "%s\n", VERSION );
+	  exit (0);
+	}
     }/* --leave this for future debugging purposes
 	printf("\nArguments detected:\n");
 	printf("--ipc-method = %s \n", ipc_method->sval[0]);
@@ -4034,34 +4137,34 @@ void setgid_lpfwuser()
   if (!m_group)
     {
       if (errno == 0)
-        {
+	{
 	  printf("lpfwuser group does not exist, creating...\n");
-          if (system("groupadd lpfwuser") == -1)
-            {
-              printf("error in system(groupadd)\n");
-              return;
-            }
-          //get group id again after group creation
-          errno = 0;
-          m_group = getgrnam("lpfwuser");
-          if(!m_group)
-            {
-              if (errno == 0)
-                {
-                  printf ("lpfwuser group still doesn't exist even though we've just created it");
-                }
-              else
-                {
-                  perror ("getgrnam");
-                }
-            }
-          lpfwuser_gid = m_group->gr_gid;
-        }
+	  if (system("groupadd lpfwuser") == -1)
+	    {
+	      printf("error in system(groupadd)\n");
+	      return;
+	    }
+	  //get group id again after group creation
+	  errno = 0;
+	  m_group = getgrnam("lpfwuser");
+	  if(!m_group)
+	    {
+	      if (errno == 0)
+		{
+		  printf ("lpfwuser group still doesn't exist even though we've just created it");
+		}
+	      else
+		{
+		  perror ("getgrnam");
+		}
+	    }
+	  lpfwuser_gid = m_group->gr_gid;
+	}
       else
-        {
-          printf("Error in getgrnam\n");
-          perror ("getgrnam");
-        }
+	{
+	  printf("Error in getgrnam\n");
+	  perror ("getgrnam");
+	}
       return;
     }
   //when debugging, we add user who launches frontend to lpfwuser group, hence disable this check
@@ -4139,26 +4242,37 @@ void init_iptables()
     if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
     if ( system ( "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
     if ( system ( "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
     if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
+      }
+    if ( system ( "iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222" ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
     if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
     if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	exit (0);
       }
 
 
@@ -4302,7 +4416,38 @@ void init_nfq_handlers()
     M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
-
+    //---GID match rule
+    globalh_gid = nfq_open();
+    if ( !globalh_gid )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
+      }
+    if ( nfq_unbind_pf ( globalh_gid, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
+      }
+    if ( nfq_bind_pf ( globalh_gid, AF_INET ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
+      }
+    struct nfq_q_handle * globalqh_gid = nfq_create_queue ( globalh_gid, NFQNUM_GID, &nfq_handle_gid, NULL );
+    if ( !globalqh_gid )
+      {
+	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
+	exit (0);
+      }
+    //copy only 40 bytes of packet to userspace - just to extract tcp source field
+    if ( nfq_set_mode ( globalqh_gid, NFQNL_COPY_PACKET, 40 ) < 0 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
+      }
+    if ( nfq_set_queue_maxlen ( globalqh_gid, 30 ) == -1 )
+      {
+	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
+      }
+    nfqfd_gid = nfq_fd ( globalh_gid );
+    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+    //--------Done registering------------------
 
 }
 
@@ -4412,9 +4557,9 @@ int main ( int argc, char *argv[] )
   if ( argc >= 2 )
     {
       if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui"))
-        {
-          return frontend_mode ( argc, argv );
-        }
+	{
+	  return frontend_mode ( argc, argv );
+	}
     }
 #endif
 
@@ -4471,6 +4616,7 @@ int main ( int argc, char *argv[] )
   if (pthread_create ( &nfqinput_thread, NULL, nfqinputthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfqout_udp_thread, NULL, nfqoutudpthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &nfqout_rest_thread, NULL, nfqoutrestthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &nfq_gid_thread, NULL, nfqgidthread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 
 #ifdef DEBUG
   pthread_create ( &rulesdump_thread, NULL, rulesdumpthread, NULL );
@@ -4490,3 +4636,5 @@ int main ( int argc, char *argv[] )
     }
 }
 // kate: indent-mode cstyle; space-indent on; indent-width 4;
+
+
