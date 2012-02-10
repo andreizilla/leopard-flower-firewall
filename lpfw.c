@@ -4259,11 +4259,13 @@ void init_iptables()
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit (0);
       }
+    /*
     if ( system ( "iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit (0);
       }
+      */
     if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
