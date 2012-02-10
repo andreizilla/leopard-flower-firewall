@@ -109,7 +109,7 @@ FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 
 struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
-struct nfct_handle *dummy_handle;
+struct nfct_handle *dummy_handle_delete, *dummy_handle_setmark_out, *dummy_handle_setmark_in;
 struct nfct_handle *setmark_handle_out, *setmark_handle_in;
 
 int nfqfd_input, nfqfd_tcp, nfqfd_udp, nfqfd_rest, nfqfd_gid;
@@ -456,7 +456,7 @@ int conntrack_delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
   if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out)
     {
-      if (nfct_query(dummy_handle, NFCT_Q_DESTROY, mct) == -1)
+      if (nfct_query(dummy_handle_delete, NFCT_Q_DESTROY, mct) == -1)
         {
           M_PRINTF ( MLOG_DEBUG, "nfct_query DESTROY %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
           return NFCT_CB_CONTINUE;
@@ -718,7 +718,7 @@ void* conntrack_delete_thread ( void* ptr )
 int setmark_out (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_out);
-  nfct_query(setmark_handle_out, NFCT_Q_UPDATE, mct);
+  nfct_query(dummy_handle_setmark_out, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
@@ -726,7 +726,7 @@ int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
 {
   nfmark_to_set_in += NFMARK_DELTA;
   nfct_set_attr_u32(mct, ATTR_MARK, nfmark_to_set_in);
-  nfct_query(setmark_handle_in, NFCT_Q_UPDATE, mct);
+  nfct_query(dummy_handle_setmark_in, NFCT_Q_UPDATE, mct);
   return NFCT_CB_CONTINUE;
 }
 
@@ -749,14 +749,22 @@ void  init_conntrack()
     {
       perror("new");
     }
-  if ((dummy_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+  if ((dummy_handle_delete = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
       perror("nfct_open");
     }
-  if (nfct_query(dummy_handle, NFCT_Q_FLUSH, &family) == -1)
+  if (nfct_query(dummy_handle_delete, NFCT_Q_FLUSH, &family) == -1)
   {
       M_PRINTF ( MLOG_INFO, "nfct_query FLUSH %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
   }
+  if ((dummy_handle_setmark_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+    {
+      perror("nfct_open");
+    }
+  if ((dummy_handle_setmark_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+    {
+      perror("nfct_open");
+    }
   if ((setmark_handle_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
       perror("nfct_open");
