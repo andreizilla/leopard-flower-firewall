@@ -3912,18 +3912,6 @@ int parse_command_line(int argc, char* argv[])
 
 #ifndef WITHOUT_SYSVIPC
 
-  char *clipath;
-  clipath = malloc(PATHSIZE-16);
-  strcpy (clipath, owndir);
-  strcat(clipath, "lpfwcli");
-  cli_path->filename[0] = clipath;
-
-  char *pyguipath;
-  pyguipath = malloc(PATHSIZE -16);
-  strcpy (pyguipath, owndir);
-  strcat(pyguipath,"lpfwpygui");
-  pygui_path->filename[0] = pyguipath;
-
   char *testlogpath;
   testlogpath = malloc(PATHSIZE -16);
   strcpy (testlogpath, "/tmp/lpfw.testlog");

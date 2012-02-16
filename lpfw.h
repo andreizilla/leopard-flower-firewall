@@ -32,7 +32,7 @@ int ruleslist_add ( const char *path, const char *pid, const char *perms, const 
 		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance );
 
 //make a copy of ruleslist and return a pointer to it
-dlist * ruleslist_copy();
+ruleslist * ruleslist_copy();
 
 //remove rule from ruleslist
 void ruleslist_del ( const char *path, const char *pid );

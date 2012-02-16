@@ -30,7 +30,7 @@ typedef struct m_global_rule
     ports_list_t *ports_list;
 } global_rule_t;
 
-typedef struct m_dlist
+typedef struct m_ruleslist
 {
   int command;
   int rules_number; //used only by the first member list to keep track
@@ -46,8 +46,8 @@ typedef struct m_dlist
   unsigned long long stime; // start time of the process
   ino_t inode; // /proc/PID entry's inode number. Can change only if another process with the same PID is running
   off_t exesize; //executable's size
-  struct m_dlist *prev; //previous element in dlist
-  struct m_dlist *next; // next element in dlist
+  struct m_ruleslist *prev; //previous element in dlist
+  struct m_ruleslist *next; // next element in dlist
   long *sockets_cache;//pointer to 2D array of cache
   DIR *dirstream; //a constantly open stream to /proc/PID/fd
   char pidfdpath[32];
@@ -64,7 +64,7 @@ typedef struct
 typedef struct
 {
   long type;
-  dlist item;
+  ruleslist item;
 } msg_struct;
 
 typedef struct
