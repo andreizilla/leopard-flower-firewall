@@ -39,7 +39,7 @@ pthread_t command_thread, regfrontend_thread;
 //flag to show that frontend is already processing some "add" query
 int awaiting_reply_from_fe = FALSE;
 //struct of what was sent to f.e.dd
-dlist sent_to_fe_struct;
+ruleslist sent_to_fe_struct;
 
 //mutex to avoid fe_ask_* to send data simultaneously
 pthread_mutex_t msgq_mutex;
@@ -231,7 +231,7 @@ interrupted:
 void* commandthread(void* ptr)
 {
   ptr = 0;
-  dlist *rule;
+  ruleslist *rule;
 
   // N.B. continue statement doesn't apply to switch it causes to jump to while()
   while (1)
@@ -255,7 +255,7 @@ interrupted:
         {
         case F2DCOMM_LIST:
           ;
-	  rule = (dlist *) ruleslist_copy();
+	  rule = (ruleslist *) ruleslist_copy();
           //check if the list is empty and let frontend know
 	  if (rule[0].rules_number == 1)
             {

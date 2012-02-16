@@ -16,7 +16,7 @@
 extern int ( *m_printf ) ( int loglevel, char *logstring);
 extern int ruleslist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
 extern pthread_mutex_t dlist_mutex;
-extern dlist *first_rule;
+extern ruleslist *first_rule;
 extern char logstring[PATHSIZE];
 extern pthread_mutex_t logstring_mutex;
 extern int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime );
@@ -85,7 +85,7 @@ int test_refresh_thread()
       int stat_loc;
       wait(childpid, &stat_loc, 0); //wait for child to return
       sleep(REFRESH_INTERVAL+1);
-      dlist *temp;
+      ruleslist *temp;
       pthread_mutex_lock(&dlist_mutex);
       temp = first_rule;
       while (temp->next != NULL)

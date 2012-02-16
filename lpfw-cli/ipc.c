@@ -19,7 +19,7 @@ extern void list();
 extern void add_out(msg_struct add_struct);
 extern void add_in(msg_struct add_struct);
 extern int (*m_printf)(int loglevel, char *logstring);
-extern void farray_add(dlist rule);
+extern void farray_add(ruleslist rule);
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
 
@@ -88,7 +88,7 @@ void* listenthread(void * ptr)
     }
 }
 
-void msgq_f2ddel(dlist rule, int ack_flag)
+void msgq_f2ddel(ruleslist rule, int ack_flag)
 {
   msg_f2d.item = rule;
   if (ack_flag)

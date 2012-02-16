@@ -28,7 +28,7 @@ char TAB[2] = {9, 0};
 //string holds daemon request
 msg_struct global_struct;
 
-dlist *first;
+ruleslist *first;
 
 // lw -list window, uw - upper, tw - title, sw - status hw -help
 WINDOW *sw, *lw, *tw, *uw, *hw;
@@ -69,7 +69,7 @@ extern  void frontend_unregister();
 extern  void msgq_initialize();
 extern void msgq_add(msg_struct add_struct);
 extern void msgq_list();
-extern void msgq_f2ddel(dlist rule, int ack_flag);
+extern void msgq_f2ddel(ruleslist rule, int ack_flag);
 
 char logstring[PATHSIZE];
 
@@ -319,8 +319,8 @@ void add_in(msg_struct add_struct)
 void farray_clear()
 {
   pthread_mutex_lock(&mutex);
-  dlist *temp = first->next;
-  dlist *temp2;
+  ruleslist *temp = first->next;
+  ruleslist *temp2;
   while (temp != NULL)
     {
       temp2 = temp->next;
@@ -331,17 +331,17 @@ void farray_clear()
   pthread_mutex_unlock(&mutex);
 }
 
-void farray_add(dlist rule) //split string to path/pid/permissions/flags and add to dynamic array
+void farray_add(ruleslist rule) //split string to path/pid/permissions/flags and add to dynamic array
 {
   char *result;
-  dlist *temp = first;
+  ruleslist *temp = first;
   //find the last element in array i.e. the one that has .next == NULL...
   while (temp->next != NULL)
     {
       temp = temp->next;
     }
   //last element's .next should point now to our newly created one
-  if ((temp->next = malloc(sizeof (dlist))) == NULL)
+  if ((temp->next = malloc(sizeof (ruleslist))) == NULL)
     {
       M_PRINTF(MLOG_ERROR, "malloc: %s in %s:%d\n", strerror(errno), __FILE__, __LINE__);
       die();
@@ -364,7 +364,7 @@ void farray_add(dlist rule) //split string to path/pid/permissions/flags and add
 void delindex(int index, int ack_flag)
 {
   if (index == 0) return;
-  dlist *temp = first;
+  ruleslist *temp = first;
   //upon the beginning of each iteration i == number of calculated elements in array
   int i = 0;
   while ((temp != 0) && (index != i))
@@ -388,7 +388,7 @@ void delindex(int index, int ack_flag)
 
 void list()
 {
-  dlist *temp = first;
+  ruleslist *temp = first;
   int i = -1;
   char perms[16];
   wclear(memlw);
@@ -442,7 +442,7 @@ void list()
 void delstring(char path[PATHSIZE])//daemon asked us to remove a certain rule since app is no longer running
 {
   pthread_mutex_lock(&mutex);
-  dlist *temp = first->next;
+  ruleslist *temp = first->next;
   while (temp != NULL)
     {
       if (!strcmp(temp->path, path))
@@ -808,7 +808,7 @@ int main(int argc, char *argv[])
   //install signal handler on window resize
   signal(SIGWINCH, sigwinch);
 
-  first = malloc(sizeof (dlist));
+  first = malloc(sizeof (ruleslist));
   first->next = first->prev = 0;
 
   ncursesInit();

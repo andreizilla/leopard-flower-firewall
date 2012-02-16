@@ -40,41 +40,32 @@
 struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in, *globalh_gid;
 
 //command line arguments available globally
-struct arg_str *ipc_method, *logging_facility, *frontend;
+struct arg_str *logging_facility;
 struct arg_file *rules_file, *pid_file, *log_file, *test_log_path;
 struct arg_int *log_info, *log_traffic, *log_debug;
+//Paths of various frontends kept track of in order to chown&chown them
+struct arg_file *cli_path, *gui_path, *pygui_path;
 
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
 
 //first element of dlist is an empty one,serves as reference to determine the start of dlist
-dlist *first_rule;
+ruleslist *first_rule;
 
 global_rule_t *first_global_rule = NULL;
-char ownpath[PATHSIZE];
-char owndir[PATHSIZE];
-//Paths of various frontends kept track of in order to chown&chown them
-struct arg_file *cli_path, *gui_path, *pygui_path;
+
 pid_t fe_pid;
 
+//pointer to the actual logging function
 int ( *m_printf ) ( const int loglevel, const char *logstring );
 
-//mutex to protect dlist AND nfmark_count
+//mutex to protect ruleslist AND nfmark_count
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
-//mutex to lock fe_active_flag
-pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 //two NFCT_Q_DUMP simultaneous operations can produce an error
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-
-//thread which listens for command and thread which scans for rynning apps and removes them from the dlist
-pthread_t refresh_thr, nfq_in_thr, cache_build_thr, nfq_out_udp_thr, nfq_out_rest_thr,
-ct_dump_thr, ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, frontend_poll_thr,
-nfq_gid_thr;
+pthread_t refresh_thr, nfq_in_thr, cache_build_thr, nfq_out_udp_thr, nfq_out_rest_thr, ct_dump_thr,
+ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, frontend_poll_thr, nfq_gid_thr;
 
 #ifdef DEBUG
 pthread_t unittest_thr, rules_dump_thr;
@@ -82,10 +73,11 @@ pthread_t unittest_thr, rules_dump_thr;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
+pthread_mutex_t fe_active_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 //fe_was_busy_* is a flag to know whether frontend was processing another "add" request from lpfw
-//Normally, if path is not found in dlist, we send a request to frontend
+//Normally, if path is not found in ruleslist, we send a request to frontend
 //But in case it was busy when we started packet_handle_*, we assume FRONTEND_BUSY
-//This prevents possible duplicate entries in dlist
+//This prevents possible duplicate entries in ruleslist
 int fe_was_busy_in, fe_was_busy_out;
 
 //netfilter mark to be put on an ALLOWed packet
@@ -93,14 +85,9 @@ int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_
 int nfmark_to_delete_in, nfmark_to_delete_out;
 
 //mutexed string which threads use for logging
+pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
 char logstring[PATHSIZE];
 
-
-// holds currently-being-processed packet's size for in and out NFQUEUE
-int out_packet_size, in_packet_size;
-
-char* tcp_membuf, *tcp6_membuf, *udp_membuf, *udp6_membuf; //MEMBUF_SIZE to fread /tcp/net/* in one swoop
-char tcp_smallbuf[4096], udp_smallbuf[4096], tcp6_smallbuf[4096], udp6_smallbuf[4096];
 FILE *tcpinfo, *tcp6info, *udpinfo, *udp6info;
 int tcpinfo_fd, tcp6info_fd, udpinfo_fd, udp6info_fd, procnetrawfd;
 
@@ -110,14 +97,16 @@ struct nfct_handle *setmark_handle_out_tcp, *setmark_handle_in, *setmark_handle_
 
 int nfqfd_input, nfqfd_tcp, nfqfd_udp, nfqfd_rest, nfqfd_gid;
 
+//ct_delete_mark_thread uses waiting on condition
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t condvar_mutex = PTHREAD_MUTEX_INITIALIZER;
 char predicate = FALSE;
-//holds the time when last packet was seen
+
+//track time when last packet was seen to put to sleep some threads when there is no traffic
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-//netfilter mark number for the packet (to be added to NF_MARK_BASE)
+//netfilter mark number for the packet (to be summed with NF_MARK_BASE)
 int nfmark_count = 0;
 //for debug purposed - how many times read() was called
 int tcp_stats, udp_stats;
@@ -125,7 +114,7 @@ int tcp_stats, udp_stats;
 int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE],
 tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 
-//this array is used internally by lpfw to
+//this array is used internally by lpfw to prepare for export
 ulong ct_array[CT_ENTRIES_EXPORT_MAX][9] = {};
 //this array is built for export to frontend based on ct_array
 ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
@@ -144,6 +133,7 @@ ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 //array of global ports rules
 ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
+//macros enables any thread to use logging concurrently
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
@@ -153,47 +143,47 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
 int global_rules_filter(const int m_direction, const int protocol, const int port, const int verdict)
 {
-    int direction;
-    if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
-    if (m_direction == DIRECTION_OUT)
+  int direction;
+  if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
+  if (m_direction == DIRECTION_OUT)
+  {
+    if (protocol == PROTO_TCP) direction = TCP_OUT_ALLOW;
+    else if (protocol == PROTO_UDP) direction =  UDP_OUT_ALLOW;
+  }
+  else if (m_direction == DIRECTION_IN)
+  {
+    if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
+    else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
+  }
+  ports_list_t *ports_list;
+  ports_list = ports_list_array[direction];
+  while (ports_list != NULL)
+  {
+    if (ports_list->is_range)
     {
-	if (protocol == PROTO_TCP) direction = TCP_OUT_ALLOW;
-	else if (protocol == PROTO_UDP) direction =  UDP_OUT_ALLOW;
+      if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_ALLOW;}
     }
-    else if (m_direction == DIRECTION_IN)
+    else
     {
-	if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
-	else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
+      if (ports_list->min_port == port) {return GLOBAL_RULE_ALLOW;}
     }
-    ports_list_t *ports_list;
-    ports_list = ports_list_array[direction];
-    while (ports_list != NULL)
-    {
-	if (ports_list->is_range)
-	{
-	    if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_ALLOW;}
-	}
-	else
-	{
-	    if (ports_list->min_port == port) {return GLOBAL_RULE_ALLOW;}
-	}
-	ports_list = ports_list->next;
-    }
+    ports_list = ports_list->next;
+  }
 
-    ports_list = ports_list_array[direction+1];
-    while (ports_list != NULL)
+  ports_list = ports_list_array[direction+1];
+  while (ports_list != NULL)
+  {
+    if (ports_list->is_range)
     {
-	if (ports_list->is_range)
-	{
-	    if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_DENY;}
-	}
-	else
-	{
-	    if (ports_list->min_port == port) {return GLOBAL_RULE_DENY;}
-	}
-	ports_list = ports_list->next;
+      if ((ports_list->min_port <= port)&&(ports_list->max_port >= port)) {return GLOBAL_RULE_DENY;}
     }
-    return verdict;
+    else
+    {
+      if (ports_list->min_port == port) {return GLOBAL_RULE_DENY;}
+    }
+    ports_list = ports_list->next;
+  }
+  return verdict;
 }
 
 void denied_traffic_add (const int direction, const int mark, const int bytes)
@@ -254,6 +244,7 @@ void capabilities_modify(const int capability, const int set, const int action)
 
 int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
+    char tcp_smallbuf[4096];
     int bytesread_tcp;
     char newline[2] = {'\n','\0'};
     int port,found_flag, i;
@@ -297,6 +288,7 @@ int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 
 int build_tcp6_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
+    char tcp6_smallbuf[4096];
     int bytesread_tcp6;
     char newline[2] = {'\n','\0'};
     int port, found_flag, i;
@@ -340,6 +332,7 @@ int build_tcp6_port_and_socket_cache(long *socket_found, const int *port_to_find
 
 int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
+    char udp_smallbuf[4096];
     int bytesread_udp;
     char newline[2] = {'\n','\0'};
     int port, found_flag, i;
@@ -351,31 +344,31 @@ int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
     fseek(udpinfo,0,SEEK_SET);
     found_flag = 0;
     while ((bytesread_udp = read(udpinfo_fd, udp_smallbuf, 4060)) > 0)
+    {
+      udp_stats++;
+      if (bytesread_udp == -1)
       {
-	udp_stats++;
-	if (bytesread_udp == -1)
-	  {
-	    perror ("read");
-	    return -1;
-	  }
-	token = strtok_r(udp_smallbuf, newline, &lasts); //skip the first line (column headers)
-	while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
-	  {
-	    //take a line until EOF
-	    sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
-	    udp_port_and_socket_cache[i*2] = (long)port;
-	    udp_port_and_socket_cache[i*2+1] = socket;
-	    if (*port_to_find != port)
-	      {
-		i++;
-		*socket_found = socket;
-		continue;
-	      }
-	    //else
-	    found_flag = 1;
-	    i++;
-	  }
+        perror ("read");
+        return -1;
       }
+      token = strtok_r(udp_smallbuf, newline, &lasts); //skip the first line (column headers)
+      while ((token = strtok_r(NULL, newline, &lasts)) != NULL)
+      {
+       //take a line until EOF
+        sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
+        udp_port_and_socket_cache[i*2] = (long)port;
+        udp_port_and_socket_cache[i*2+1] = socket;
+        if (*port_to_find != port)
+        {
+          i++;
+          *socket_found = socket;
+          continue;
+        }
+        //else
+          found_flag = 1;
+          i++;
+        }
+    }
     udp_port_and_socket_cache[i*2] = MAGIC_NO;
     if (!found_flag) {return -1;}
     else {return 1;}
@@ -383,6 +376,7 @@ int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 
 int build_udp6_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
+    char udp6_smallbuf[4096];
     int bytesread_udp6;
     char newline[2] = {'\n','\0'};
     int port, found_flag, i;
@@ -935,18 +929,18 @@ unsigned long long starttimeGet ( const int mypid )
   return starttime;
 }
 
-dlist * ruleslist_copy()
+ruleslist * ruleslist_copy()
 {   
-  dlist *copy_rule;
+  ruleslist *copy_rule;
   pthread_mutex_lock ( &dlist_mutex );
-  if (( copy_rule = malloc ( (sizeof(dlist))*first_rule->rules_number )) == NULL )
+  if (( copy_rule = malloc ( (sizeof(ruleslist))*first_rule->rules_number )) == NULL )
     {
       M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       exit(0);
     }
 
   copy_rule[0].rules_number = first_rule->rules_number;
-  dlist *rule = first_rule->next;
+  ruleslist *rule = first_rule->next;
   int i = 1;
   for (i; i < first_rule->rules_number; i++)
   {
@@ -967,7 +961,7 @@ int ruleslist_add ( const char *path, const char *pid, const char *perms, const 
 {
   int retnfmark;
   pthread_mutex_lock ( &dlist_mutex );
-  dlist *rule = first_rule;
+  ruleslist *rule = first_rule;
 
   if (!strcmp(path, KERNEL_PROCESS))  //make sure it is not a duplicate KERNEL_PROCESS
     {
@@ -1003,7 +997,7 @@ int ruleslist_add ( const char *path, const char *pid, const char *perms, const 
       rule = rule->next;
     }
   //last element's .next should point now to our newly created one
-  if ( ( rule->next = malloc ( sizeof ( dlist ) ) ) == NULL )
+  if ( ( rule->next = malloc ( sizeof ( ruleslist ) ) ) == NULL )
     {
       M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       exit(0);
@@ -1088,7 +1082,7 @@ void ruleslist_del ( const char *path, const char *pid )
 {
   mbool was_active;
   pthread_mutex_lock ( &dlist_mutex );
-  dlist *temp = first_rule->next;
+  ruleslist *temp = first_rule->next;
   while ( temp != NULL )
     {
       if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, pid ) )
@@ -1132,7 +1126,7 @@ int search_pid_and_socket_cache_in(const long *socket, char *path, char *pid, in
 {
   int i;
   int retval;
-  dlist *temp;
+  ruleslist *temp;
   pthread_mutex_lock(&dlist_mutex);
   temp = first_rule;
   while (temp->next != NULL)
@@ -1165,7 +1159,7 @@ int search_pid_and_socket_cache_out(const long *socket, char *path, char *pid, i
 {
   int i;
   int retval;
-  dlist *temp;
+  ruleslist *temp;
   pthread_mutex_lock(&dlist_mutex);
   temp = first_rule;
   while (temp->next != NULL)
@@ -1203,7 +1197,7 @@ void* build_pid_and_socket_cache ( void *ptr )
   struct timespec refresh_timer,dummy;
   refresh_timer.tv_sec=0;
   refresh_timer.tv_nsec=1000000000/4;
-  dlist *rule;
+  ruleslist *rule;
   struct timeval time;
   int i, delta;
 
@@ -1333,7 +1327,7 @@ dump:
           continue;
         }
 
-      dlist *temp;
+      ruleslist *temp;
       pthread_mutex_lock ( &dlist_mutex );
       temp = first_rule->next;
       char nfmarkstr[16];
@@ -1364,7 +1358,7 @@ dump:
 void* refresh_thread ( void* ptr )
 {
   prctl(PR_SET_NAME,"refresh",0,0,0);
-  dlist *rule, *prev, *temp_rule;
+  ruleslist *rule, *prev, *temp_rule;
   ptr = 0;     //to prevent gcc warnings of unused variable
   char proc_pid_exe[32] = "/proc/";
   char exe_path[PATHSIZE];
@@ -1739,8 +1733,8 @@ void rulesfileWrite()
   }
 
   pthread_mutex_lock ( &dlist_mutex );
-  dlist* temp = first_rule->next;
-  dlist* temp2;
+  ruleslist* temp = first_rule->next;
+  ruleslist* temp2;
 
 loop:
   while ( temp != NULL )
@@ -1826,7 +1820,7 @@ inkernel:
 int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime)
 {
   pthread_mutex_lock ( &dlist_mutex );
-  dlist* temp = first_rule->next;
+  ruleslist* temp = first_rule->next;
   while ( temp != NULL )
     {
       if ( !strcmp ( temp->path, path ) )
@@ -1947,7 +1941,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be
 //two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
 
-	      dlist * temp = first_rule->next;
+              ruleslist * temp = first_rule->next;
               while ( temp != NULL )
                 {
                   if ( !strcmp ( temp->path, path ) && !strcmp ( temp->pid, ppid ) ) //we have a fork()ed child
@@ -2033,7 +2027,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
 
               //See if we need to query user or silently add to dlist
               pthread_mutex_lock ( &dlist_mutex );
-	      dlist * temp2 = first_rule->next;
+              ruleslist * temp2 = first_rule->next;
 
 // A1. Are there any entries in dlist with the same PATH as NP AND *ALWAYS perms? If yes, then create new entry in dlist copy parent's perms and all other attributes over to NP and continue;
 // A2. If No, i.e. there either aren't any entries in dlist with the same PATH as NP OR there are entries with the same path as NP AND *ONCE perms, then query user.
@@ -2097,7 +2091,7 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
   strcat ( find_socket, "]" );
 
   pthread_mutex_lock ( &dlist_mutex );
-  dlist * temp = first_rule->next;
+  ruleslist * temp = first_rule->next;
 
   while ( temp != NULL )
     {
@@ -2504,6 +2498,7 @@ int inkernel_check_tcp(const int *port)
 //NEEDED BY THE TEST SUITE, don't comment out yetfind in procfs which socket corresponds to source port
 int port2socket_udp ( int *portint, int *socketint )
 {
+  char *udp_membuf, *udp6_membuf;
   char buffer[5];
   char procport[12];
   char socketstr[12];
@@ -2582,6 +2577,7 @@ endloop:
 //find in procfs which socket corresponds to source port
 int  port2socket_tcp ( int *portint, int *socketint )
 {
+  char* tcp_membuf, *tcp6_membuf;
   char buffer[5];
   char procport[12];
   char socketstr[12];
@@ -3007,7 +3003,7 @@ int socket_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long 
 int inkernel_get_verdict(const char *ipaddr, int *nfmark)
 {
     pthread_mutex_lock(&dlist_mutex);
-    dlist *rule = first_rule;
+    ruleslist *rule = first_rule;
     while(rule->next != NULL)
       {
 	rule = rule->next;
@@ -4397,7 +4393,7 @@ void init_nfq_handlers()
 void init_ruleslist()
 {
     //initialze dlist first(reference) element
-    if ( ( first_rule = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
+    if ( ( first_rule = ( ruleslist * ) malloc ( sizeof ( ruleslist ) ) ) == NULL )
       {
 	M_PRINTF ( MLOG_INFO, "malloc: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit(0);
