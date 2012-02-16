@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'popup_out.ui'
 #
-# Created: Mon Feb 20 23:47:05 2012
+# Created: Tue Feb 21 18:04:05 2012
 #      by: PyQt4 UI code generator 4.7.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -187,7 +187,7 @@ class Ui_DialogOut(object):
         font.setUnderline(True)
         self.pushButton_show.setFont(font)
         self.pushButton_show.setCursor(QtCore.Qt.PointingHandCursor)
-        self.pushButton_show.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.pushButton_show.setFocusPolicy(QtCore.Qt.TabFocus)
         self.pushButton_show.setIconSize(QtCore.QSize(1, 16))
         self.pushButton_show.setAutoDefault(False)
         self.pushButton_show.setFlat(True)
@@ -293,17 +293,16 @@ class Ui_DialogOut(object):
         QtCore.QObject.connect(self.pushButton_allow, QtCore.SIGNAL("clicked()"), DialogOut.hide)
         QtCore.QObject.connect(self.pushButton_deny, QtCore.SIGNAL("clicked()"), DialogOut.hide)
         QtCore.QMetaObject.connectSlotsByName(DialogOut)
+        DialogOut.setTabOrder(self.pushButton_show, self.pushButton_allow)
         DialogOut.setTabOrder(self.pushButton_allow, self.pushButton_deny)
         DialogOut.setTabOrder(self.pushButton_deny, self.checkBox)
-        DialogOut.setTabOrder(self.checkBox, self.pushButton_show)
-        DialogOut.setTabOrder(self.pushButton_show, self.pushButton_hide)
 
     def retranslateUi(self, DialogOut):
         DialogOut.setWindowTitle(QtGui.QApplication.translate("DialogOut", "Dialog", None, QtGui.QApplication.UnicodeUTF8))
         self.label_name.setText(QtGui.QApplication.translate("DialogOut", "Application name", None, QtGui.QApplication.UnicodeUTF8))
         self.label_text.setText(QtGui.QApplication.translate("DialogOut", "is trying to connect to", None, QtGui.QApplication.UnicodeUTF8))
         self.label_ip.setText(QtGui.QApplication.translate("DialogOut", "IP address", None, QtGui.QApplication.UnicodeUTF8))
-        self.label_domain.setText(QtGui.QApplication.translate("DialogOut", "Domain name", None, QtGui.QApplication.UnicodeUTF8))
+        self.label_domain.setText(QtGui.QApplication.translate("DialogOut", "Looking up DNS...", None, QtGui.QApplication.UnicodeUTF8))
         self.pushButton_allow.setText(QtGui.QApplication.translate("DialogOut", "&Allow", None, QtGui.QApplication.UnicodeUTF8))
         self.pushButton_show.setText(QtGui.QApplication.translate("DialogOut", "&Show details...", None, QtGui.QApplication.UnicodeUTF8))
         self.pushButton_hide.setText(QtGui.QApplication.translate("DialogOut", "&Hide details...", None, QtGui.QApplication.UnicodeUTF8))

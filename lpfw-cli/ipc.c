@@ -34,14 +34,14 @@ extern char logstring[PATHSIZE];
 void msgq_list()
 {
   msg_f2d.item.command = F2DCOMM_LIST;
-  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1)
+  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
   farray_clear();
   while (1)
     {
-      if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_struct), 0, 0) == -1)
+      if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0, 0) == -1)
         {
           M_PRINTF(MLOG_INFO, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
@@ -60,7 +60,7 @@ void* listenthread(void * ptr)
   while (1)
     {
       interrupted:
-      if (msgrcv(mqd_d2f, &msg_d2f, sizeof (msg_struct), 0, 0) == -1)
+      if (msgrcv(mqd_d2f, &msg_d2f, sizeof (msg_d2f.item), 0, 0) == -1)
         {
 	  M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	  sleep(1); //avoid overwhelming the log
@@ -94,7 +94,7 @@ void msgq_f2ddel(dlist rule, int ack_flag)
   if (ack_flag)
     {
       msg_f2d.item.command = F2DCOMM_DELANDACK;
-      if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1)
+      if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
         {
           M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
         };
@@ -104,7 +104,7 @@ void msgq_f2ddel(dlist rule, int ack_flag)
 void msgq_write()
 {
   msg_f2d.item.command = F2DCOMM_WRT;
-  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1)
+  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
@@ -113,7 +113,7 @@ void msgq_write()
 void msgq_add(msg_struct add_struct)
 {
   add_struct.item.command = F2DCOMM_ADD;
-  if (msgsnd(mqd_f2d, &add_struct, sizeof (msg_struct), 0) == -1)
+  if (msgsnd(mqd_f2d, &add_struct, sizeof (add_struct.item), 0) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
@@ -122,7 +122,7 @@ void msgq_add(msg_struct add_struct)
 void frontend_register()
 {
   msg_f2d.item.command = F2DCOMM_REG;
-  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1)
+  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       return;
@@ -132,7 +132,7 @@ void frontend_register()
 void frontend_unregister()
 {
   msg_f2d.item.command = F2DCOMM_UNREG;
-  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_struct), 0) == -1)
+  if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
     {
       M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       return;

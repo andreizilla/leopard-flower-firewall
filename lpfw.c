@@ -91,8 +91,8 @@ int fe_was_busy_in, fe_was_busy_out;
 //netfilter mark to be put on an ALLOWed packet
 int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_to_set_in;
 int nfmark_to_delete_in, nfmark_to_delete_out;
-//numbers of rules to which current process belongs
-int rule_ordinal_out, rule_ordinal_in;
+
+//mutexed string which threads use for logging
 char logstring[PATHSIZE];
 
 

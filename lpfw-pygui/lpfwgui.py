@@ -375,6 +375,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         name = string.rsplit(path,"/",1)
         dialogOut.label_name.setText(name[1])
         dialogOut.label_ip.setText(addr)
+        dialogOut.label_domain.setText("Looking up DNS...")
         fullpath = QTableWidgetItem(path)
         dialogOut.tableWidget_details.setItem(0,1,fullpath)
         pid_item = QTableWidgetItem(pid)
@@ -388,8 +389,11 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         sport_item = QTableWidgetItem(sport)
         dialogOut.tableWidget_details.setItem(5,1,sport_item)
         QHostInfo.lookupHost(addr, dialogOut.dnsLookupFinished)
+        #we don't want the user to accidentally click ALLOW
         
         dialogOut.show()
+        dialogOut.setDisabled()
+
         
     def askUserIN(self):
         print "In askUserIn"

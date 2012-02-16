@@ -295,7 +295,7 @@
             </font>
            </property>
            <property name="text">
-            <string>Domain name</string>
+            <string>Looking up DNS...</string>
            </property>
            <property name="textInteractionFlags">
             <set>Qt::TextSelectableByKeyboard|Qt::TextSelectableByMouse</set>
@@ -460,7 +460,7 @@
                 <cursorShape>PointingHandCursor</cursorShape>
                </property>
                <property name="focusPolicy">
-                <enum>Qt::NoFocus</enum>
+                <enum>Qt::TabFocus</enum>
                </property>
                <property name="text">
                 <string>&amp;Show details...</string>
@@ -749,11 +749,10 @@ p, li { white-space: pre-wrap; }
   </action>
  </widget>
  <tabstops>
+  <tabstop>pushButton_show</tabstop>
   <tabstop>pushButton_allow</tabstop>
   <tabstop>pushButton_deny</tabstop>
   <tabstop>checkBox</tabstop>
-  <tabstop>pushButton_show</tabstop>
-  <tabstop>pushButton_hide</tabstop>
  </tabstops>
  <resources>
   <include location="resource.qrc"/>
