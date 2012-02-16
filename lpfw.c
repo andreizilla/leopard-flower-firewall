@@ -52,18 +52,9 @@ dlist *first_rule;
 global_rule_t *first_global_rule = NULL;
 char ownpath[PATHSIZE];
 char owndir[PATHSIZE];
-gid_t lpfwuser_gid;
-char logstring[PATHSIZE];
+//Paths of various frontends kept track of in order to chown&chown them
 struct arg_file *cli_path, *gui_path, *pygui_path;
-pthread_mutex_t msgq_mutex, logstring_mutex;
 pid_t fe_pid;
-
-//type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
-msg_struct msg_d2f = {1, 0};
-msg_struct msg_f2d = {1, 0};
-msg_struct msg_d2fdel = {1, 0};
-msg_struct msg_d2flist = {1, 0};
-msg_struct_creds msg_creds = {1, 0};
 
 int ( *m_printf ) ( const int loglevel, const char *logstring );
 
@@ -76,6 +67,9 @@ pthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t ct_dump_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_mutex_t ct_entries_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_mutex_t logstring_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 
 //thread which listens for command and thread which scans for rynning apps and removes them from the dlist
 pthread_t refresh_thr, nfq_in_thr, cache_build_thr, nfq_out_udp_thr, nfq_out_rest_thr,
@@ -99,6 +93,8 @@ int nfmark_to_set_out_tcp, nfmark_to_set_out_udp,nfmark_to_set_out_icmp, nfmark_
 int nfmark_to_delete_in, nfmark_to_delete_out;
 //numbers of rules to which current process belongs
 int rule_ordinal_out, rule_ordinal_in;
+char logstring[PATHSIZE];
+
 
 // holds currently-being-processed packet's size for in and out NFQUEUE
 int out_packet_size, in_packet_size;
@@ -121,15 +117,18 @@ char predicate = FALSE;
 struct timeval lastpacket = {0};
 pthread_mutex_t lastpacket_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+//netfilter mark number for the packet (to be added to NF_MARK_BASE)
 int nfmark_count = 0;
+//for debug purposed - how many times read() was called
 int tcp_stats, udp_stats;
+//cache that holds correlation of ports<-->sockets from various /proc/net/* files
 int tcp_port_and_socket_cache[MEMBUF_SIZE], udp_port_and_socket_cache[MEMBUF_SIZE],
 tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE];
 
 //this array is used internally by lpfw to
-ulong ct_entries[CT_ENTRIES_EXPORT_MAX][9] = {};
-//this array is built for export to frontend based on ct_entries
-ulong ct_entries_export[CT_ENTRIES_EXPORT_MAX][5] = {};
+ulong ct_array[CT_ENTRIES_EXPORT_MAX][9] = {};
+//this array is built for export to frontend based on ct_array
+ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5] = {};
 /*
   [0] nfmark (export[0])
   [1] bytes in allowed
@@ -201,29 +200,29 @@ void denied_traffic_add (const int direction, const int mark, const int bytes)
 {
     pthread_mutex_lock ( &ct_entries_mutex);
     int i;
-    for (i = 0; ct_entries[i][0] != 0; ++i)
+    for (i = 0; ct_array[i][0] != 0; ++i)
       {
-	if (ct_entries[i][0] != mark) continue;
+	if (ct_array[i][0] != mark) continue;
 	if (direction == DIRECTION_OUT)
 	{
-	    ct_entries[i][8] += bytes;
+	    ct_array[i][8] += bytes;
 	}
 	else if (direction == DIRECTION_IN)
 	{
-	    ct_entries[i][7] += bytes;
+	    ct_array[i][7] += bytes;
 	}
 	pthread_mutex_unlock ( &ct_entries_mutex);
 	return;
       }
     //the entry is not yet in array, adding now
-    ct_entries[i][0] = mark;
+    ct_array[i][0] = mark;
     if (direction == DIRECTION_OUT)
     {
-	ct_entries[i][8] += bytes;
+	ct_array[i][8] += bytes;
     }
     else if (direction == DIRECTION_IN)
     {
-	ct_entries[i][7] += bytes;
+	ct_array[i][7] += bytes;
     }
     pthread_mutex_unlock ( &ct_entries_mutex);
     return ;
@@ -253,7 +252,7 @@ void capabilities_modify(const int capability, const int set, const int action)
       }
 }
 
-int build_tcp_port_cache(long *socket_found, const int *port_to_find)
+int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_tcp;
     char newline[2] = {'\n','\0'};
@@ -296,7 +295,7 @@ int build_tcp_port_cache(long *socket_found, const int *port_to_find)
     else {return 1;}
 }
 
-int build_tcp6_port_cache(long *socket_found, const int *port_to_find)
+int build_tcp6_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_tcp6;
     char newline[2] = {'\n','\0'};
@@ -339,7 +338,7 @@ int build_tcp6_port_cache(long *socket_found, const int *port_to_find)
     else {return 1;}
 }
 
-int build_udp_port_cache(long *socket_found, const int *port_to_find)
+int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_udp;
     char newline[2] = {'\n','\0'};
@@ -382,7 +381,7 @@ int build_udp_port_cache(long *socket_found, const int *port_to_find)
     else {return 1;}
 }
 
-int build_udp6_port_cache(long *socket_found, const int *port_to_find)
+int build_udp6_port_and_socket_cache(long *socket_found, const int *port_to_find)
 {
     int bytesread_udp6;
     char newline[2] = {'\n','\0'};
@@ -446,8 +445,7 @@ void * readstatsthread( void *ptr)
     }
 }
 
-//Both in and out conntrack entrien get deleted when process exits
-int conntrack_delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+int ct_delete_mark_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   int mark = nfct_get_attr_u32(mct, ATTR_MARK);
   if ( mark == nfmark_to_delete_in || mark == nfmark_to_delete_out)
@@ -463,8 +461,7 @@ int conntrack_delete_mark(enum nf_conntrack_msg_type type, struct nf_conntrack *
   return NFCT_CB_CONTINUE;
 }
 
-//process rules that trafficthread dumps every second to extract traffic statistics
-int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+int ct_dump_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   int mark;
   ulong in_bytes, out_bytes;
@@ -477,24 +474,24 @@ int traffic_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,v
 
   pthread_mutex_lock ( &ct_entries_mutex);
   int i;
-  for (i = 0; ct_entries[i][0] != 0; ++i)
+  for (i = 0; ct_array[i][0] != 0; ++i)
     {
-      if (ct_entries[i][0] != mark) continue;
-      ct_entries[i][1] += in_bytes;
-      ct_entries[i][2] += out_bytes;
+      if (ct_array[i][0] != mark) continue;
+      ct_array[i][1] += in_bytes;
+      ct_array[i][2] += out_bytes;
       pthread_mutex_unlock ( &ct_entries_mutex);
       return NFCT_CB_CONTINUE;
     }
   //the entry is not yet in array, adding now
-  ct_entries[i][0] = mark;
-  ct_entries[i][1] = in_bytes;
-  ct_entries[i][2] = out_bytes;
+  ct_array[i][0] = mark;
+  ct_array[i][1] = in_bytes;
+  ct_array[i][2] = out_bytes;
   pthread_mutex_unlock ( &ct_entries_mutex);
   return NFCT_CB_CONTINUE;
 }
 
 //When conntrack deletes an entry, we get called. Bump up the in/out bytes statistics
-int conntrack_destroy_callback(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
+int ct_destroy_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
 {
   int mark;
   ulong in_bytes, out_bytes;
@@ -507,27 +504,26 @@ int conntrack_destroy_callback(enum nf_conntrack_msg_type type, struct nf_conntr
   in_bytes = nfct_get_attr_u32(mct, ATTR_REPL_COUNTER_BYTES);
 
   int i;
-  for (i = 0; ct_entries[i][0] != 0; ++i)
+  for (i = 0; ct_array[i][0] != 0; ++i)
     {
-      if (ct_entries[i][0] != mark) continue;
-      ct_entries[i][3] += in_bytes;
-      ct_entries[i][4] += out_bytes;
+      if (ct_array[i][0] != mark) continue;
+      ct_array[i][3] += in_bytes;
+      ct_array[i][4] += out_bytes;
       return NFCT_CB_CONTINUE;
     }
   printf ("Error: there was a request to destroy nfmark which is not in the list \n");
   return NFCT_CB_CONTINUE;
 }
 
-//dump all conntrack entries every second, extract the traffic statistics and send it to frontend
 void * ct_dump_thread( void *ptr)
 {
   u_int8_t family = AF_INET;
-  struct nfct_handle *traffic_handle;
-  if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
+  struct nfct_handle *ct_dump_handle;
+  if ((ct_dump_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, traffic_callback, NULL) == -1))
+  if ((nfct_callback_register(ct_dump_handle, NFCT_T_ALL, ct_dump_cb, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -537,11 +533,11 @@ void * ct_dump_thread( void *ptr)
       int i;
       for (i=0; i<CT_ENTRIES_EXPORT_MAX; ++i)
         {
-	  ct_entries[i][1] = ct_entries[i][2] = ct_entries_export[i][0] = ct_entries_export[i][1] =
-		  ct_entries_export[i][2] = ct_entries_export[i][3] = ct_entries_export[i][4] = 0;
+	  ct_array[i][1] = ct_array[i][2] = ct_array_export[i][0] = ct_array_export[i][1] =
+		  ct_array_export[i][2] = ct_array_export[i][3] = ct_array_export[i][4] = 0;
         }
       pthread_mutex_lock(&ct_dump_mutex);
-      if (nfct_query(traffic_handle, NFCT_Q_DUMP, &family) == -1)
+      if (nfct_query(ct_dump_handle, NFCT_Q_DUMP, &family) == -1)
         {
           perror("query-DELETE");
         }
@@ -551,61 +547,61 @@ void * ct_dump_thread( void *ptr)
 
       pthread_mutex_lock(&ct_entries_mutex);
 
-      for (i = 0; ct_entries[i][0] != 0; ++i)
+      for (i = 0; ct_array[i][0] != 0; ++i)
         {
-	  ct_entries[i][5] = ct_entries[i][1]+ct_entries[i][3];
-	  ct_entries[i][6] = ct_entries[i][2]+ct_entries[i][4];
+	  ct_array[i][5] = ct_array[i][1]+ct_array[i][3];
+	  ct_array[i][6] = ct_array[i][2]+ct_array[i][4];
         }
 
       //rearrange array for export
       int j;
-      for (i=0; ct_entries[i][0] != 0; ++i)
+      for (i=0; ct_array[i][0] != 0; ++i)
         {
-	  for (j=0; ct_entries_export[j][0] !=0; ++j)
+	  for (j=0; ct_array_export[j][0] !=0; ++j)
             {
 	      //if this is an IN nfmark
-	      if (ct_entries[i][0] >= NFMARKIN_BASE)
+	      if (ct_array[i][0] >= NFMARKIN_BASE)
                 {
 		  //find its OUT nfmark
-		  int delta = ct_entries[i][0] - NFMARK_DELTA;
-		  if (delta == ct_entries_export[j][0])
+		  int delta = ct_array[i][0] - NFMARK_DELTA;
+		  if (delta == ct_array_export[j][0])
                     {
 		      //bytes in for IN nfmark are bytes out for OUT nfmark
-		      ct_entries_export[j][1] += ct_entries[i][6];
-		      ct_entries_export[j][2] += ct_entries[i][5];
-		      ct_entries_export[j][3] += ct_entries[i][8];
-		      ct_entries_export[j][4] += ct_entries[i][7];
+		      ct_array_export[j][1] += ct_array[i][6];
+		      ct_array_export[j][2] += ct_array[i][5];
+		      ct_array_export[j][3] += ct_array[i][8];
+		      ct_array_export[j][4] += ct_array[i][7];
                       goto next;
                     }
                 }
 	      //else if this is a OUT nfmark
-	      if (ct_entries[i][0] == ct_entries_export[j][0])
+	      if (ct_array[i][0] == ct_array_export[j][0])
                 {
-		  ct_entries_export[j][1] += ct_entries[i][5];
-		  ct_entries_export[j][2] += ct_entries[i][6];
-		  ct_entries_export[j][3] += ct_entries[i][7];
-		  ct_entries_export[j][4] += ct_entries[i][8];
+		  ct_array_export[j][1] += ct_array[i][5];
+		  ct_array_export[j][2] += ct_array[i][6];
+		  ct_array_export[j][3] += ct_array[i][7];
+		  ct_array_export[j][4] += ct_array[i][8];
 
                   goto next;
                 }
             }
 	  //Doesn't exist in export list, create an entry
-	  if (ct_entries[i][0] >= NFMARKIN_BASE)
+	  if (ct_array[i][0] >= NFMARKIN_BASE)
             {
-	      ct_entries_export[j][0] = ct_entries[i][0] - NFMARK_DELTA;
-	      ct_entries_export[j][1] = ct_entries[i][6];
-	      ct_entries_export[j][2] = ct_entries[i][5];
-	      ct_entries_export[j][3] = ct_entries[i][8];
-	      ct_entries_export[j][4] = ct_entries[i][7];
+	      ct_array_export[j][0] = ct_array[i][0] - NFMARK_DELTA;
+	      ct_array_export[j][1] = ct_array[i][6];
+	      ct_array_export[j][2] = ct_array[i][5];
+	      ct_array_export[j][3] = ct_array[i][8];
+	      ct_array_export[j][4] = ct_array[i][7];
 
             }
           else
             {
-	      ct_entries_export[j][0] = ct_entries[i][0];
-	      ct_entries_export[j][1] = ct_entries[i][5];
-	      ct_entries_export[j][2] = ct_entries[i][6];
-	      ct_entries_export[j][3] = ct_entries[i][7];
-	      ct_entries_export[j][4] = ct_entries[i][8];
+	      ct_array_export[j][0] = ct_array[i][0];
+	      ct_array_export[j][1] = ct_array[i][5];
+	      ct_array_export[j][2] = ct_array[i][6];
+	      ct_array_export[j][3] = ct_array[i][7];
+	      ct_array_export[j][4] = ct_array[i][8];
 
             }
 next:
@@ -615,7 +611,7 @@ next:
       pthread_mutex_unlock(&ct_entries_mutex);
 
 #ifdef DEBUG
-      for (i = 0; ct_entries_export[i][0] != 0; ++i)
+      for (i = 0; ct_array_export[i][0] != 0; ++i)
         {
           //printf("rulesexp: %d: >%d <%d \n", rulesexp[i][0], rulesexp[i][1], rulesexp[i][2]);
         }
@@ -623,13 +619,13 @@ next:
 
       mymsg msg;
       msg.type = 1;
-      memcpy (msg.ct_entries_export, ct_entries_export, sizeof(msg.ct_entries_export));
+      memcpy (msg.ct_array_export, ct_array_export, sizeof(msg.ct_array_export));
 
       msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
       //don't send if there is already some data down the queue that frontend hasn't yet received
       if (msgqid_d2ftraffic->msg_qnum == 0)
         {
-	  if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof ( msg.ct_entries_export ), IPC_NOWAIT ) == -1 )
+	  if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof (msg.ct_array_export), IPC_NOWAIT ) == -1 )
             {
               M_PRINTF (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
             }
@@ -638,15 +634,14 @@ next:
     }
 }
 
-//Register a hook that gets triggered whenever conntrack tries to destroy a connection
-void * ct_destroy_hook_thread( void *ptr)
+void * ct_destroy_thread( void *ptr)
 {
   struct nfct_handle *traffic_handle;
   if ((traffic_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, NF_NETLINK_CONNTRACK_DESTROY)) == NULL)
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, conntrack_destroy_callback, NULL) == -1))
+  if ((nfct_callback_register(traffic_handle, NFCT_T_ALL, ct_destroy_cb, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -670,8 +665,7 @@ void* frontend_poll_thread ( void* ptr )
     }
 }
 
-//Register callback to delete nfmark and wait on condition to be triggered.
-void* ct_delete_nfmark_thread ( void* ptr )
+void* ct_delete_mark_thread ( void* ptr )
 {
   u_int8_t family = AF_INET; //used by conntrack
   struct nfct_handle *deletemark_handle;
@@ -679,7 +673,7 @@ void* ct_delete_nfmark_thread ( void* ptr )
     {
       perror("nfct_open");
     }
-  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, conntrack_delete_mark, NULL) == -1))
+  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL) == -1))
     {
       perror("cb_reg");
     }
@@ -941,9 +935,7 @@ unsigned long long starttimeGet ( const int mypid )
   return starttime;
 }
 
-//make a copy of dlist for future iterations.
-//We don't iterate through dlist itself because that would require to lock a mutex for too long
-dlist * dlist_copy()
+dlist * ruleslist_copy()
 {   
   dlist *copy_rule;
   pthread_mutex_lock ( &dlist_mutex );
@@ -970,22 +962,20 @@ dlist * dlist_copy()
   return copy_rule;
 }
 
-//Add new element to dlist and return new nfmark (if any)
-int dlist_add ( const char *path, const char *pid, const char *perms, const mbool active, const char *sha,
+int ruleslist_add ( const char *path, const char *pid, const char *perms, const mbool active, const char *sha,
 		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance)
 {
   int retnfmark;
-
   pthread_mutex_lock ( &dlist_mutex );
-  dlist *temp = first_rule;
+  dlist *rule = first_rule;
 
   if (!strcmp(path, KERNEL_PROCESS))  //make sure it is not a duplicate KERNEL_PROCESS
     {
-      while ( temp->next != NULL )
+      while ( rule->next != NULL )
         {
-          temp = temp->next;
-	  if (strcmp(temp->path, KERNEL_PROCESS)) continue;
-          if (!strcmp(temp->pid, pid))  //same IP, quit
+	  rule = rule->next;
+	  if (strcmp(rule->path, KERNEL_PROCESS)) continue;
+	  if (!strcmp(rule->pid, pid))  //same IP, quit
             {
               pthread_mutex_unlock ( &dlist_mutex );
               return;
@@ -994,11 +984,11 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
     }
   else //make sure it's not a duplicate of a regular (i.e. non-kernel) rule
   {
-      temp = first_rule;
-       while ( temp->next != NULL )
+      rule = first_rule;
+       while ( rule->next != NULL )
        {
-	   temp = temp->next;
-	   if ((!strcmp(temp->path, path)) && (!strcmp(temp->pid, pid)))
+	   rule = rule->next;
+	   if ((!strcmp(rule->path, path)) && (!strcmp(rule->pid, pid)))
 	   {
 	       pthread_mutex_unlock ( &dlist_mutex );
 	       return;
@@ -1006,36 +996,36 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
        }
   }
 
-  temp = first_rule;
-  //find the last element in dlist i.e. the one that has .next == NULL...
-  while ( temp->next != NULL )
+  rule = first_rule;
+  //find the last element in dlist
+  while ( rule->next != NULL )
     {
-      temp = temp->next;
+      rule = rule->next;
     }
   //last element's .next should point now to our newly created one
-  if ( ( temp->next = malloc ( sizeof ( dlist ) ) ) == NULL )
+  if ( ( rule->next = malloc ( sizeof ( dlist ) ) ) == NULL )
     {
       M_PRINTF ( MLOG_INFO, "malloc: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
       exit(0);
     }
   // new element's prev field should point to the former last element...
-  temp->next->prev = temp;
+  rule->next->prev = rule;
   // point temp to the newly added element...
-  temp = temp->next;
+  rule = rule->next;
   //initialize fields
-  temp->next = NULL;
-  strcpy ( temp->path, path );
-  strcpy ( temp->pid, pid );
-  strcpy ( temp->perms, perms );
-  temp->is_active = active;
-  temp->stime = stime;
+  rule->next = NULL;
+  strcpy ( rule->path, path );
+  strcpy ( rule->pid, pid );
+  strcpy ( rule->perms, perms );
+  rule->is_active = active;
+  rule->stime = stime;
   assert(sha != NULL);
-  memcpy ( temp->sha, sha, DIGEST_SIZE );
-  temp->exesize = size;
+  memcpy ( rule->sha, sha, DIGEST_SIZE );
+  rule->exesize = size;
   if (nfmark == 0)
     {
-      temp->nfmark_in = NFMARKIN_BASE + nfmark_count;
-      retnfmark = temp->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
+      rule->nfmark_in = NFMARKIN_BASE + nfmark_count;
+      retnfmark = rule->nfmark_out = NFMARKOUT_BASE +  nfmark_count;
       nfmark_count++;
     }
   else // nfmark > 0 => assign parent's nfmark
@@ -1043,23 +1033,23 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
       //either nfmark is for in or out traffic
       if (nfmark >= NFMARKIN_BASE)
         {
-          temp->nfmark_in = nfmark;
-          retnfmark = temp->nfmark_out = nfmark - NFMARK_DELTA;
+	  rule->nfmark_in = nfmark;
+	  retnfmark = rule->nfmark_out = nfmark - NFMARK_DELTA;
         }
       else
         {
-          retnfmark = temp->nfmark_out = nfmark;
-          temp->nfmark_in = nfmark + NFMARK_DELTA;
+	  retnfmark = rule->nfmark_out = nfmark;
+	  rule->nfmark_in = nfmark + NFMARK_DELTA;
         }
       nfmark_count++;
     }
-  temp->first_instance = first_instance;
-  if (temp->is_active && strcmp(temp->path, KERNEL_PROCESS))
+  rule->first_instance = first_instance;
+  if (rule->is_active && strcmp(rule->path, KERNEL_PROCESS))
     {
-      strcpy(temp->pidfdpath,"/proc/");
-      strcat(temp->pidfdpath, temp->pid);
-      strcat(temp->pidfdpath, "/fd/");
-      if ((temp->dirstream = opendir ( temp->pidfdpath )) == NULL)
+      strcpy(rule->pidfdpath,"/proc/");
+      strcat(rule->pidfdpath, rule->pid);
+      strcat(rule->pidfdpath, "/fd/");
+      if ((rule->dirstream = opendir ( rule->pidfdpath )) == NULL)
         {
           M_PRINTF ( MLOG_DEBUG, "opendir: %s in %s:%d\n", strerror ( errno ), __FILE__, __LINE__ );
           exit(0);
@@ -1083,19 +1073,18 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
 //	cache_temp->sockets[0][0] = MAGIC_NO;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
-  if ((temp->sockets_cache = (long*)malloc(sizeof(long)*MAX_CACHE)) == NULL)
+  if ((rule->sockets_cache = (long*)malloc(sizeof(long)*MAX_CACHE)) == NULL)
     {
       perror("malloc");
     }
-  *temp->sockets_cache = MAGIC_NO;
+  *rule->sockets_cache = MAGIC_NO;
 
   first_rule->rules_number = first_rule->rules_number + 1;
   pthread_mutex_unlock ( &dlist_mutex );
   return retnfmark;
 }
 
-//Remove element from dlist...
-void dlist_del ( const char *path, const char *pid )
+void ruleslist_del ( const char *path, const char *pid )
 {
   mbool was_active;
   pthread_mutex_lock ( &dlist_mutex );
@@ -1139,7 +1128,7 @@ void dlist_del ( const char *path, const char *pid )
   pthread_mutex_unlock ( &dlist_mutex );
 }
 
-int socket_cache_in_search(const long *socket, char *path, char *pid, int *nfmark_to_set_in)
+int search_pid_and_socket_cache_in(const long *socket, char *path, char *pid, int *nfmark_to_set_in)
 {
   int i;
   int retval;
@@ -1172,7 +1161,7 @@ int socket_cache_in_search(const long *socket, char *path, char *pid, int *nfmar
   return SOCKETS_CACHE_NOT_FOUND;
 }
 
-int socket_cache_out_search(const long *socket, char *path, char *pid, int *nfmark_to_set_out)
+int search_pid_and_socket_cache_out(const long *socket, char *path, char *pid, int *nfmark_to_set_out)
 {
   int i;
   int retval;
@@ -1205,8 +1194,7 @@ int socket_cache_out_search(const long *socket, char *path, char *pid, int *nfma
   return SOCKETS_CACHE_NOT_FOUND;
 }
 
-//scan active /proc/pid entries (ignoring kernel processes) and build a correlation of PIDs to sockets
-void* cache_build_thread ( void *ptr )
+void* build_pid_and_socket_cache ( void *ptr )
 {
   DIR *mdir;
   struct dirent *m_dirent;
@@ -1410,7 +1398,7 @@ void* refresh_thread ( void* ptr )
 		  strcpy (path, rule->path);
 		  strcpy (pid, rule->pid);
 		  pthread_mutex_unlock ( &dlist_mutex );
-		  dlist_del ( path, pid );
+		  ruleslist_del ( path, pid );
 		  continue;
 	      }
 	      //Only delete *ALWAYS rule if there is at least one more rule in dlist with the same PATH
@@ -1429,7 +1417,7 @@ void* refresh_thread ( void* ptr )
 			  strcpy (path, rule->path);
 			  strcpy (pid, rule->pid);
 			  pthread_mutex_unlock ( &dlist_mutex );
-			  dlist_del ( path, pid );
+			  ruleslist_del ( path, pid );
 			  goto loop;
 			}
 		      temp_rule=temp_rule->next;
@@ -1636,7 +1624,7 @@ void rules_load()
           if ( fgets ( perms, PERMSLENGTH, stream ) == 0 ) break;
           perms[strlen ( perms ) - 1] = 0;
           if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break; //read last newline
-          dlist_add( path, ip , perms, FALSE, digest, 0, 0, 0, TRUE);
+	  ruleslist_add( path, ip , perms, FALSE, digest, 0, 0, 0, TRUE);
           continue;
         }
       if ( fgets ( perms, PERMSLENGTH, stream ) == 0 ) break;
@@ -1656,7 +1644,7 @@ void rules_load()
         }
       if ( fgets ( laststring, PATHSIZE, stream ) == 0 ) break; //read last newline
 
-      dlist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
+      ruleslist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
   if ( fclose ( stream ) == EOF )
     {
@@ -1835,7 +1823,7 @@ inkernel:
 }
 
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
-int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime)
+int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime)
 {
   pthread_mutex_lock ( &dlist_mutex );
   dlist* temp = first_rule->next;
@@ -1987,7 +1975,7 @@ int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, 
                       unsigned long long stime;
                       stime = starttimeGet ( atoi ( pid ) );
 
-                      *nfmark_to_set = dlist_add ( path, pid, tempperms2, TRUE, tempsha2, stime, parent_size2, 0, FALSE );
+		      *nfmark_to_set = ruleslist_add ( path, pid, tempperms2, TRUE, tempsha2, stime, parent_size2, 0, FALSE );
 		      if (fe_active_flag_get())
 		      {
 			fe_list();
@@ -2057,7 +2045,7 @@ int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, 
                       if ( !strcmp ( temp2->perms, ALLOW_ALWAYS ) )
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
-			  *nfmark_to_set = dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0 ,FALSE);
+			  *nfmark_to_set = ruleslist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0 ,FALSE);
 			  if (fe_active_flag_get())
 			  {
 			    fe_list();
@@ -2067,7 +2055,7 @@ int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, 
                       else if ( !strcmp ( temp2->perms, DENY_ALWAYS ) )
                         {
                           pthread_mutex_unlock ( &dlist_mutex );
-			  dlist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0, FALSE );
+			  ruleslist_add ( path, pid, tempperms, TRUE, tempsha, *stime, parent_size, 0, FALSE );
 			  if (fe_active_flag_get())
 			  {
 			    fe_list();
@@ -2091,8 +2079,6 @@ quit:
   return PATH_IN_DLIST_NOT_FOUND;
 }
 
-//scan only those /proc entries that are already in the dlist
-// and only those that have a current PID (meaning the app has already sent a packet)
 int socket_active_processes_search ( const long *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
   char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
@@ -2182,7 +2168,6 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
   return SOCKET_ACTIVE_PROCESSES_NOT_FOUND;
 }
 
-//scan /proc to find which PID the socket belongs to
 int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
   //vars for scanning through /proc dir
@@ -2278,7 +2263,7 @@ int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, u
 }
 
 //if there are more than one entry in /proc/net/raw for icmp then it's impossible to tell which app is sending the packet
-int icmp_check_only_one_inode ( long *socket )
+int icmp_check_only_one_socket ( long *socket )
 {
   int loop = 0;
   int readbytes = 1;
@@ -2673,10 +2658,10 @@ endloop:
 }
 
 //Handler for TCP packets for INPUT NFQUEUE
-int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int socket_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_in_search(socket, path, pid, nfmark_to_set);
+    retval = search_pid_and_socket_cache_in(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -2694,16 +2679,16 @@ int packet_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, c
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
     {
-      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      retval = path_find_in_ruleslist ( nfmark_to_set, path, pid, stime);
       return retval;
     }
 }
 
 //Handler for TCP packets for OUTPUT NFQUEUE
-int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int socket_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval;
-  retval = socket_cache_out_search(socket, path, pid, nfmark_to_set);
+  retval = search_pid_and_socket_cache_out(socket, path, pid, nfmark_to_set);
   if (retval != SOCKETS_CACHE_NOT_FOUND){
       M_PRINTF (MLOG_DEBUG2, "(cache)");
       return retval;
@@ -2717,16 +2702,16 @@ int packet_handle_tcp_out ( const long *socket, int *nfmark_to_set, char *path, 
     return retval;
   }
   else if (retval == SOCKET_FOUND_IN_PROCPIDFD){
-    retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+    retval = path_find_in_ruleslist ( nfmark_to_set, path, pid, stime);
     return retval;
   }
 }
 
 //Handler for UDP packets
-int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int socket_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_in_search(socket, path, pid, nfmark_to_set);
+    retval = search_pid_and_socket_cache_in(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -2744,16 +2729,16 @@ int packet_handle_udp_in ( const long *socket, int *nfmark_to_set, char *path, c
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
     {
-      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      retval = path_find_in_ruleslist ( nfmark_to_set, path, pid, stime);
       return retval;
     }
 }
 
 //Handler for UDP packets
-int packet_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int socket_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
     int retval;
-    retval = socket_cache_out_search(socket, path, pid, nfmark_to_set);
+    retval = search_pid_and_socket_cache_out(socket, path, pid, nfmark_to_set);
     if (retval != SOCKETS_CACHE_NOT_FOUND)
     {
 	M_PRINTF (MLOG_DEBUG2, "(cache)");
@@ -2771,7 +2756,7 @@ int packet_handle_udp_out ( const long *socket, int *nfmark_to_set, char *path, 
     }
     else if (retval == SOCKET_FOUND_IN_PROCPIDFD)
     {
-      retval = path_find_in_dlist ( nfmark_to_set, path, pid, stime);
+      retval = path_find_in_ruleslist ( nfmark_to_set, path, pid, stime);
       return retval;
     }
 }
@@ -3005,21 +2990,21 @@ void print_traffic_log(const int proto, const int direction, const char *ip, con
   M_PRINTF(MLOG_TRAFFIC, "%s", m_logstring);
 }
 
-int packet_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
+int socket_handle_icmp(int *nfmark_to_set, char *path, char *pid, unsigned long long *stime)
 {
   int retval;
   long socket;
-  retval = icmp_check_only_one_inode ( &socket );
+  retval = icmp_check_only_one_socket ( &socket );
   if (retval != ICMP_ONLY_ONE_ENTRY) {return retval;}
   retval = socket_active_processes_search ( &socket, path, pid, nfmark_to_set );
   if (retval != SOCKET_ACTIVE_PROCESSES_NOT_FOUND) {return retval;}
   retval = socket_procpidfd_search ( &socket, path, pid, stime );
   if (retval != SOCKET_FOUND_IN_PROCPIDFD) {return retval;}
-  retval = path_find_in_dlist (nfmark_to_set, path, pid, stime);
+  retval = path_find_in_ruleslist (nfmark_to_set, path, pid, stime);
   return retval;
 }
 
-int inkernel_make_verdict(const char *ipaddr, int *nfmark)
+int inkernel_get_verdict(const char *ipaddr, int *nfmark)
 {
     pthread_mutex_lock(&dlist_mutex);
     dlist *rule = first_rule;
@@ -3186,13 +3171,13 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       if (socket == 0){
 	  verdict = inkernel_check_tcp(&dport_hostbo);
 	  if (verdict == INKERNEL_SOCKET_FOUND) {
-	      verdict = inkernel_make_verdict(saddr, &nfmark_to_set_in);
+	      verdict = inkernel_get_verdict(saddr, &nfmark_to_set_in);
 	  }
 	  else break;
       }
       else{
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
+      verdict = socket_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
       }
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_TCP, dport_hostbo, verdict);
 
@@ -3226,13 +3211,13 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       if (socket == 0){
 	  verdict = inkernel_check_tcp(&dport_hostbo);
 	  if (verdict == INKERNEL_SOCKET_FOUND) {
-	      verdict = inkernel_make_verdict(daddr, &nfmark_to_set_in);
+	      verdict = inkernel_get_verdict(daddr, &nfmark_to_set_in);
 	  }
 	  else break;
       }
       else{
       fe_was_busy_in = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_udp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
+      verdict = socket_handle_udp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
       }
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_UDP, dport_hostbo, verdict);
 
@@ -3342,7 +3327,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
     {
     case IPPROTO_ICMP:
       fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_icmp (&nfmark_to_set_out_icmp, path, pid, &stime );
+      verdict = socket_handle_icmp (&nfmark_to_set_out_icmp, path, pid, &stime );
       if (verdict  == PATH_IN_DLIST_NOT_FOUND)
         {
           if (fe_was_busy_out)
@@ -3440,9 +3425,9 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   timer.tv_nsec=1000000000/2;
   nanosleep(&timer, &dummy);
 
-  if (build_udp_port_cache(&socket_found, &srcudp) == -1)
+  if (build_udp_port_and_socket_cache(&socket_found, &srcudp) == -1)
   {
-      if (build_udp6_port_cache(&socket_found, &srcudp) == -1)
+      if (build_udp6_port_and_socket_cache(&socket_found, &srcudp) == -1)
       {
       //the packet has no inode associated with it
 	verdict = PORT_NOT_FOUND_IN_PROCNET;
@@ -3454,14 +3439,14 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   if (socket_found == 0){
       verdict = inkernel_check_udp(&srcudp);
       if (verdict == INKERNEL_SOCKET_FOUND) {
-	  verdict = inkernel_make_verdict(daddr, &nfmark_to_set_out_udp);
+	  verdict = inkernel_get_verdict(daddr, &nfmark_to_set_out_udp);
       }
       else {goto execute_verdict;}
   }
   else{
   //remember f/e's state before we process
   fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-  verdict = packet_handle_udp_out ( &socket_found, &nfmark_to_set_out_udp, path, pid, &starttime );
+  verdict = socket_handle_udp_out ( &socket_found, &nfmark_to_set_out_udp, path, pid, &starttime );
   }
 
       verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
@@ -3566,9 +3551,9 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 	  timer.tv_nsec=1000000000/2;
 	  nanosleep(&timer, &dummy);
 
-	  if (build_tcp_port_cache(&socket_found, &srctcp) == -1)
+	  if (build_tcp_port_and_socket_cache(&socket_found, &srctcp) == -1)
 	  {
-	      if (build_tcp6_port_cache(&socket_found, &srctcp) == -1)
+	      if (build_tcp6_port_and_socket_cache(&socket_found, &srctcp) == -1)
 	      {
 	      //the packet has no inode associated with it
 		verdict = PORT_NOT_FOUND_IN_PROCNET;
@@ -3579,14 +3564,14 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
   if (socket_found == 0){
       verdict = inkernel_check_tcp(&srctcp);
       if (verdict == INKERNEL_SOCKET_FOUND) {
-	  verdict = inkernel_make_verdict(daddr, &nfmark_to_set_out_tcp);
+	  verdict = inkernel_get_verdict(daddr, &nfmark_to_set_out_tcp);
       }
       else {goto execute_verdict;}
   }
   else{
       //remember f/e's state before we process
       fe_was_busy_out = awaiting_reply_from_fe? TRUE: FALSE;
-      verdict = packet_handle_tcp_out ( &socket_found, &nfmark_to_set_out_tcp, path, pid, &starttime );
+      verdict = socket_handle_tcp_out ( &socket_found, &nfmark_to_set_out_tcp, path, pid, &starttime );
   }
 
     verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dsttcp, verdict);
@@ -3833,7 +3818,7 @@ int frontend_mode ( int argc, char *argv[] )
     }
   msg.item.params[i+2][0] = 0; //the last parm should be 0
 
-  if ( msgsnd ( mqd, &msg, sizeof ( msg_struct_creds ), 0 ) == -1 )
+  if ( msgsnd ( mqd, &msg, sizeof ( msg.item ), 0 ) == -1 )
     {
 
       printf ( "msgsnd: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -4006,7 +3991,6 @@ int parse_command_line(int argc, char* argv[])
   //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
 
-/* chack that we have the 5 needed capabilities and if we do, then drop all the other capabilities */
 void capabilities_setup()
 {
   //=======  Capabilities check
@@ -4082,9 +4066,9 @@ void capabilities_setup()
 #endif
 }
 
-/* Create group lpfwuser. Backend and frontend both should belong to this group to communicate over sysvmsgq */
 void setgid_lpfwuser()
 {
+  gid_t lpfwuser_gid;
   //First we need to create/(check existence of) lpfwuser group and add ourselves to it
   errno = 0;
   struct group *m_group;
@@ -4145,7 +4129,6 @@ void setgid_lpfwuser()
   capabilities_modify(CAP_SETGID, CAP_PERMITTED, CAP_CLEAR);
 }
 
-/* Setuid() lpfw to root */
 void setuid_root()
 {
   capabilities_modify(CAP_SETUID, CAP_EFFECTIVE, CAP_SET);
@@ -4173,6 +4156,8 @@ void setup_signal_handlers()
       }
 }
 
+#if 0
+//OBSOLETE - frontend starts standalone and there is no need to track its path
 void save_own_path()
 {
     int ownpid = getpid();
@@ -4191,6 +4176,7 @@ void save_own_path()
     basenamelength = strlen ( strrchr ( ownpath, '/' ) +1 );
     strncpy ( owndir, ownpath, strlen ( ownpath )-basenamelength );
 }
+#endif
 
 void init_iptables()
 {
@@ -4408,7 +4394,7 @@ void init_nfq_handlers()
 
 }
 
-void init_dlist()
+void init_ruleslist()
 {
     //initialze dlist first(reference) element
     if ( ( first_rule = ( dlist * ) malloc ( sizeof ( dlist ) ) ) == NULL )
@@ -4529,10 +4515,6 @@ int main ( int argc, char *argv[] )
   }
   setup_signal_handlers();
 
-#ifndef WITHOUT_SYSVIPC
-  save_own_path();
-#endif
-
   parse_command_line(argc, argv);
   chown_and_setgid_frontend();
   init_log();
@@ -4557,15 +4539,15 @@ int main ( int argc, char *argv[] )
 #endif
 
   init_nfq_handlers();
-  init_dlist();
+  init_ruleslist();
   rules_load();
   open_proc_net_files();
 
   if (pthread_create ( &refresh_thr, NULL, refresh_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &cache_build_thr, NULL, cache_build_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &cache_build_thr, NULL, build_pid_and_socket_cache, NULL ) != 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &ct_dump_thr, NULL, ct_dump_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &ct_destroy_hook_thr, NULL, ct_destroy_hook_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
-  if (pthread_create ( &ct_delete_nfmark_thr, NULL, ct_delete_nfmark_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_destroy_hook_thr, NULL, ct_destroy_thread, NULL ) != 0) {perror ("pthread_create"); exit(0);}
+  if (pthread_create ( &ct_delete_nfmark_thr, NULL, ct_delete_mark_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
   if (pthread_create ( &frontend_poll_thr, NULL, frontend_poll_thread, NULL )!= 0) {perror ("pthread_create"); exit(0);}
 
   if (pthread_create ( &nfq_in_thr, NULL, nfq_in_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}

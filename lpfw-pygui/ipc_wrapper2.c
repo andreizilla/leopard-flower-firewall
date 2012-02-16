@@ -95,7 +95,7 @@ void* f2dthread(void * ptr) {
 	{
 	    exit(0);
 	}
-	if ( msgsnd ( mqd_f2d, &msg, sizeof ( msg_struct ), 0 ) == -1 )
+	if ( msgsnd ( mqd_f2d, &msg, sizeof ( msg.item ), 0 ) == -1 )
 	{
 	    printf ( "msgsnd: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	};
@@ -216,13 +216,6 @@ void* d2flistthread(void * ptr) {
 }
 
 
-
-typedef struct
-{
-    long type;
-    ulong ct_entries_export[CT_ENTRIES_EXPORT_MAX][5];
-} mymsg;
-
 void* d2ftrafficthread(void * ptr) {
 
     key_t ipckey_d2ftraffic;
@@ -243,7 +236,7 @@ void* d2ftrafficthread(void * ptr) {
     char message[MAX_LINE_LENGTH];
     while (1)
     {
-	if (msgrcv(mqd_d2ftraffic, &msg_d2ftraffic, sizeof (mymsg), 0, 0) == -1) {
+	if (msgrcv(mqd_d2ftraffic, &msg_d2ftraffic, sizeof (msg_d2ftraffic.ct_array_export), 0, 0) == -1) {
 	    printf("msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    exit(0);
 	};
@@ -251,21 +244,21 @@ void* d2ftrafficthread(void * ptr) {
 
 	int i;
 	char int2str[16];
-	for (i=0; msg_d2ftraffic.ct_entries_export[i][0] != 0; ++i)
+	for (i=0; msg_d2ftraffic.ct_array_export[i][0] != 0; ++i)
 	{
-	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][0]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][0]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][1]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][1]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][2]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][2]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][3]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][3]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
-	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_entries_export[i][4]);
+	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][4]);
 	    strcat(message, int2str);
 	    strcat(message, " ");
 	}
@@ -273,7 +266,6 @@ void* d2ftrafficthread(void * ptr) {
 	send_message(message);
     }
 }
-
 
 int main ( int argc, char *argv[] )
 {    

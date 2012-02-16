@@ -194,7 +194,7 @@ def msgq_init():
     #daemonize the thread, meaning it will exit when main() exits. This is needed b/c the thread will be blocking on reading pipe
     stdout_thread.daemon = True
     stdout_thread.start()
-    
+        
     send_to_backend("F2DCOMM_REG ")
     send_to_backend("F2DCOMM_LIST ")
 
@@ -262,8 +262,11 @@ class myDialogOut(QDialog, Ui_DialogOut):
         if ( host.error() != QHostInfo.NoError):
             print "Lookup failed %s" %(host.errorString())
             return
-        item = QTableWidgetItem(host.hostName())
+        hostname = host.hostName()
+        item = QTableWidgetItem(hostname)
         self.tableWidget_details.setItem(3,1,item)
+        self.label_domain.setText(hostname)
+
         
         
         
@@ -369,9 +372,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         global addr
         global sport
         global dport
-        dialogOut.label_name.setText(path)
+        name = string.rsplit(path,"/",1)
+        dialogOut.label_name.setText(name[1])
         dialogOut.label_ip.setText(addr)
-        dialogOut.label_port.setText(dport)
         fullpath = QTableWidgetItem(path)
         dialogOut.tableWidget_details.setItem(0,1,fullpath)
         pid_item = QTableWidgetItem(pid)
@@ -522,7 +525,6 @@ if (len(sys.argv) <= 1 or sys.argv[1] != "debug"):
     logfile = open("/dev/null", "w")
     sys.stdout = logfile
   
-    
 app=QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(True)
 window = myMainWindow()

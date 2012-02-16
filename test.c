@@ -14,7 +14,7 @@
 
 
 extern int ( *m_printf ) ( int loglevel, char *logstring);
-extern int dlist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
+extern int ruleslist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
 extern pthread_mutex_t dlist_mutex;
 extern dlist *first_rule;
 extern char logstring[PATHSIZE];
@@ -77,7 +77,7 @@ int test_refresh_thread()
           return -1;
         }
       fprintf (test_log_stream, "Own path is %s\n", exepath);
-      dlist_add(exepath, pidstr, DENY_ALWAYS, TRUE, "0", 0 , 0, 0, 0 );
+      ruleslist_add(exepath, pidstr, DENY_ALWAYS, TRUE, "0", 0 , 0, 0, 0 );
       exit(0);
     }
   if (childpid > 0) //parent

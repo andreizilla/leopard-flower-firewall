@@ -57,7 +57,7 @@ typedef struct m_dlist
 typedef struct
 {
   long type;
-  int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3];
+  ulong ct_array_export[CT_ENTRIES_EXPORT_MAX][5];
 } mymsg;
 
 //structures used in msgq for communication daemon<>frontend

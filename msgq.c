@@ -24,12 +24,15 @@
     pthread_mutex_unlock(&logstring_mutex); \
  
 int awaiting_reply_from_fe;
-int mqd_d2ftraffic;
-
 
 //message queue id - communication link beteeen daemon and frontend
 int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel, mqd_creds, mqd_d2ftraffic;
 struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgqid_creds, *msgqid_d2ftraffic;
+
+//type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
+msg_struct msg_f2d = {1, 0};
+msg_struct msg_d2fdel = {1, 0};
+msg_struct msg_d2flist = {1, 0};
 
 pthread_t command_thread, regfrontend_thread;
 
@@ -38,8 +41,14 @@ int awaiting_reply_from_fe = FALSE;
 //struct of what was sent to f.e.dd
 dlist sent_to_fe_struct;
 
+//mutex to avoid fe_ask_* to send data simultaneously
+pthread_mutex_t msgq_mutex;
+
+
 // register frontend when "lpfw --cli" is invoked.The thread is restarted by invoking pthread_create
 // towards the end of it
+//OBSOLETE - frontend now starts standalone
+#if 0
 void*  fe_reg_thread(void* ptr)
 {
   ptr = 0;
@@ -47,7 +56,7 @@ void*  fe_reg_thread(void* ptr)
 
   //block until message is received
 interrupted:
-  if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_creds), 0, 0) == -1)
+  if (msgrcv(mqd_creds, &msg_creds, sizeof (msg_creds.item), 0, 0) == -1)
     {
       M_PRINTF(MLOG_DEBUG, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       goto interrupted;
@@ -100,12 +109,13 @@ interrupted:
   if (child_pid == 0)  //child process
     {
       child_close_nfqueue();
-      /* no need to setgid on child since gid==lpfwuser is inherited from parent
-      if (setgid(lpfwuser_gid) == -1)
-      {
-                M_PRINTF(MLOG_INFO, "setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-      }
-      */
+
+//      /* no need to setgid on child since gid==lpfwuser is inherited from parent
+//      if (setgid(lpfwuser_gid) == -1)
+//      {
+//                M_PRINTF(MLOG_INFO, "setgid: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+//      }
+//      */
 
       //enable CAP_SETUID in effective set
       cap_t cap_current;
@@ -214,8 +224,8 @@ interrupted:
     {
       perror("fork");
     }
-
 }
+#endif
 
 // wait for commands from frontend
 void* commandthread(void* ptr)
@@ -228,7 +238,7 @@ void* commandthread(void* ptr)
     {
       //block until message is received from frontend:
 interrupted:
-      if (msgrcv(mqd_f2d, (void*) &msg_f2d, sizeof (msg_f2d), 0, 0) == -1)
+      if (msgrcv(mqd_f2d, (void*) &msg_f2d, sizeof (msg_f2d.item), 0, 0) == -1)
         {
           M_PRINTF(MLOG_DEBUG	, "msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
           sleep(1); //avoid overwhelming the log
@@ -245,7 +255,7 @@ interrupted:
         {
         case F2DCOMM_LIST:
           ;
-	  rule = (dlist *) dlist_copy();
+	  rule = (dlist *) ruleslist_copy();
           //check if the list is empty and let frontend know
 	  if (rule[0].rules_number == 1)
             {
@@ -280,7 +290,7 @@ interrupted:
           continue;
 
         case F2DCOMM_DELANDACK:
-          dlist_del(msg_f2d.item.path, msg_f2d.item.pid);
+	  ruleslist_del(msg_f2d.item.path, msg_f2d.item.pid);
           continue;
 
         case F2DCOMM_WRT:
@@ -312,7 +322,7 @@ interrupted:
 
           if (!strcmp(msg_f2d.item.path, KERNEL_PROCESS))  //don't set fe_awaiting_reply flags
             {
-              dlist_add(KERNEL_PROCESS, msg_f2d.item.pid, msg_f2d.item.perms, TRUE, "", 0, 0, 0 ,TRUE);
+	      ruleslist_add(KERNEL_PROCESS, msg_f2d.item.pid, msg_f2d.item.perms, TRUE, "", 0, 0, 0 ,TRUE);
               continue;
             }
 
@@ -360,7 +370,7 @@ interrupted:
 
 //TODO SECURITY. We should check now that /proc/PID inode wasn't changed while we were shasumming and exesizing
 
-          dlist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, TRUE, sha, sent_to_fe_struct.stime, exestat.st_size, 0 ,TRUE);
+	  ruleslist_add(sent_to_fe_struct.path, sent_to_fe_struct.pid, msg_f2d.item.perms, TRUE, sha, sent_to_fe_struct.stime, exestat.st_size, 0 ,TRUE);
 #ifdef DEBUG
           gettimeofday(&time_struct, NULL);
           M_PRINTF(MLOG_DEBUG,"After  adding @ %d %d\n", (int) time_struct.tv_sec, (int) time_struct.tv_usec);
@@ -580,7 +590,7 @@ void init_msgq()
   //------------------------------------------------------------
 
   pthread_create(&command_thread, NULL, commandthread, NULL);
-  pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
+  //pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
 
 }
 

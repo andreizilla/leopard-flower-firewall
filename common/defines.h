@@ -29,7 +29,12 @@
 //#define NFMARK_DELTA NFMARKIN_BASE-NFMARKOUT_BASE //This doesn't work
 #define MEMBUF_SIZE 65536 //buffer size to fread() /proc/net/tcp*,udp*
 #define MAX_CACHE 1024 ///proc/pid/FD sockets of one process
-#define CT_ENTRIES_EXPORT_MAX 500
+
+//because sysvmsgq limit on the size of a message is usually 8192 bytes, we don't want to have to change it
+//we try to fit all export stats in one message which is approx 200 processes. If user wants to have more
+//processes displaying stats, he can increase the size of a sysv message or we will have to work around
+//this limitation, e.g. by using multiple messages
+#define CT_ENTRIES_EXPORT_MAX 200
 #define REFRESH_INTERVAL 1
 #define TEST_FAILED SIGUSR1
 #define TEST_SUCCEEDED SIGUSR2

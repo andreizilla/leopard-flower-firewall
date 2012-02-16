@@ -21,7 +21,7 @@
 #include "../version.h" //for version string during packaging
 
 
-int (*m_printf)(int loglevel, char *logstring);
+int (*m_printf)(const int loglevel, const char *logstring);
 void list();
 
 char TAB[2] = {9, 0};
@@ -87,7 +87,7 @@ struct arg_int *log_debug, *nozenity;
 
 
 
-int m_printf_file(int loglevel, char * logstring)
+int m_printf_file(const int loglevel, const char * logstring)
 {
   write ( fileno ( logfilefd ), logstring, strlen ( logstring ) );
 
