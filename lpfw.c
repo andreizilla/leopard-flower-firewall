@@ -1081,7 +1081,7 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
 //	cache_temp->sockets[0][0] = MAGIC_NO;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
-  if ((temp->sockets_cache = (long*)malloc(sizeof(long)*MAX_CSACHE)) == NULL)
+  if ((temp->sockets_cache = (long*)malloc(sizeof(long)*MAX_CACHE)) == NULL)
     {
       perror("malloc");
     }
@@ -4292,7 +4292,7 @@ void save_own_path()
 
 void init_iptables()
 {
-    if ( system ( "iptables -I OUTPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
+    if ( system ( "iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit (0);
@@ -4307,7 +4307,7 @@ void init_iptables()
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit (0);
       }
-    if ( system ( "iptables -I INPUT 1 -p all -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
+    if ( system ( "iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
       {
 	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 	exit (0);

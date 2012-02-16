@@ -1,5 +1,6 @@
 <RCC>
-    <qresource prefix="/pics">
-        <file>pic.jpg</file>
-    </qresource>
+  <qresource prefix="/pics">
+    <file>tux2.jpg</file>
+    <file>pic.jpg</file>
+  </qresource>
 </RCC>

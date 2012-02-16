@@ -1,8 +1,9 @@
 import sys, os, thread, time, string, threading, subprocess
-from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont
+from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont, QTableWidgetItem
 import resource
 import wingdbstub
 from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect
+from PyQt4.QtNetwork import QHostInfo
 from frontend import Ui_MainWindow
 from popup_out import Ui_DialogOut
 from popup_in import Ui_DialogIn
@@ -170,6 +171,7 @@ def stdoutthread(stdout):
             path = msglist[1]
             pid = msglist[2]
             addr = msglist[3]
+            sport = msglist[4]
             dport = msglist[5]
             print "calling emitaskuserOUT"
             window.emitAskUserOUT()
@@ -177,7 +179,8 @@ def stdoutthread(stdout):
             path = msglist[1]
             pid = msglist[2]
             addr = msglist[3]
-            sport = msglist[5]
+            sport = msglist[4]
+            dport = msglist[5]
             print "calling emitaskuserIN"
             window.emitAskUserIN()            
 
@@ -197,25 +200,48 @@ def msgq_init():
 
     
 class myDialogOut(QDialog, Ui_DialogOut):
+    dns_lookup_id = 0
+    host = 0
     def __init__(self):
+        self.dns_lookup_id = 0  
         QDialog.__init__(self)
         self.setupUi(self)
         self.pushButton_allow.clicked.connect(self.allowClicked)
         self.pushButton_deny.clicked.connect(self.denyClicked)
+        self.pushButton_hide.setVisible(False)
+        self.tableWidget_details.setVisible(False)
         self.rejected.connect(self.escapePressed)
+        self.finished.connect(self.dialogFinished)
+
+        fullpath_text = QTableWidgetItem("Full path")
+        self.tableWidget_details.setItem(0,0,fullpath_text)
+        pid_text = QTableWidgetItem("Process ID")
+        self.tableWidget_details.setItem(1,0,pid_text)
+        remoteip_text = QTableWidgetItem("Remote IP")
+        self.tableWidget_details.setItem(2,0,remoteip_text)
+        remotedomain_text = QTableWidgetItem("Remote domain")
+        self.tableWidget_details.setItem(3,0,remotedomain_text)
+        remoteport_text = QTableWidgetItem("Remote port")
+        self.tableWidget_details.setItem(4,0,remoteport_text)
+        localport_text = QTableWidgetItem("Local port")
+        self.tableWidget_details.setItem(5,0,localport_text)
+        
         
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
+        self.done(1)
         send_to_backend("F2DCOMM_ADD IGNORED")
      
     def closeEvent(self, event):
         "in case when user closed the dialog without pressing allow or deny"
         print "in closeEvent"
+        self.done(2)        
         send_to_backend("F2DCOMM_ADD IGNORED")
             
     def allowClicked(self):
         print "allow clicked"
+        self.done(3)        
         if (self.checkBox.isChecked()): verdict = "ALLOW_ALWAYS"
         else: verdict = "ALLOW_ONCE"     
         send_to_backend("F2DCOMM_ADD %s " %(verdict))
@@ -223,11 +249,23 @@ class myDialogOut(QDialog, Ui_DialogOut):
         
     def denyClicked(self):
         print "deny clicked"
+        self.done(4)
         if (self.checkBox.isChecked()): verdict = "DENY_ALWAYS"
         else: verdict = "DENY_ONCE"     
         send_to_backend("F2DCOMM_ADD %s " %(verdict))
         send_to_backend("F2DCOMM_LIST")
              
+    def dialogFinished(self):
+         QHostInfo.abortHostLookup(self.dns_lookup_id)
+         
+    def dnsLookupFinished(self, host):
+        if ( host.error() != QHostInfo.NoError):
+            print "Lookup failed %s" %(host.errorString())
+            return
+        item = QTableWidgetItem(host.hostName())
+        self.tableWidget_details.setItem(3,1,item)
+        
+        
         
 class myDialogIn(QDialog, Ui_DialogIn):
     def __init__(self):
@@ -237,6 +275,7 @@ class myDialogIn(QDialog, Ui_DialogIn):
         self.pushButton_deny.clicked.connect(self.denyClicked)
         self.rejected.connect(self.escapePressed) #when Esc is pressed
         
+         
     def escapePressed(self):
         "in case when user pressed Escape"
         print "in escapePressed"
@@ -261,6 +300,7 @@ class myDialogIn(QDialog, Ui_DialogIn):
         else: verdict = "DENY_ONCE"
         send_to_backend("F2DCOMM_ADD %s " %(verdict))
         send_to_backend("F2DCOMM_LIST")
+        
         
         
 class mForm(QWidget, Ui_Form):
@@ -327,10 +367,25 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         global path
         global pid
         global addr
+        global sport
         global dport
         dialogOut.label_name.setText(path)
         dialogOut.label_ip.setText(addr)
         dialogOut.label_port.setText(dport)
+        fullpath = QTableWidgetItem(path)
+        dialogOut.tableWidget_details.setItem(0,1,fullpath)
+        pid_item = QTableWidgetItem(pid)
+        dialogOut.tableWidget_details.setItem(1,1,pid_item)
+        remoteip = QTableWidgetItem(addr)
+        dialogOut.tableWidget_details.setItem(2,1,remoteip)
+        dns = QTableWidgetItem("Looking up DNS...")
+        dialogOut.tableWidget_details.setItem(3,1,dns)
+        dport_item = QTableWidgetItem(dport)
+        dialogOut.tableWidget_details.setItem(4,1,dport_item)
+        sport_item = QTableWidgetItem(sport)
+        dialogOut.tableWidget_details.setItem(5,1,sport_item)
+        QHostInfo.lookupHost(addr, dialogOut.dnsLookupFinished)
+        
         dialogOut.show()
         
     def askUserIN(self):

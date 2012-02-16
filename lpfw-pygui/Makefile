@@ -23,7 +23,7 @@ dummy2: lpfwpygui
 	cp lpfwpygui $(DESTDIR)
 	touch dummy2
 
-dummy:  ipc_wrapper2 resource.py prefs.py popup_out.py popup_in.py lpfwgui.py frontend.py
+dummy:  ipc_wrapper2 resource_rc.py prefs.py popup_out.py popup_in.py lpfwgui.py frontend.py
 	mkdir -p $(DESTDIR)/lpfw-pygui
 # $?  - prerequisites that have changed
 	cp $? $(DESTDIR)/lpfw-pygui
