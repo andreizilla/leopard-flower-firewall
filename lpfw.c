@@ -1081,7 +1081,7 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
 //	cache_temp->sockets[0][0] = MAGIC_NO;
 //	pthread_mutex_unlock(&cache_mutex);
 //    }
-  if ((temp->sockets_cache = (int*)malloc(sizeof(int)*MAX_CACHE)) == NULL)
+  if ((temp->sockets_cache = (long*)malloc(sizeof(long)*MAX_CSACHE)) == NULL)
     {
       perror("malloc");
     }
@@ -1254,7 +1254,7 @@ void* cache_build_thread ( void *pid )
               char *end;
 	      end = strrchr(&proc_pid_exe[8],']'); //put 0 instead of ]
               *end = 0;
-	      rule->sockets_cache[i] = atoi(&proc_pid_exe[8]);
+	      rule->sockets_cache[i] = atol(&proc_pid_exe[8]);
               i++;
             }
 	  rule->sockets_cache[i] = MAGIC_NO;

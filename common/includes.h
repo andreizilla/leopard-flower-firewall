@@ -48,7 +48,7 @@ typedef struct m_dlist
   off_t exesize; //executable's size
   struct m_dlist *prev; //previous element in dlist
   struct m_dlist *next; // next element in dlist
-  int *sockets_cache;//pointer to 2D array of cache
+  long *sockets_cache;//pointer to 2D array of cache
   DIR *dirstream; //a constantly open stream to /proc/PID/fd
   char pidfdpath[32];
 } dlist;
