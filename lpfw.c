@@ -991,12 +991,12 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
   pthread_mutex_lock ( &dlist_mutex );
   dlist *temp = first_rule;
 
-  if (!strcmp(path, KERNEL_PROCESS))  //make sure it is not a duplicate from the user
+  if (!strcmp(path, KERNEL_PROCESS))  //make sure it is not a duplicate KERNEL_PROCESS
     {
-      while ( temp->next != NULL ) //find a KERNEL PROCESS entry
+      while ( temp->next != NULL )
         {
           temp = temp->next;
-          if (strcmp(temp->path, KERNEL_PROCESS)) continue;
+	  if (strcmp(temp->path, KERNEL_PROCESS)) continue;
           if (!strcmp(temp->pid, pid))  //same IP, quit
             {
               pthread_mutex_unlock ( &dlist_mutex );
@@ -1004,6 +1004,20 @@ int dlist_add ( const char *path, const char *pid, const char *perms, const mboo
             }
         }
     }
+  else //make sure it's not a duplicate of a regular (i.e. non-kernel) rule
+  {
+      temp = first_rule;
+       while ( temp->next != NULL )
+       {
+	   temp = temp->next;
+	   if ((!strcmp(temp->path, path)) && (!strcmp(temp->pid, pid)))
+	   {
+	       pthread_mutex_unlock ( &dlist_mutex );
+	       return;
+	   }
+       }
+  }
+
   temp = first_rule;
   //find the last element in dlist i.e. the one that has .next == NULL...
   while ( temp->next != NULL )
@@ -1944,12 +1958,9 @@ int path_find_in_dlist ( int *nfmark_to_set, const char *path, const char *pid, 
                   return PROCFS_ERROR;
                 };
 
-              char dummy1[32];
-              char dummy2[32];
-              char dummy3[32];
               char ppid[16];
 
-              fscanf ( stream, "%s %s %s %s", dummy1, dummy2, dummy3, ppid );
+	      fscanf ( stream, "%*s %*s %*s %s", ppid );
 
 //first copy parent's attributes
 
