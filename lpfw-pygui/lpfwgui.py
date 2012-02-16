@@ -61,7 +61,7 @@ def refreshmodel(ruleslist):
             #see below why del is needed
             del ker_fullpath,ker_pid,ker_perms,ker_name,ker_in_allow_traf,ker_out_allow_traf,ker_in_deny_traf,ker_out_allow_traf
         else:
-            fullpath = QStandardItem(item[0])
+            fullpath = QStandardItem(unicode(item[0], "utf-8"))
             #item[4] contains nfmark
             fullpath.setData(item[4])
             if (item[1] == "0"):
@@ -73,7 +73,7 @@ def refreshmodel(ruleslist):
             #only the name of the executable after the last /
             m_list = string.rsplit(item[0],"/",1)
             m_name = m_list[1]
-            name = QStandardItem(m_name)
+            name = QStandardItem(unicode(m_name, "utf-8"))
             in_allow_traf = QStandardItem()
             out_allow_traf = QStandardItem()
             in_deny_traf = QStandardItem()
@@ -82,11 +82,11 @@ def refreshmodel(ruleslist):
             del fullpath,pid,perms,name,in_allow_traf,out_allow_traf,in_deny_traf,out_deny_traf
             print "Received: %s" %(item[0])
             if (pid_string != "N/A"):
-                fullpath2 = QStandardItem(item[0])
+                fullpath2 = QStandardItem(unicode (item[0], "utf-8"))
                 fullpath2.setData(item[4])
                 pid2 = QStandardItem(pid_string)
                 perms2 = QStandardItem(item[2])
-                name2 = QStandardItem(m_name)
+                name2 = QStandardItem(unicode(m_name, "utf-8"))
                 in_allow_traf2 = QStandardItem()
                 out_allow_traf2 = QStandardItem()
                 in_deny_traf2 = QStandardItem()
@@ -373,10 +373,10 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         global sport
         global dport
         name = string.rsplit(path,"/",1)
-        dialogOut.label_name.setText(name[1])
+        dialogOut.label_name.setText(unicode(name[1], "utf-8"))
         dialogOut.label_ip.setText(addr)
         dialogOut.label_domain.setText("Looking up DNS...")
-        fullpath = QTableWidgetItem(path)
+        fullpath = QTableWidgetItem(unicode(path, "utf-8"))
         dialogOut.tableWidget_details.setItem(0,1,fullpath)
         pid_item = QTableWidgetItem(pid)
         dialogOut.tableWidget_details.setItem(1,1,pid_item)
@@ -400,7 +400,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         global path
         global addr
         global dport
-        dialogIn.label_name.setText(path)
+        dialogIn.label_name.setText(unicode(path, "utf-8"))
         dialogIn.label_port.setText(dport)
         dialogIn.label_ip.setText(str(addr))
         dialogIn.show()
