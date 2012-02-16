@@ -51,7 +51,7 @@ typedef struct m_dlist
   long *sockets_cache;//pointer to 2D array of cache
   DIR *dirstream; //a constantly open stream to /proc/PID/fd
   char pidfdpath[32];
-} dlist;
+} ruleslist;
 
 
 typedef struct

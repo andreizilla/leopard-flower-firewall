@@ -78,7 +78,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
 
 //EXPERIMENTAL. Like the above but uses the -m owner --gid-owner workaround to receive packets only from that gid
 void* nfq_gid_thread ( void *ptr );
-int  nfq_handle_gid ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata );
+int nfq_handle_gid ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata );
 
 //find the process which owns the socket and return nfmark,path,pid,stime, otherwise SOCKET_NOT_FOUND_IN_PROCPIDFD
 int socket_handle_tcp_in ( const long *socket, int *nfmark_to_set, char *path, char *pid, unsigned long long *stime);
