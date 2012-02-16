@@ -53,8 +53,14 @@ typedef struct m_dlist
   char pidfdpath[32];
 } dlist;
 
-//structures used in msgq for communication daemon<>frontend
 
+typedef struct
+{
+  long type;
+  int ct_entries_export[CT_ENTRIES_EXPORT_MAX][3];
+} mymsg;
+
+//structures used in msgq for communication daemon<>frontend
 typedef struct
 {
   long type;
