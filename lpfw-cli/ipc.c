@@ -8,16 +8,16 @@
 
 int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel;
 
-msg_struct msg_d2f = {1, 0};
+d2f_msg msg_d2f = {1, 0};
 msg_struct msg_d2flist = {1, 0};
 msg_struct msg_d2fdel = {1, 0};
-msg_struct msg_f2d = {1, 0};
+d2f_msg msg_f2d = {1, 0};
 
 void msgq_initialize();
 
 extern void list();
-extern void add_out(msg_struct add_struct);
-extern void add_in(msg_struct add_struct);
+extern void add_out(d2f_msg add_struct);
+extern void add_in(d2f_msg add_struct);
 extern int (*m_printf)(int loglevel, char *logstring);
 extern void farray_add(ruleslist rule);
 extern pthread_mutex_t logstring_mutex;
@@ -90,7 +90,8 @@ void* listenthread(void * ptr)
 
 void msgq_f2ddel(ruleslist rule, int ack_flag)
 {
-  msg_f2d.item = rule;
+  strcpy (msg_f2d.item.path, rule.path);
+  strcpy (msg_f2d.item.pid, rule.pid);
   if (ack_flag)
     {
       msg_f2d.item.command = F2DCOMM_DELANDACK;
@@ -110,7 +111,7 @@ void msgq_write()
     };
 }
 
-void msgq_add(msg_struct add_struct)
+void msgq_add(d2f_msg add_struct)
 {
   add_struct.item.command = F2DCOMM_ADD;
   if (msgsnd(mqd_f2d, &add_struct, sizeof (add_struct.item), 0) == -1)

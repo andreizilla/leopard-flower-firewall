@@ -72,6 +72,7 @@ typedef struct
     int command;
     char path[PATHSIZE]; //path to executable
     char pid[PIDLENGTH]; //its pid (or IP address for kernel processes)
+    char perms[PERMSLENGTH]; // permission in the form "ALLOW ALWAYS"
     char addr[INET_ADDRSTRLEN];
     int sport;
     int dport;

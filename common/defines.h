@@ -59,6 +59,9 @@
 #define PIDFILE "/tmp/lpfw.pid"
 #define RULESFILE "/etc/lpfw.rules"
 #define LPFW_LOGFILE "/tmp/lpfw.log"
+#define TEST_LOGFILE "/tmp/lpfw.testlog"
+#define CLI_FILE "lpfwcli"
+#define GUI_FILE "lpfwpygui"
 
 #define TCPINFO "/proc/net/tcp"
 #define UDPINFO "/proc/net/udp"

@@ -30,7 +30,7 @@ int mqd_d2f, mqd_f2d, mqd_d2flist, mqd_d2fdel, mqd_creds, mqd_d2ftraffic;
 struct msqid_ds *msgqid_d2f, *msgqid_f2d, *msgqid_d2flist, *msgqid_d2fdel, *msgqid_creds, *msgqid_d2ftraffic;
 
 //type has to be initialized to one, otherwise if it is 0 we'll get EINVAL on msgsnd
-msg_struct msg_f2d = {1, 0};
+d2f_msg msg_f2d = {1, 0};
 msg_struct msg_d2fdel = {1, 0};
 msg_struct msg_d2flist = {1, 0};
 
@@ -626,7 +626,7 @@ int notify_frontend(int command, char *path, char *pid, unsigned long long stime
 */
 
 //Ask frontend
-int  fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, int *sport, int*dport)
+int   fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, int *sport, int*dport)
 {
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
   if (awaiting_reply_from_fe)

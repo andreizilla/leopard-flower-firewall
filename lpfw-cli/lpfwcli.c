@@ -26,7 +26,7 @@ void list();
 
 char TAB[2] = {9, 0};
 //string holds daemon request
-msg_struct global_struct;
+d2f_msg global_struct;
 
 ruleslist *first;
 
@@ -67,7 +67,7 @@ int zenity_answer;
 
 extern  void frontend_unregister();
 extern  void msgq_initialize();
-extern void msgq_add(msg_struct add_struct);
+extern void msgq_add(d2f_msg add_struct);
 extern void msgq_list();
 extern void msgq_f2ddel(ruleslist rule, int ack_flag);
 
@@ -261,7 +261,7 @@ void * threadXmessage(void *ptr)
   process_verdict(retval);
 }
 
-void add_out(msg_struct add_struct)
+void add_out(d2f_msg add_struct)
 {
   if (is_being_run) return;
   is_being_run = 1;
@@ -282,7 +282,7 @@ void add_out(msg_struct add_struct)
 }
 
 
-void add_in(msg_struct add_struct)
+void add_in(d2f_msg add_struct)
 {
   if (is_being_run) return;
   is_being_run = 1;
@@ -294,11 +294,11 @@ void add_in(msg_struct add_struct)
   waddstr(uw, ":");
   //stime contains remote's port
   char string[16];
-  sprintf ( string, "%d", (int)add_struct.item.stime );
+  sprintf ( string, "%d", (int)add_struct.item.sport );
   waddstr(uw, string);
   waddstr(uw, " => port ");
   //inode contains local port
-  sprintf ( string, "%d", (int)add_struct.item.inode );
+  sprintf ( string, "%d", (int)add_struct.item.dport );
   waddstr(uw, string);
   waddstr(uw, " ");
   waddstr(uw, add_struct.item.path);

@@ -3331,7 +3331,15 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
               verdict = FRONTEND_BUSY;
               break;
             }
-	  else verdict = fe_active_flag_get() ? fe_ask_out(path,pid,&stime, daddr, 0,0) : FRONTEND_NOT_LAUNCHED;
+	  else {
+	    if (fe_active_flag_get()){
+	      int zero = 0;
+	      verdict = fe_ask_out(path,pid,&stime, daddr, &zero, &zero);
+	      }
+	    else {
+	      verdict = FRONTEND_NOT_LAUNCHED;
+	    }
+	  }
         }
       break;
     default:
@@ -3864,6 +3872,8 @@ int parse_command_line(int argc, char* argv[])
   rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
   pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
   log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
+  test_log_path = arg_file0 ( NULL, "test-log-file", "<path to file>", "Test log output file" );
+
 
 #ifndef WITHOUT_SYSVIPC
   cli_path = arg_file0 ( NULL, "cli-path", "<path to file>", "Path to CLI frontend" );
@@ -3910,16 +3920,12 @@ int parse_command_line(int argc, char* argv[])
   strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
   log_file->filename[0] = lpfw_logfile_pointer;
 
-#ifndef WITHOUT_SYSVIPC
+  char *testlogpath_pointer = malloc(strlen(TEST_LOGFILE)+1);
+  strcpy (testlogpath_pointer, TEST_LOGFILE);
+  test_log_path->filename[0] = testlogpath_pointer;
 
-  char *testlogpath;
-  testlogpath = malloc(PATHSIZE -16);
-  strcpy (testlogpath, "/tmp/lpfw.testlog");
-  test_log_path->filename[0] = testlogpath;
-
-
-
-#endif
+  cli_path->filename[0] = CLI_FILE;
+  pygui_path->filename[0] = GUI_FILE;
 
   * ( log_info->ival ) = 1;
   * ( log_traffic->ival ) = 1;
