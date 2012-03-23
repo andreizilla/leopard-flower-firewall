@@ -22,7 +22,6 @@ extern int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m
 extern long is_tcp_port_in_cache (const int *port);
 
 
-extern struct arg_file *test_log_path;
 FILE *test_log_stream;
 
 int test_refresh_thread()
@@ -96,6 +95,7 @@ int test_send_tcp ()
 {
 
   //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
+  //Also check if the packet actually hits the NFQUEUE handler
   int sock;
   struct sockaddr_in server;
   const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
@@ -228,7 +228,7 @@ int test_send_udp ()
 void * unittest_thread(void *ptr)
 {
   int retval;
-  if ( ( test_log_stream = fopen ( test_log_path->filename[0], "w") ) == NULL )
+  if ( ( test_log_stream = fopen ( TEST_LOGFILE, "w") ) == NULL )
     {
       perror ( "open testlog" );
     }

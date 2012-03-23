@@ -42,8 +42,9 @@ struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *global
 
 //command line arguments available globally
 struct arg_str *logging_facility;
-struct arg_file *rules_file, *pid_file, *log_file, *test_log_path, *allow_rule;
+struct arg_file *rules_file, *pid_file, *log_file, *allow_rule;
 struct arg_int *log_info, *log_traffic, *log_debug;
+struct arg_lit *test;
 //Paths of various frontends kept track of in order to chown&chmod them
 struct arg_file *cli_path, *gui_path, *pygui_path;
 
@@ -63,11 +64,8 @@ int ( *m_printf ) ( const int loglevel, const char *logstring );
 pthread_mutex_t dlist_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_t refresh_thr, nfq_in_thr, cache_build_thr, nfq_out_udp_thr, nfq_out_rest_thr, ct_dump_thr,
-ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, frontend_poll_thr, nfq_gid_thr;
-
-#ifdef DEBUG
-pthread_t unittest_thr, rules_dump_thr;
-#endif
+ct_destroy_hook_thr, read_stats_thread, ct_delete_nfmark_thr, frontend_poll_thr, nfq_gid_thr,
+unittest_thr, rules_dump_thr;
 
 //flag which shows whether frontend is running
 int fe_active_flag = 0;
@@ -3396,11 +3394,10 @@ int parse_command_line(int argc, char* argv[])
 #else
 				"<file>,<stdout>"
 #endif
-				, "Divert loggin to..." );
+				, "Divert logging to..." );
   rules_file = arg_file0 ( NULL, "rules-file", "<path to file>", "Rules output file" );
   pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
   log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
-  test_log_path = arg_file0 ( NULL, "test-log-file", "<path to file>", "Test log output file" );
   allow_rule = arg_file0 ( NULL, "addrule", "<path to executable>", "Add executable to rulesfile as ALLOW ALWAYS" );
 
 
@@ -3412,25 +3409,14 @@ int parse_command_line(int argc, char* argv[])
   log_info = arg_int0 ( NULL, "log-info", "<1/0 for yes/no>", "Info messages logging" );
   log_traffic = arg_int0 ( NULL, "log-traffic", "<1/0 for yes/no>", "Traffic logging" );
   log_debug = arg_int0 ( NULL, "log-debug", "<1/0 for yes/no>", "Debug messages logging" );
-
-#ifdef DEBUG
-  struct arg_lit *test = arg_lit0 ( NULL, "test", "Run unit test" );
-  test_log_path = arg_file0 ( NULL, "test-log-path", "<path to file>", "Where to print test log" );
-#endif
+  test = arg_lit0 ( NULL, "test", "Run unit test" );
 
   struct arg_lit *help = arg_lit0 ( NULL, "help", "Display help screen" );
   struct arg_lit *version = arg_lit0 ( NULL, "version", "Display the current version" );
   struct arg_end *end = arg_end ( 30 );
-  void *argtable[] = {logging_facility, rules_file, pid_file, log_file,
-#ifndef WITHOUT_SYSVIPC
-		      cli_path, pygui_path,
-#endif
-		      log_info, log_traffic, log_debug, allow_rule, help, version,
-#ifdef DEBUG
-		      test, test_log_path,
-#endif
-		     end
-		     };
+  void *argtable[] = {logging_facility, rules_file, pid_file, log_file, cli_path,
+      pygui_path, log_info, log_traffic, log_debug, allow_rule, help, version,
+      test, end};
 
   // Set default values
   char *stdout_pointer = malloc(strlen("stdout")+1);
@@ -3448,10 +3434,6 @@ int parse_command_line(int argc, char* argv[])
   char *lpfw_logfile_pointer = malloc(strlen(LPFW_LOGFILE)+1);
   strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
   log_file->filename[0] = lpfw_logfile_pointer;
-
-  char *testlogpath_pointer = malloc(strlen(TEST_LOGFILE)+1);
-  strcpy (testlogpath_pointer, TEST_LOGFILE);
-  test_log_path->filename[0] = testlogpath_pointer;
 
   cli_path->filename[0] = CLI_FILE;
   pygui_path->filename[0] = GUI_FILE;
@@ -3490,19 +3472,19 @@ int parse_command_line(int argc, char* argv[])
 	add_to_rulesfile(allow_rule->filename[0]);
 	exit(0);
       }
-    }/* --leave this for future debugging purposes
-	printf("\nArguments detected:\n");
-	printf("--ipc-method = %s \n", ipc_method->sval[0]);
-	printf("--login-facility = %s \n", logging_facility->sval[0]);
-	printf("--rules_file = %s \n", rules_file->filename[0]);
-	printf("--pid-file = %s \n", pid_file->filename[0]);
-	printf("--log-file = %s \n", log_file->filename[0]);
-	printf("--log-info = %d \n", log_info->count);
-	printf("--log-error = %d \n", log_error->count);
-	printf("--log-debug = %d \n", log_debug->count);
-	printf("--help = %d \n", help->count);
-	printf("--version = %d \n", version->count);
-*/
+      else if (test->count == 1) //log traffic to a separate file
+      {
+	char *file_pointer = malloc(strlen("file")+1);
+	strcpy (file_pointer, "file");
+	logging_facility->sval[0] = file_pointer;
+
+	 * ( log_traffic->ival ) = 1;
+
+	char *log_file_pointer = malloc(strlen(TEST_TRAFFIC_LOG)+1);
+	strcpy (log_file_pointer, TEST_TRAFFIC_LOG);
+	log_file->filename[0] = TEST_TRAFFIC_LOG;
+      }
+    }
   else if ( nerrors > 0 )
     {
       arg_print_errors ( stdout, end, "Leopard Flower" );
@@ -3946,20 +3928,17 @@ int main ( int argc, char *argv[] )
 
 #ifndef WITHOUT_SYSVIPC
   //argv[0] is the  path of the executable
-  if ( argc >= 2 )
-    {
-      if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui"))
-	{
+  if ( argc >= 2 ){
+      if (!strcmp (argv[1],"--cli")  || !strcmp(argv[1],"--gui") || !strcmp(argv[1],"--pygui")){
 	  return frontend_mode ( argc, argv );
-	}
-    }
+      }
+  }
 #endif
 
-  if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version")))
-    {
+  if (argc == 2 && ( !strcmp(argv[1], "--help") || !strcmp(argv[1], "--version"))){
       parse_command_line(argc, argv);
       return 0;
-    }
+  }
 
   capabilities_setup();
   setuid_root();
@@ -4011,12 +3990,11 @@ int main ( int argc, char *argv[] )
 
 #ifdef DEBUG
   pthread_create ( &rules_dump_thr, NULL, rules_dump_thread, NULL );
+#endif
 
-  if (argc > 1 && !strcmp (argv[1], "--test"))
-    {
+  if (test->count == 1){
        pthread_create ( &unittest_thr, NULL, unittest_thread, NULL );
     }
-#endif
 
   //endless loop of receiving packets and calling a handler on each packet
   int rv;

@@ -59,7 +59,8 @@
 #define PIDFILE "/tmp/lpfw.pid"
 #define RULESFILE "/etc/lpfw.rules"
 #define LPFW_LOGFILE "/tmp/lpfw.log"
-#define TEST_LOGFILE "/tmp/lpfw.testlog"
+#define TEST_LOGFILE "/tmp/lpfw.test_log"
+#define TEST_TRAFFIC_LOG "/tmp/lpfw.test_traffic_log"
 #define CLI_FILE "lpfwcli"
 #define GUI_FILE "lpfwpygui"
 
