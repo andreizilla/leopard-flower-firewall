@@ -1,12 +1,14 @@
-#include "conntrack.h"
-#include <string.h> //for memcpy
-#include "lpfw.h"
-#include "msgq.h" //for extern int mqd_d2ftraffic;
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
-#include "common/includes.h"
+#include <string.h> //for memcpy
 #include <pthread.h>
 #include <errno.h>
 #include <sys/msg.h>
+
+#include "conntrack.h"
+#include "lpfw.h"
+#include "msgq.h" //for extern int mqd_d2ftraffic;
+#include "common/includes.h"
+
 
 //ct_delete_mark_thread uses waiting on condition
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;

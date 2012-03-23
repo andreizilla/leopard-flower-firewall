@@ -3796,8 +3796,8 @@ void init_iptables()
 
 void init_nfq_handlers()
 {
-  struct nfq_q_handle * globalqh_tcp, * globalqh_udp;
-  //-----------------Register queue handler-------------
+  struct nfq_q_handle * globalqh_tcp, * globalqh_udp, * globalqh_rest, * globalqh_input, * globalqh_gid;
+  //-----------------Register OUT TCP queue handler-------------
   CALL_RETVAL (nfq_open, ==NULL, globalh_out_tcp);
   CALL (nfq_unbind_pf, <0, globalh_out_tcp, AF_INET );
   CALL (nfq_bind_pf, <0, globalh_out_tcp, AF_INET );
@@ -3810,7 +3810,7 @@ void init_nfq_handlers()
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
   //--------Done registering------------------
 
-  //-----------------Register queue handler-------------
+  //-----------------Register OUT UDP queue handler-------------
   CALL_RETVAL (nfq_open, ==NULL, globalh_out_udp);
   CALL (nfq_unbind_pf, <0, globalh_out_udp, AF_INET );
   CALL (nfq_bind_pf, <0, globalh_out_udp, AF_INET );
@@ -3823,108 +3823,44 @@ void init_nfq_handlers()
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
-    globalh_out_rest = nfq_open();
-    if ( !globalh_out_rest )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-      }
-    if ( nfq_unbind_pf ( globalh_out_rest, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-      }
-    if ( nfq_bind_pf ( globalh_out_rest, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-      }
-    struct nfq_q_handle * globalqh_rest = nfq_create_queue ( globalh_out_rest, NFQNUM_OUTPUT_REST, &nfq_handle_out_rest, NULL );
-    if ( !globalqh_rest )
-      {
-	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	exit (0);
-      }
-    //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_rest, NFQNL_COPY_PACKET, 40 ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-      }
-    if ( nfq_set_queue_maxlen ( globalqh_rest, 200 ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-      }
-    nfqfd_rest = nfq_fd ( globalh_out_rest );
-    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+  //-----------------Register OUT REST queue handler-------------
+  CALL_RETVAL (nfq_open, ==NULL, globalh_out_rest);
+  CALL (nfq_unbind_pf, <0, globalh_out_rest, AF_INET );
+  CALL (nfq_bind_pf, <0, globalh_out_rest, AF_INET );
+  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_rest, globalh_out_rest, NFQNUM_OUTPUT_REST,
+							      &nfq_handle_out_rest, NULL );
+  //copy only 40 bytes of packet to userspace - just to extract tcp source field
+  CALL (nfq_set_mode, <0, globalqh_rest, NFQNL_COPY_PACKET, 40 );
+  CALL (nfq_set_queue_maxlen, ==-1, globalqh_rest, 200 );
+  nfqfd_rest = nfq_fd ( globalh_out_rest);
+  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
-
-
-
-
-    //-----------------Register queue handler for INPUT chain-----
-    globalh_in = nfq_open();
-    if ( !globalh_in )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-      }
-    if ( nfq_unbind_pf ( globalh_in, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-      }
-    if ( nfq_bind_pf ( globalh_in, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-      }
-    struct nfq_q_handle * globalqh_input = nfq_create_queue ( globalh_in, NFQNUM_INPUT, &nfq_handle_in, NULL );
-    if ( !globalqh_input )
-      {
-	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	exit (0);
-      }
-    //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_input, NFQNL_COPY_PACKET, 40 ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-      }
-    if ( nfq_set_queue_maxlen ( globalqh_input, 30 ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-      }
-    nfqfd_input = nfq_fd ( globalh_in );
-    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+  //-----------------Register IN queue handler-------------
+  CALL_RETVAL (nfq_open, ==NULL, globalh_in);
+  CALL (nfq_unbind_pf, <0, globalh_in, AF_INET );
+  CALL (nfq_bind_pf, <0, globalh_in, AF_INET );
+  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_input, globalh_in, NFQNUM_INPUT,
+							      &nfq_handle_in, NULL );
+  //copy only 40 bytes of packet to userspace - just to extract tcp source field
+  CALL (nfq_set_mode, <0, globalqh_input, NFQNL_COPY_PACKET, 40 );
+  CALL (nfq_set_queue_maxlen, ==-1, globalqh_input, 30 );
+  nfqfd_input = nfq_fd ( globalh_in);
+  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
-    //---GID match rule
-    globalh_gid = nfq_open();
-    if ( !globalh_gid )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-      }
-    if ( nfq_unbind_pf ( globalh_gid, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-      }
-    if ( nfq_bind_pf ( globalh_gid, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-      }
-    struct nfq_q_handle * globalqh_gid = nfq_create_queue ( globalh_gid, NFQNUM_GID, &nfq_handle_gid, NULL );
-    if ( !globalqh_gid )
-      {
-	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	exit (0);
-      }
-    //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_gid, NFQNL_COPY_PACKET, 40 ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-      }
-    if ( nfq_set_queue_maxlen ( globalqh_gid, 30 ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-      }
-    nfqfd_gid = nfq_fd ( globalh_gid );
-    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+  //-----------------Register GID queue handler-------------
+  CALL_RETVAL (nfq_open, ==NULL, globalh_gid);
+  CALL (nfq_unbind_pf, <0, globalh_gid, AF_INET );
+  CALL (nfq_bind_pf, <0, globalh_gid, AF_INET );
+  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_gid, globalh_gid, NFQNUM_GID,
+							      &nfq_handle_gid, NULL );
+  //copy only 40 bytes of packet to userspace - just to extract tcp source field
+  CALL (nfq_set_mode, <0, globalqh_gid, NFQNL_COPY_PACKET, 40 );
+  CALL (nfq_set_queue_maxlen, ==-1, globalqh_gid, 30 );
+  nfqfd_gid = nfq_fd ( globalh_gid);
+  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
-
 }
 
 void init_ruleslist()
