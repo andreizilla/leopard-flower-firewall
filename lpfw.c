@@ -139,8 +139,26 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
     m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex); \
- 
+    pthread_mutex_unlock(&logstring_mutex);
+
+//wrap a system function in error code checking
+#define CALL(func, error, ...) \
+  do{ \
+    if (func(__VA_ARGS__) == error ){ \
+      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
+      return; \
+    } \
+  } while(0)
+
+//wrap a system function with return value in error code checking
+#define CALL_RETVAL(func, error, retval, ...) \
+  do{ \
+    if ((retval = func(__VA_ARGS__)) == error ){ \
+      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
+      return; \
+    } \
+  } while(0)
+
 
 int global_rules_filter(const int m_direction, const int protocol, const int port, const int verdict)
 {
@@ -1650,25 +1668,20 @@ void rules_load()
 //Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions and GLOBAL rules
 void rulesfileWrite()
 {
-  FILE *fd;
+  FILE *fd, *stream;
   struct stat m_stat;
-  FILE *stream;
   int i;
   unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
   unsigned char shachar[3] = "";
   char sizestring[16];
-
-  //rewrite/create the file regardless of whether it already exists
-  if ( ( fd = fopen ( rules_file->filename[0], "w" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "open: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-    }
-
-  //First write GLOBAL rules
   int is_first_port=TRUE , is_first_rule=TRUE ;
   char portsstring [PATHSIZE];
   ports_list_t * ports_list;
+
+  //rewrite/create the file regardless of whether it already exists
+  CALL_RETVAL (fopen, NULL, fd, rules_file->filename[0], "w");
+
+  //First write GLOBAL rules
   for (i=0; i < 8; i++)
   {
       is_first_port = TRUE;
@@ -1678,11 +1691,8 @@ void rulesfileWrite()
 	  if (is_first_rule == TRUE)
 	  {
 	      is_first_rule = FALSE;
-	      if ( fputs ( "[GLOBAL]", fd ) == EOF )
-		{
-		  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-		}
-	      fputc ( '\n', fd );
+	      CALL (fputs, EOF, "[GLOBAL]", fd);
+	      CALL (fputc, EOF, '\n', fd );
 	  }
 	  if (i == TCP_IN_ALLOW) strcpy(portsstring, "TCP_IN_ALLOW ");
 	  else if (i == TCP_IN_DENY) strcpy(portsstring, "TCP_IN_DENY ");
@@ -1722,15 +1732,12 @@ void rulesfileWrite()
 	  }
 	  ports_list = ports_list->next;
       }
-      if ( fputs ( portsstring, fd ) == EOF )
-	{
-	  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	}
-      fputc ( '\n', fd );
+      CALL (fputs, EOF, portsstring, fd);
+      CALL (fputc, EOF, '\n', fd );
   }
   if (is_first_rule == FALSE)
   {
-      fputc ( '\n', fd );
+    CALL (fputc, EOF, '\n', fd );
   }
 
   pthread_mutex_lock ( &dlist_mutex );
@@ -3988,81 +3995,55 @@ int parse_command_line(int argc, char* argv[])
   //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
 
+
+
+
+
 //add an executable (from command line) with ALLOW ALWAYS permissions
 void add_to_rulesfile(const char *exefile_path)
 {
-  if (access(exefile_path, R_OK) == -1){
-    printf("access: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
-    return;
-  }
-  FILE *exefile_stream;
-  if ((exefile_stream = fopen ( exefile_path, "r" )) == NULL){
-      printf ("fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
+  FILE *exefile_stream, *rulesfile_stream;
   unsigned char sha[DIGEST_SIZE];
-  sha512_stream ( exefile_stream, ( void * ) sha );
-  fclose (exefile_stream);
   struct stat exestat;
   char size[16];
-  if ( stat ( exefile_path, &exestat ) == -1 ){
-      printf ( "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
+  unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
+  unsigned char shachar[3] = "";
+  int i;
+
+  CALL (access, -1, exefile_path, R_OK);
+  CALL_RETVAL (fopen, NULL, exefile_stream, exefile_path, "r");
+  sha512_stream ( exefile_stream, ( void * ) sha );
+  CALL (fclose, EOF, exefile_stream);
+
+  CALL (stat, -1, exefile_path, &exestat);
   sprintf(size, "%d", (int)exestat.st_size);
 
   //Open rules file and add to the bottom of it
-  FILE *rulesfile_stream;
-  if ( access ( rules_file->filename[0], F_OK ) == -1 )
-  {
+  if ( access ( rules_file->filename[0], F_OK ) == -1 ){
     printf ( "CONFIG doesnt exist..creating" );
-    if ( ( rulesfile_stream = fopen ( rules_file->filename[0], "w" ) ) == NULL )
-      {
-	printf ( "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	return;
-      }
+    CALL_RETVAL (fopen, NULL, rulesfile_stream, rules_file->filename[0], "w");
   }
-  if ( ( rulesfile_stream = fopen ( rules_file->filename[0], "a" ) ) == NULL ){
-      printf ( "fopen RULESFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
-  if (fseek(rulesfile_stream, 0, SEEK_END) == -1){
-    printf ( "fseek: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    return;
-  }
-  if ( fputs ( exefile_path, rulesfile_stream ) == EOF ){
-      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
-  fputc ( '\n', rulesfile_stream );
-  if ( fputs ( ALLOW_ALWAYS , rulesfile_stream ) == EOF ){
-      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
-  fputc ( '\n', rulesfile_stream );
-  if ( fputs ( size , rulesfile_stream ) == EOF ){
-      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-  }
-  fputc ( '\n', rulesfile_stream );
+  else {CALL_RETVAL (fopen, NULL, rulesfile_stream, rules_file->filename[0], "a");}
 
-  unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
-  shastring[0] = 0;
-  unsigned char shachar[3] = "";
-  int i;
-  for ( i = 0; i < DIGEST_SIZE; ++i )
-    {
-      //pad single digits with a leading zero
-      sprintf ( shachar, "%02x", sha[i] );
-      //The next line causes gdb to go nutty: has to do with char vs. unsigned char
-      strcat ( shastring, shachar );
-    }
+  CALL (fseek, -1, rulesfile_stream, 0, SEEK_END);
+  CALL (fputs, EOF, exefile_path, rulesfile_stream);
+  CALL (fputc, EOF, '\n', rulesfile_stream);
+  CALL (fputs, EOF, ALLOW_ALWAYS, rulesfile_stream);
+  CALL (fputc, EOF, '\n', rulesfile_stream);
+  CALL (fputs, EOF, size, rulesfile_stream);
+  CALL (fputc, EOF, '\n', rulesfile_stream);
+
+  for ( i = 0; i < DIGEST_SIZE; ++i ){
+    //pad single digits with a leading zero
+    sprintf ( shachar, "%02x", sha[i] );
+    strcat ( shastring, shachar );
+  }
   shastring[DIGEST_SIZE * 2] = 0;
 
-  fputs ( shastring, rulesfile_stream );
-  fputc ( '\n', rulesfile_stream );
-  fputc ( '\n', rulesfile_stream );
-  fclose ( rulesfile_stream );
+  CALL (fputs, EOF, shastring, rulesfile_stream);
+  CALL (fputc, EOF, '\n', rulesfile_stream);
+  CALL (fputc, EOF, '\n', rulesfile_stream);
+  CALL (fclose, EOF, rulesfile_stream);
 }
 
 

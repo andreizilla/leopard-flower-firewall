@@ -1,6 +1,7 @@
 #ifndef LPFW_H
 #define LPFW_H
 
+#include <pthread.h>
 #include "common/defines.h"
 #include "common/includes.h"
 #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
@@ -191,5 +192,8 @@ int port2socket_udp ( int *portint, int *socketint );
 int port2socket_tcp ( int *portint, int *socketint );
 //dump all rules to a files
 void* rules_dump_thread ( void *ptr );
+
+
+
 
 #endif // LPFW_H
