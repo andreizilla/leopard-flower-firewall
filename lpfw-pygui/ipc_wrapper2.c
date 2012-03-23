@@ -43,7 +43,7 @@ void* f2dthread(void * ptr) {
 	char *token, *lasts;
 	char *search = " ";
 
-	msg_struct msg;
+	d2f_msg msg;
 	msg.type = 1;
 
 	memset(line, 0, sizeof(line));
