@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/capability.h>
 #include "argtable/argtable2.h"
+
 #include "common/defines.h"
 #include "common/includes.h"
 #include "lpfw.h"

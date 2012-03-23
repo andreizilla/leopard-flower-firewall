@@ -9,7 +9,7 @@ The following packaged must be installed for lpfw daemon to compile:
     libnetfilter-conntrack-dev
     libcap-dev
 The following packaged must be installed for lpfwcli frontend to compile:
-    libncurses5-dev
+    libncursesw5-dev
     optional: zenity(for popup notifications)
 The following packaged must be installed for python frontend to compile:
     libpython2.6

@@ -1,4 +1,3 @@
-#include "common/includes.h"
 #include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -8,10 +7,10 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <fcntl.h>
-#include "test.h"
 #include "argtable/argtable2.h"
 
-
+#include "common/includes.h"
+#include "test.h"
 
 extern int ( *m_printf ) ( int loglevel, char *logstring);
 extern int ruleslist_add ( char *path, char *pid, char *perms, mbool active, char *sha, unsigned long long stime, off_t size, int nfmark, unsigned char first_instance);
