@@ -24,17 +24,19 @@ endif
 
 all: lpfw install lpfwcli lpfwpygui
 
-lpfw: sha.o msgq.o test.o \
+lpfw: sha.o msgq.o conntrack.o test.o \
       argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
       lpfw.c lpfw.h common/defines.h common/includes.h
-	gcc $(GCCFLAGS) sha.o msgq.o test.o lpfw.c \
-		      argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
-		      -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
+	gcc $(GCCFLAGS) sha.o msgq.o conntrack.o test.o lpfw.c \
+	    argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o \
+	    -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 sha.o : sha512/sha.c sha512/sha.h sha512/u64.h
 	gcc $(GCCFLAGS) -c sha512/sha.c
 msgq.o : msgq.c msgq.h lpfw.h common/defines.h common/includes.h
 	gcc $(GCCFLAGS) -c msgq.c
+conntrack.o : conntrack.c conntrack.h
+	gcc $(GCCFLAGS) -c conntrack.c
 test.o : test.c test.h common/includes.h
 	gcc $(GCCFLAGS) -c test.c
 argtable2.o : argtable/argtable2.c
