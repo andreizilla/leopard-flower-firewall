@@ -141,10 +141,10 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex);
 
-//wrap a system function in error code checking
+//wrap a system function in error code checking, error is in the form ==EOF or <0 etc.
 #define CALL(func, error, ...) \
   do{ \
-    if (func(__VA_ARGS__) == error ){ \
+    if (func(__VA_ARGS__) error ){ \
       M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
       return; \
     } \
@@ -153,7 +153,7 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 //wrap a system function with return value in error code checking
 #define CALL_RETVAL(func, error, retval, ...) \
   do{ \
-    if ((retval = func(__VA_ARGS__)) == error ){ \
+    if ((retval = func(__VA_ARGS__)) error ){ \
       M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
       return; \
     } \
@@ -1570,44 +1570,31 @@ void global_rule_add( const char *str_direction, char *str_ports)
 void rules_load()
 {
   FILE *stream;
-  char path[PATHSIZE];
-  char laststring[PATHSIZE];
-  char line[PATHSIZE];
+  char path[PATHSIZE], laststring[PATHSIZE] , line[PATHSIZE], perms[PERMSLENGTH];;
   char *result;
-  char perms[PERMSLENGTH];
   char ip[INET_ADDRSTRLEN+1];//plus trailing /n and 0
   unsigned long sizeint;
   char sizestring[16];
   char shastring[DIGEST_SIZE * 2 + 2];
-  struct stat m_stat;
   unsigned char digest[DIGEST_SIZE];
   unsigned char hexchar[3] = "";
   char newline[2] = {'\n','\0'};
+  char *token, *lasts;
+  char direction[14];
+  char ports[PATHSIZE - 100];
 
-
-  if ( stat ( rules_file->filename[0], &m_stat ) == -1 )
+  if ( access ( rules_file->filename[0], F_OK ) == -1 )
     {
       M_PRINTF ( MLOG_INFO, "CONFIG doesnt exist..creating" );
-      if ( ( stream = fopen ( rules_file->filename[0], "w+" ) ) == NULL )
-        {
-          M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-          return;
-        }
+      CALL_RETVAL (fopen, ==NULL, stream, rules_file->filename[0], "w+");
     }
-  if ( ( stream = fopen ( rules_file->filename[0], "r" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_INFO, "fopen RULESFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-    }
+  CALL_RETVAL (fopen, ==NULL, stream, rules_file->filename[0], "r");
 
 //First read the global rules
   if ( fgets ( path, PATHSIZE, stream ) == 0 ) return;
   path[strlen ( path ) - 1] = 0; //remove newline
   if (!strcmp(path, "[GLOBAL]"))
     {
-      char *token, *lasts;
-      char direction[14];
-      char ports[PATHSIZE - 100];
       while(fgets ( path, PATHSIZE, stream ))
 	{
 	  if (!strcmp (path, newline)) break;
@@ -1621,7 +1608,7 @@ void rules_load()
     }
   else
   {
-      fseek(stream, 0, SEEK_SET);
+      CALL (fseek, ==-1, stream, 0, SEEK_SET);
   }
 
   //Now process all the non-global, i.e. per-application rules
@@ -1659,10 +1646,7 @@ void rules_load()
 
       ruleslist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
-  if ( fclose ( stream ) == EOF )
-    {
-      M_PRINTF ( MLOG_INFO, "fclose: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-    }
+  CALL (fclose, ==EOF, stream);
 }
 
 //Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions and GLOBAL rules
@@ -1679,7 +1663,7 @@ void rulesfileWrite()
   ports_list_t * ports_list;
 
   //rewrite/create the file regardless of whether it already exists
-  CALL_RETVAL (fopen, NULL, fd, rules_file->filename[0], "w");
+  CALL_RETVAL (fopen, ==NULL, fd, rules_file->filename[0], "w");
 
   //First write GLOBAL rules
   for (i=0; i < 8; i++)
@@ -1691,8 +1675,8 @@ void rulesfileWrite()
 	  if (is_first_rule == TRUE)
 	  {
 	      is_first_rule = FALSE;
-	      CALL (fputs, EOF, "[GLOBAL]", fd);
-	      CALL (fputc, EOF, '\n', fd );
+	      CALL (fputs, ==EOF, "[GLOBAL]", fd);
+	      CALL (fputc, ==EOF, '\n', fd );
 	  }
 	  if (i == TCP_IN_ALLOW) strcpy(portsstring, "TCP_IN_ALLOW ");
 	  else if (i == TCP_IN_DENY) strcpy(portsstring, "TCP_IN_DENY ");
@@ -1732,12 +1716,12 @@ void rulesfileWrite()
 	  }
 	  ports_list = ports_list->next;
       }
-      CALL (fputs, EOF, portsstring, fd);
-      CALL (fputc, EOF, '\n', fd );
+      CALL (fputs, ==EOF, portsstring, fd);
+      CALL (fputc, ==EOF, '\n', fd );
   }
   if (is_first_rule == FALSE)
   {
-    CALL (fputc, EOF, '\n', fd );
+    CALL (fputc, ==EOF, '\n', fd );
   }
 
   pthread_mutex_lock ( &dlist_mutex );
@@ -1768,52 +1752,38 @@ loop:
 inkernel:
           if (!strcmp(temp->path, KERNEL_PROCESS))
             {
-              if ( fputs ( temp->path, fd ) == EOF )
-                {
-                  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-                }
-              fputc ( '\n', fd );
-              if ( fputs ( temp->pid, fd ) == EOF )
-                {
-                  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-                }
-              fputc ( '\n', fd );
-              if ( fputs ( temp->perms, fd ) == EOF )
-                {
-                  M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-                }
-              fputc ( '\n', fd );
-              fputc ( '\n', fd );
+	      CALL (fputs, ==EOF, temp->path, fd);
+	      CALL (fputc, ==EOF, '\n', fd );
+	      CALL (fputs, ==EOF, temp->pid, fd);
+	      CALL (fputc, ==EOF, '\n', fd );
+	      CALL (fputs, ==EOF, temp->perms, fd);
+	      CALL (fputc, ==EOF, '\n', fd );
+	      CALL (fputc, ==EOF, '\n', fd );
               fsync ( fileno ( fd ) );
               temp = temp->next;
               continue;
-            }
+	    }
 
-          if ( fputs ( temp->path, fd ) == EOF )
-            {
-              M_PRINTF ( MLOG_INFO, "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-            }
-          fputc ( '\n', fd );
-          fputs ( temp->perms, fd );
-          fputc ( '\n', fd );
+	  CALL (fputs, ==EOF, temp->path, fd);
+	  CALL (fputc, ==EOF, '\n', fd );
+	  CALL (fputs, ==EOF, temp->perms, fd);
+	  CALL (fputc, ==EOF, '\n', fd );
           sprintf ( sizestring, "%ld", ( long ) temp->exesize );
-          fputs ( sizestring, fd );
-          fputc ( '\n', fd );
+	  CALL (fputs, ==EOF, sizestring, fd);
+	  CALL (fputc, ==EOF, '\n', fd );
 
           shastring[0] = 0;
           for ( i = 0; i < DIGEST_SIZE; ++i )
             {
               //pad single digits with a leading zero
               sprintf ( shachar, "%02x", temp->sha[i] );
-              //The next line causes gdb to go nutty
               strcat ( shastring, shachar );
             }
           shastring[DIGEST_SIZE * 2] = 0;
 
-          fputs ( shastring, fd );
-          fputc ( '\n', fd );
-          fputc ( '\n', fd );
-
+	  CALL (fputs, ==EOF, shastring, fd);
+	  CALL (fputc, ==EOF, '\n', fd );
+	  CALL (fputc, ==EOF, '\n', fd );
 
           //don't proceed until data is written to disk
           fsync ( fileno ( fd ) );
@@ -1821,7 +1791,7 @@ inkernel:
       temp = temp->next;
     }
   pthread_mutex_unlock ( &dlist_mutex );
-  fclose ( fd );
+  CALL (fclose, ==EOF, fd);
 }
 
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
@@ -3995,10 +3965,6 @@ int parse_command_line(int argc, char* argv[])
   //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
 
-
-
-
-
 //add an executable (from command line) with ALLOW ALWAYS permissions
 void add_to_rulesfile(const char *exefile_path)
 {
@@ -4010,28 +3976,28 @@ void add_to_rulesfile(const char *exefile_path)
   unsigned char shachar[3] = "";
   int i;
 
-  CALL (access, -1, exefile_path, R_OK);
-  CALL_RETVAL (fopen, NULL, exefile_stream, exefile_path, "r");
+  CALL (access, ==-1, exefile_path, R_OK);
+  CALL_RETVAL (fopen, ==NULL, exefile_stream, exefile_path, "r");
   sha512_stream ( exefile_stream, ( void * ) sha );
-  CALL (fclose, EOF, exefile_stream);
+  CALL (fclose, ==EOF, exefile_stream);
 
-  CALL (stat, -1, exefile_path, &exestat);
+  CALL (stat, ==-1, exefile_path, &exestat);
   sprintf(size, "%d", (int)exestat.st_size);
 
   //Open rules file and add to the bottom of it
   if ( access ( rules_file->filename[0], F_OK ) == -1 ){
     printf ( "CONFIG doesnt exist..creating" );
-    CALL_RETVAL (fopen, NULL, rulesfile_stream, rules_file->filename[0], "w");
+    CALL_RETVAL (fopen, ==NULL, rulesfile_stream, rules_file->filename[0], "w");
   }
-  else {CALL_RETVAL (fopen, NULL, rulesfile_stream, rules_file->filename[0], "a");}
+  else {CALL_RETVAL (fopen, ==NULL, rulesfile_stream, rules_file->filename[0], "a");}
 
-  CALL (fseek, -1, rulesfile_stream, 0, SEEK_END);
-  CALL (fputs, EOF, exefile_path, rulesfile_stream);
-  CALL (fputc, EOF, '\n', rulesfile_stream);
-  CALL (fputs, EOF, ALLOW_ALWAYS, rulesfile_stream);
-  CALL (fputc, EOF, '\n', rulesfile_stream);
-  CALL (fputs, EOF, size, rulesfile_stream);
-  CALL (fputc, EOF, '\n', rulesfile_stream);
+  CALL (fseek, ==-1, rulesfile_stream, 0, SEEK_END);
+  CALL (fputs, ==EOF, exefile_path, rulesfile_stream);
+  CALL (fputc, ==EOF, '\n', rulesfile_stream);
+  CALL (fputs, ==EOF, ALLOW_ALWAYS, rulesfile_stream);
+  CALL (fputc, ==EOF, '\n', rulesfile_stream);
+  CALL (fputs, ==EOF, size, rulesfile_stream);
+  CALL (fputc, ==EOF, '\n', rulesfile_stream);
 
   for ( i = 0; i < DIGEST_SIZE; ++i ){
     //pad single digits with a leading zero
@@ -4040,10 +4006,10 @@ void add_to_rulesfile(const char *exefile_path)
   }
   shastring[DIGEST_SIZE * 2] = 0;
 
-  CALL (fputs, EOF, shastring, rulesfile_stream);
-  CALL (fputc, EOF, '\n', rulesfile_stream);
-  CALL (fputc, EOF, '\n', rulesfile_stream);
-  CALL (fclose, EOF, rulesfile_stream);
+  CALL (fputs, ==EOF, shastring, rulesfile_stream);
+  CALL (fputc, ==EOF, '\n', rulesfile_stream);
+  CALL (fputc, ==EOF, '\n', rulesfile_stream);
+  CALL (fclose, ==EOF, rulesfile_stream);
 }
 
 
@@ -4280,70 +4246,31 @@ void init_iptables()
 
 void init_nfq_handlers()
 {
-    //-----------------Register queue handler-------------
-    globalh_out_tcp = nfq_open();
-    if ( !globalh_out_tcp )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-      }
-    if ( nfq_unbind_pf ( globalh_out_tcp, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-      }
-    if ( nfq_bind_pf ( globalh_out_tcp, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-      }
-    struct nfq_q_handle * globalqh_tcp = nfq_create_queue ( globalh_out_tcp, NFQNUM_OUTPUT_TCP, &nfq_handle_out_tcp, NULL );
-    if ( !globalqh_tcp )
-      {
-	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	exit (0);
-      }
+  struct nfq_q_handle * globalqh_tcp, * globalqh_udp;
+  //-----------------Register queue handler-------------
+  CALL_RETVAL (nfq_open, ==NULL, globalh_out_tcp);
+  CALL (nfq_unbind_pf, <0, globalh_out_tcp, AF_INET );
+  CALL (nfq_bind_pf, <0, globalh_out_tcp, AF_INET );
+  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_tcp, globalh_out_tcp, NFQNUM_OUTPUT_TCP,
+							      &nfq_handle_out_tcp, NULL );
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_tcp, NFQNL_COPY_PACKET, 40 ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-      }
-    if ( nfq_set_queue_maxlen ( globalqh_tcp, 200 ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-      }
-    nfqfd_tcp = nfq_fd ( globalh_out_tcp);
-    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
-    //--------Done registering------------------
+  CALL (nfq_set_mode, <0, globalqh_tcp, NFQNL_COPY_PACKET, 40 );
+  CALL (nfq_set_queue_maxlen, ==-1, globalqh_tcp, 200 );
+  nfqfd_tcp = nfq_fd ( globalh_out_tcp);
+  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+  //--------Done registering------------------
 
-    //-----------------Register queue handler-------------
-    globalh_out_udp = nfq_open();
-    if ( !globalh_out_udp )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_open\n" );
-      }
-    if ( nfq_unbind_pf ( globalh_out_udp, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_unbind\n" );
-      }
-    if ( nfq_bind_pf ( globalh_out_udp, AF_INET ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error during nfq_bind\n" );
-      }
-    struct nfq_q_handle * globalqh_udp = nfq_create_queue ( globalh_out_udp, NFQNUM_OUTPUT_UDP, &nfq_handle_out_udp, NULL );
-    if ( !globalqh_udp )
-      {
-	M_PRINTF ( MLOG_INFO, "error in nfq_create_queue. Please make sure that any other instances of Leopard Flower are not running and restart the program. Exitting\n" );
-	exit (0);
-      }
-    //copy only 40 bytes of packet to userspace - just to extract tcp source field
-    if ( nfq_set_mode ( globalqh_udp, NFQNL_COPY_PACKET, 40 ) < 0 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in set_mode\n" );
-      }
-    if ( nfq_set_queue_maxlen ( globalqh_udp, 200 ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "error in queue_maxlen\n" );
-      }
-    nfqfd_udp = nfq_fd ( globalh_out_udp );
-    M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
+  //-----------------Register queue handler-------------
+  CALL_RETVAL (nfq_open, ==NULL, globalh_out_udp);
+  CALL (nfq_unbind_pf, <0, globalh_out_udp, AF_INET );
+  CALL (nfq_bind_pf, <0, globalh_out_udp, AF_INET );
+  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_udp, globalh_out_udp, NFQNUM_OUTPUT_UDP,
+							      &nfq_handle_out_udp, NULL );
+  //copy only 40 bytes of packet to userspace - just to extract tcp source field
+  CALL (nfq_set_mode, <0, globalqh_udp, NFQNL_COPY_PACKET, 40 );
+  CALL (nfq_set_queue_maxlen, ==-1, globalqh_udp, 200 );
+  nfqfd_udp = nfq_fd ( globalh_out_udp);
+  M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
     globalh_out_rest = nfq_open();
@@ -4465,31 +4392,16 @@ void init_ruleslist()
 
 void open_proc_net_files()
 {
-    if ( ( tcpinfo = fopen ( TCPINFO, "r" ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (PROCFS_ERROR);
-      }
-    if ( ( tcp6info = fopen ( TCP6INFO, "r" ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (PROCFS_ERROR);
-      }
-    if ( ( udpinfo = fopen ( UDPINFO, "r" ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (PROCFS_ERROR);
-      }
-    if ( ( udp6info = fopen (UDP6INFO, "r" ) ) == NULL )
-      {
-	M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (PROCFS_ERROR);
-      }
-    procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
-    tcpinfo_fd = fileno(tcpinfo);
-    tcp6info_fd = fileno(tcp6info);
-    udpinfo_fd = fileno(udpinfo);
-    udp6info_fd = fileno(udp6info);
+  CALL_RETVAL (fopen, ==NULL, tcpinfo, TCPINFO, "r");
+  CALL_RETVAL (fopen, ==NULL, tcp6info, TCP6INFO, "r");
+  CALL_RETVAL (fopen, ==NULL, udpinfo, UDPINFO, "r");
+  CALL_RETVAL (fopen, ==NULL, udp6info, UDP6INFO, "r");
+
+  procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
+  tcpinfo_fd = fileno(tcpinfo);
+  tcp6info_fd = fileno(tcp6info);
+  udpinfo_fd = fileno(udpinfo);
+  udp6info_fd = fileno(udp6info);
 }
 
 void chown_and_setgid_frontend()
