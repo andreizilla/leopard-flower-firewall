@@ -15,24 +15,6 @@
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex);
 
-//wrap a system function in error code checking; error is in the form ==EOF or <0 etc.
-#define CALL(func, error, ...) \
-  do{ \
-    if (func(__VA_ARGS__) error ){ \
-      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
-      return; \
-    } \
-  } while(0)
-
-//wrap a system function with return value in error code checking
-#define CALL_RETVAL(func, error, retval, ...) \
-  do{ \
-    if ((retval = func(__VA_ARGS__)) error ){ \
-      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
-      return; \
-    } \
-  } while(0)
-
 typedef char mbool;
 
 typedef struct m_ports_list

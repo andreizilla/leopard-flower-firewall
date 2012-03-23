@@ -17,7 +17,6 @@
 #include <ctype.h> // for toupper
 #include <unistd.h>
 #include <signal.h>
-#include <stdarg.h> //for dynamic arguments
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
@@ -31,6 +30,7 @@
 
 #include "common/includes.h"
 #include "common/defines.h"
+#include "common/syscall_wrappers.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
 #include "lpfw.h"
@@ -1154,9 +1154,9 @@ void rules_load()
   if ( access ( rules_file->filename[0], F_OK ) == -1 )
     {
       M_PRINTF ( MLOG_INFO, "CONFIG doesnt exist..creating" );
-      CALL_RETVAL (fopen, ==NULL, stream, rules_file->filename[0], "w+");
+      _fopen (stream, rules_file->filename[0], "w+");
     }
-  CALL_RETVAL (fopen, ==NULL, stream, rules_file->filename[0], "r");
+  _fopen (stream, rules_file->filename[0], "r");
 
 //First read the global rules
   if ( fgets ( path, PATHSIZE, stream ) == 0 ) return;
@@ -1176,7 +1176,7 @@ void rules_load()
     }
   else
   {
-      CALL (fseek, ==-1, stream, 0, SEEK_SET);
+      _fseek (stream, 0, SEEK_SET);
   }
 
   //Now process all the non-global, i.e. per-application rules
@@ -1214,7 +1214,7 @@ void rules_load()
 
       ruleslist_add ( path, "0", perms, FALSE, digest, 2, ( off_t ) sizeint, 0, TRUE);
     }
-  CALL (fclose, ==EOF, stream);
+  _fclose (stream);
 }
 
 //Write to RULESFILE only entries that have ALLOW/DENY_ALWAYS permissions and GLOBAL rules
@@ -1230,7 +1230,7 @@ void rulesfileWrite()
   ports_list_t * ports_list;
 
   //rewrite/create the file regardless of whether it already exists
-  CALL_RETVAL (fopen, ==NULL, fd, rules_file->filename[0], "w");
+  _fopen (fd, rules_file->filename[0], "w");
 
   //First write GLOBAL rules
   for (i=0; i < 8; i++)
@@ -1242,8 +1242,8 @@ void rulesfileWrite()
 	  if (is_first_rule == TRUE)
 	  {
 	      is_first_rule = FALSE;
-	      CALL (fputs, ==EOF, "[GLOBAL]", fd);
-	      CALL (fputc, ==EOF, '\n', fd );
+	      _fputs ("[GLOBAL]", fd);
+	      _fputc ('\n', fd );
 	  }
 	  if (i == TCP_IN_ALLOW) strcpy(portsstring, "TCP_IN_ALLOW ");
 	  else if (i == TCP_IN_DENY) strcpy(portsstring, "TCP_IN_DENY ");
@@ -1283,12 +1283,12 @@ void rulesfileWrite()
 	  }
 	  ports_list = ports_list->next;
       }
-      CALL (fputs, ==EOF, portsstring, fd);
-      CALL (fputc, ==EOF, '\n', fd );
+      _fputs (portsstring, fd);
+      _fputc ('\n', fd );
   }
   if (is_first_rule == FALSE)
   {
-    CALL (fputc, ==EOF, '\n', fd );
+    _fputc ('\n', fd );
   }
 
   pthread_mutex_lock ( &dlist_mutex );
@@ -1319,25 +1319,25 @@ loop:
 inkernel:
           if (!strcmp(temp->path, KERNEL_PROCESS))
             {
-	      CALL (fputs, ==EOF, temp->path, fd);
-	      CALL (fputc, ==EOF, '\n', fd );
-	      CALL (fputs, ==EOF, temp->pid, fd);
-	      CALL (fputc, ==EOF, '\n', fd );
-	      CALL (fputs, ==EOF, temp->perms, fd);
-	      CALL (fputc, ==EOF, '\n', fd );
-	      CALL (fputc, ==EOF, '\n', fd );
+	      _fputs (temp->path, fd);
+	      _fputc ('\n', fd );
+	      _fputs (temp->pid, fd);
+	      _fputc ('\n', fd );
+	      _fputs (temp->perms, fd);
+	      _fputc ('\n', fd );
+	      _fputc ('\n', fd );
               fsync ( fileno ( fd ) );
               temp = temp->next;
               continue;
 	    }
 
-	  CALL (fputs, ==EOF, temp->path, fd);
-	  CALL (fputc, ==EOF, '\n', fd );
-	  CALL (fputs, ==EOF, temp->perms, fd);
-	  CALL (fputc, ==EOF, '\n', fd );
+	  _fputs (temp->path, fd);
+	  _fputc ('\n', fd );
+	  _fputs (temp->perms, fd);
+	  _fputc ('\n', fd );
           sprintf ( sizestring, "%ld", ( long ) temp->exesize );
-	  CALL (fputs, ==EOF, sizestring, fd);
-	  CALL (fputc, ==EOF, '\n', fd );
+	  _fputs (sizestring, fd);
+	  _fputc ('\n', fd );
 
           shastring[0] = 0;
           for ( i = 0; i < DIGEST_SIZE; ++i )
@@ -1348,9 +1348,9 @@ inkernel:
             }
           shastring[DIGEST_SIZE * 2] = 0;
 
-	  CALL (fputs, ==EOF, shastring, fd);
-	  CALL (fputc, ==EOF, '\n', fd );
-	  CALL (fputc, ==EOF, '\n', fd );
+	  _fputs (shastring, fd);
+	  _fputc ('\n', fd );
+	  _fputc ('\n', fd );
 
           //don't proceed until data is written to disk
           fsync ( fileno ( fd ) );
@@ -1358,7 +1358,7 @@ inkernel:
       temp = temp->next;
     }
   pthread_mutex_unlock ( &dlist_mutex );
-  CALL (fclose, ==EOF, fd);
+  _fclose (fd);
 }
 
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
@@ -3221,9 +3221,9 @@ void pidfile_check()
   //stat() returns 0 if file exists
   if ( stat ( pid_file->filename[0], &m_stat ) == 0 )
     {
-    CALL_RETVAL (fopen, ==NULL, pidfd, pid_file->filename[0], "r");
-    CALL (fgets, ==NULL, pidbuf, 8, pidfd);
-    CALL (fclose, ==EOF, pidfd);
+    _fopen (pidfd, pid_file->filename[0], "r");
+    _fgets (pidbuf, 8, pidfd);
+    _fclose (pidfd);
       pidbuf[7] = 0;
       pid = atoi ( pidbuf );
       if ( pid > 0 )
@@ -3234,10 +3234,10 @@ void pidfile_check()
 	      strcpy ( procstring, "/proc/" );
 	      strcat ( procstring, pidbuf );
 	      strcat ( procstring, "/comm" );
-	      CALL_RETVAL (fopen, ==NULL, procfd, procstring, "r");
+	      _fopen (procfd, procstring, "r");
 	      //let's replace 0x0A with 0x00
-	      CALL (fgets, ==NULL, procbuf, 19, procfd);
-	      CALL (fclose, ==EOF, procfd);
+	      _fgets (procbuf, 19, procfd);
+	      _fclose (procfd);
 	      ptr = strstr ( procbuf, srchstr );
 	      *ptr = 0;
 	      //compare the actual string, if found => carry on
@@ -3261,13 +3261,13 @@ void pidfile_check()
 
 
   //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-  CALL_RETVAL (fopen, ==NULL, newpid, pid_file->filename[0], "w");
+  _fopen (newpid, pid_file->filename[0], "w");
 
   sprintf ( pid2str, "%d", ( int ) getpid() );
   ssize_t size;
   newpidfd = fileno(newpid);
-  CALL_RETVAL (write, ==-1, size,newpidfd, pid2str, 8);
-  CALL (fclose, ==EOF, newpid);
+  _write (size,newpidfd, pid2str, 8);
+  _fclose (newpid);
 }
 
 //initiate message queue and send to first lpfw instance, our pid, tty and display and quit.
@@ -3490,28 +3490,28 @@ void add_to_rulesfile(const char *exefile_path)
   unsigned char shachar[3] = "";
   int i;
 
-  CALL (access, ==-1, exefile_path, R_OK);
-  CALL_RETVAL (fopen, ==NULL, exefile_stream, exefile_path, "r");
+  _access (exefile_path, R_OK);
+  _fopen (exefile_stream, exefile_path, "r");
   sha512_stream ( exefile_stream, ( void * ) sha );
-  CALL (fclose, ==EOF, exefile_stream);
+  _fclose (exefile_stream);
 
-  CALL (stat, ==-1, exefile_path, &exestat);
+  _stat (exefile_path, &exestat);
   sprintf(size, "%d", (int)exestat.st_size);
 
   //Open rules file and add to the bottom of it
   if ( access ( rules_file->filename[0], F_OK ) == -1 ){
     printf ( "CONFIG doesnt exist..creating" );
-    CALL_RETVAL (fopen, ==NULL, rulesfile_stream, rules_file->filename[0], "w");
+    _fopen (rulesfile_stream, rules_file->filename[0], "w");
   }
-  else {CALL_RETVAL (fopen, ==NULL, rulesfile_stream, rules_file->filename[0], "a");}
+  else {_fopen (rulesfile_stream, rules_file->filename[0], "a");}
 
-  CALL (fseek, ==-1, rulesfile_stream, 0, SEEK_END);
-  CALL (fputs, ==EOF, exefile_path, rulesfile_stream);
-  CALL (fputc, ==EOF, '\n', rulesfile_stream);
-  CALL (fputs, ==EOF, ALLOW_ALWAYS, rulesfile_stream);
-  CALL (fputc, ==EOF, '\n', rulesfile_stream);
-  CALL (fputs, ==EOF, size, rulesfile_stream);
-  CALL (fputc, ==EOF, '\n', rulesfile_stream);
+  _fseek (rulesfile_stream, 0, SEEK_END);
+  _fputs (exefile_path, rulesfile_stream);
+  _fputc ('\n', rulesfile_stream);
+  _fputs (ALLOW_ALWAYS, rulesfile_stream);
+  _fputc ('\n', rulesfile_stream);
+  _fputs (size, rulesfile_stream);
+  _fputc ('\n', rulesfile_stream);
 
   for ( i = 0; i < DIGEST_SIZE; ++i ){
     //pad single digits with a leading zero
@@ -3520,10 +3520,10 @@ void add_to_rulesfile(const char *exefile_path)
   }
   shastring[DIGEST_SIZE * 2] = 0;
 
-  CALL (fputs, ==EOF, shastring, rulesfile_stream);
-  CALL (fputc, ==EOF, '\n', rulesfile_stream);
-  CALL (fputc, ==EOF, '\n', rulesfile_stream);
-  CALL (fclose, ==EOF, rulesfile_stream);
+  _fputs (shastring, rulesfile_stream);
+  _fputc ('\n', rulesfile_stream);
+  _fputc ('\n', rulesfile_stream);
+  _fclose (rulesfile_stream);
 }
 
 
@@ -3728,14 +3728,14 @@ void* iptables_check_thread (void *ptr)
 
   //commit to memory the contents of the files
   fd_output = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
-  CALL (stat, ==-1, SAVE_IPTABLES_OUTPUT_FILE , &mstat);
+  _stat (SAVE_IPTABLES_OUTPUT_FILE , &mstat);
   size_output = mstat.st_size;
   addr_output = mmap (NULL, size_output, PROT_READ, MAP_PRIVATE, fd_output, 0);
   close (fd_output);
   if (addr_output == MAP_FAILED) {perror("mmap"); exit(0);}
 
   fd_input = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
-  CALL (stat, ==-1, SAVE_IPTABLES_INPUT_FILE , &mstat);
+  _stat (SAVE_IPTABLES_INPUT_FILE , &mstat);
   size_input = mstat.st_size;
   addr_input = mmap (NULL, size_input, PROT_READ, MAP_PRIVATE, fd_input, 0);
   close (fd_input);
@@ -3744,18 +3744,18 @@ void* iptables_check_thread (void *ptr)
   while (1)
   {
     sleep(3);
-    CALL (system, ==-1, save_output);
-    CALL (system, ==-1, save_input);
+    _system (save_output);
+    _system (save_input);
 
     fd_newoutput = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
-    CALL (stat, ==-1, SAVE_IPTABLES_OUTPUT_FILE , &mstat);
+    _stat (SAVE_IPTABLES_OUTPUT_FILE , &mstat);
     size_newoutput = mstat.st_size;
     addr_newoutput = mmap (NULL, size_newoutput, PROT_READ, MAP_PRIVATE, fd_newoutput, 0);
     close (fd_newoutput);
     if (addr_newoutput == MAP_FAILED) {perror("mmap"); exit(0);}
 
     fd_newinput = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
-    CALL (stat, ==-1, SAVE_IPTABLES_INPUT_FILE , &mstat);
+    _stat (SAVE_IPTABLES_INPUT_FILE , &mstat);
     size_newinput = mstat.st_size;
     addr_newinput = mmap (NULL, size_newinput, PROT_READ, MAP_PRIVATE, fd_newinput, 0);
     close (fd_newinput);
@@ -3781,22 +3781,22 @@ void* iptables_check_thread (void *ptr)
 
 void init_iptables()
 {
-  CALL (system, ==-1, "iptables -F INPUT");
-  CALL (system, ==-1, "iptables -F OUTPUT");
-  CALL (system, ==-1, "iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223");
-  CALL (system, ==-1, "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220");
-  CALL (system, ==-1, "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222");
-  CALL (system, ==-1, "iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221");
-  //CALL (system, ==-1, "iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222");
-  CALL (system, ==-1, "iptables -I OUTPUT 1 -d localhost -j ACCEPT");
-  CALL (system, ==-1, "iptables -I INPUT 1 -d localhost -j ACCEPT");
+  _system ("iptables -F INPUT");
+  _system ("iptables -F OUTPUT");
+  _system ("iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223");
+  _system ("iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220");
+  _system ("iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222");
+  _system ("iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221");
+  //_system ("iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222");
+  _system ("iptables -I OUTPUT 1 -d localhost -j ACCEPT");
+  _system ("iptables -I INPUT 1 -d localhost -j ACCEPT");
   //save and start checking if iptables rules altered
   char save_output[MAX_LINE_LENGTH] = "iptables -L OUTPUT > ";
   char save_input[MAX_LINE_LENGTH] = "iptables -L INPUT >";
   strcat (save_output, SAVE_IPTABLES_OUTPUT_FILE);
   strcat (save_input, SAVE_IPTABLES_INPUT_FILE);
-  CALL (system, ==-1, save_output);
-  CALL (system, ==-1, save_input);
+  _system (save_output);
+  _system (save_input);
   pthread_t iptables_check;
   if (pthread_create ( &iptables_check, NULL, iptables_check_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 }
@@ -3805,66 +3805,66 @@ void init_nfq_handlers()
 {
   struct nfq_q_handle * globalqh_tcp, * globalqh_udp, * globalqh_rest, * globalqh_input, * globalqh_gid;
   //-----------------Register OUT TCP queue handler-------------
-  CALL_RETVAL (nfq_open, ==NULL, globalh_out_tcp);
-  CALL (nfq_unbind_pf, <0, globalh_out_tcp, AF_INET );
-  CALL (nfq_bind_pf, <0, globalh_out_tcp, AF_INET );
-  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_tcp, globalh_out_tcp, NFQNUM_OUTPUT_TCP,
+  _nfq_open (globalh_out_tcp);
+  _nfq_unbind_pf (globalh_out_tcp, AF_INET );
+  _nfq_bind_pf (globalh_out_tcp, AF_INET );
+  _nfq_create_queue (globalqh_tcp, globalh_out_tcp, NFQNUM_OUTPUT_TCP,
 							      &nfq_handle_out_tcp, NULL );
     //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  CALL (nfq_set_mode, <0, globalqh_tcp, NFQNL_COPY_PACKET, 40 );
-  CALL (nfq_set_queue_maxlen, ==-1, globalqh_tcp, 200 );
+  _nfq_set_mode (globalqh_tcp, NFQNL_COPY_PACKET, 40 );
+  _nfq_set_queue_maxlen (globalqh_tcp, 200 );
   nfqfd_tcp = nfq_fd ( globalh_out_tcp);
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
   //--------Done registering------------------
 
   //-----------------Register OUT UDP queue handler-------------
-  CALL_RETVAL (nfq_open, ==NULL, globalh_out_udp);
-  CALL (nfq_unbind_pf, <0, globalh_out_udp, AF_INET );
-  CALL (nfq_bind_pf, <0, globalh_out_udp, AF_INET );
-  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_udp, globalh_out_udp, NFQNUM_OUTPUT_UDP,
+  _nfq_open (globalh_out_udp);
+  _nfq_unbind_pf (globalh_out_udp, AF_INET );
+  _nfq_bind_pf (globalh_out_udp, AF_INET );
+  _nfq_create_queue (globalqh_udp, globalh_out_udp, NFQNUM_OUTPUT_UDP,
 							      &nfq_handle_out_udp, NULL );
   //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  CALL (nfq_set_mode, <0, globalqh_udp, NFQNL_COPY_PACKET, 40 );
-  CALL (nfq_set_queue_maxlen, ==-1, globalqh_udp, 200 );
+  _nfq_set_mode (globalqh_udp, NFQNL_COPY_PACKET, 40 );
+  _nfq_set_queue_maxlen (globalqh_udp, 200 );
   nfqfd_udp = nfq_fd ( globalh_out_udp);
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
   //-----------------Register OUT REST queue handler-------------
-  CALL_RETVAL (nfq_open, ==NULL, globalh_out_rest);
-  CALL (nfq_unbind_pf, <0, globalh_out_rest, AF_INET );
-  CALL (nfq_bind_pf, <0, globalh_out_rest, AF_INET );
-  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_rest, globalh_out_rest, NFQNUM_OUTPUT_REST,
+  _nfq_open (globalh_out_rest);
+  _nfq_unbind_pf (globalh_out_rest, AF_INET );
+  _nfq_bind_pf (globalh_out_rest, AF_INET );
+  _nfq_create_queue (globalqh_rest, globalh_out_rest, NFQNUM_OUTPUT_REST,
 							      &nfq_handle_out_rest, NULL );
   //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  CALL (nfq_set_mode, <0, globalqh_rest, NFQNL_COPY_PACKET, 40 );
-  CALL (nfq_set_queue_maxlen, ==-1, globalqh_rest, 200 );
+  _nfq_set_mode (globalqh_rest, NFQNL_COPY_PACKET, 40 );
+  _nfq_set_queue_maxlen (globalqh_rest, 200 );
   nfqfd_rest = nfq_fd ( globalh_out_rest);
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
   //-----------------Register IN queue handler-------------
-  CALL_RETVAL (nfq_open, ==NULL, globalh_in);
-  CALL (nfq_unbind_pf, <0, globalh_in, AF_INET );
-  CALL (nfq_bind_pf, <0, globalh_in, AF_INET );
-  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_input, globalh_in, NFQNUM_INPUT,
+  _nfq_open (globalh_in);
+  _nfq_unbind_pf (globalh_in, AF_INET );
+  _nfq_bind_pf (globalh_in, AF_INET );
+  _nfq_create_queue (globalqh_input, globalh_in, NFQNUM_INPUT,
 							      &nfq_handle_in, NULL );
   //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  CALL (nfq_set_mode, <0, globalqh_input, NFQNL_COPY_PACKET, 40 );
-  CALL (nfq_set_queue_maxlen, ==-1, globalqh_input, 30 );
+  _nfq_set_mode (globalqh_input, NFQNL_COPY_PACKET, 40 );
+  _nfq_set_queue_maxlen (globalqh_input, 30 );
   nfqfd_input = nfq_fd ( globalh_in);
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
 
   //-----------------Register GID queue handler-------------
-  CALL_RETVAL (nfq_open, ==NULL, globalh_gid);
-  CALL (nfq_unbind_pf, <0, globalh_gid, AF_INET );
-  CALL (nfq_bind_pf, <0, globalh_gid, AF_INET );
-  CALL_RETVAL (nfq_create_queue, ==NULL, globalqh_gid, globalh_gid, NFQNUM_GID,
+  _nfq_open (globalh_gid);
+  _nfq_unbind_pf (globalh_gid, AF_INET );
+  _nfq_bind_pf (globalh_gid, AF_INET );
+  _nfq_create_queue (globalqh_gid, globalh_gid, NFQNUM_GID,
 							      &nfq_handle_gid, NULL );
   //copy only 40 bytes of packet to userspace - just to extract tcp source field
-  CALL (nfq_set_mode, <0, globalqh_gid, NFQNL_COPY_PACKET, 40 );
-  CALL (nfq_set_queue_maxlen, ==-1, globalqh_gid, 30 );
+  _nfq_set_mode (globalqh_gid, NFQNL_COPY_PACKET, 40 );
+  _nfq_set_queue_maxlen (globalqh_gid, 30 );
   nfqfd_gid = nfq_fd ( globalh_gid);
   M_PRINTF ( MLOG_DEBUG, "nfqueue handler registered\n" );
     //--------Done registering------------------
@@ -3885,10 +3885,10 @@ void init_ruleslist()
 
 void open_proc_net_files()
 {
-  CALL_RETVAL (fopen, ==NULL, tcpinfo, TCPINFO, "r");
-  CALL_RETVAL (fopen, ==NULL, tcp6info, TCP6INFO, "r");
-  CALL_RETVAL (fopen, ==NULL, udpinfo, UDPINFO, "r");
-  CALL_RETVAL (fopen, ==NULL, udp6info, UDP6INFO, "r");
+  _fopen (tcpinfo, TCPINFO, "r");
+  _fopen (tcp6info, TCP6INFO, "r");
+  _fopen (udpinfo, UDPINFO, "r");
+  _fopen (udp6info, UDP6INFO, "r");
 
   procnetrawfd = open ( "/proc/net/raw", O_RDONLY );
   tcpinfo_fd = fileno(tcpinfo);
