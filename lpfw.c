@@ -1844,7 +1844,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
                 }
 
               //TODO mutex will be held for way too long here, find a way to decrease time
-              char sha[DIGEST_SIZE];
+	      unsigned char sha[DIGEST_SIZE];
               FILE *stream;
               if ((stream = fopen ( path, "r" )) == NULL)
                 {

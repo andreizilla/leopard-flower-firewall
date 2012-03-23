@@ -341,7 +341,7 @@ interrupted:
             }
 
           //if perms are *ALWAYS we need both exesize and sha512
-          char sha[DIGEST_SIZE] = "";
+	  unsigned char sha[DIGEST_SIZE] = "";
           struct stat exestat;
           if (!strcmp(msg_f2d.item.perms,ALLOW_ALWAYS) || !strcmp(msg_f2d.item.perms,DENY_ALWAYS))
             {
