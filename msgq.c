@@ -258,9 +258,9 @@ interrupted:
 	  int i = 1;
 	  for (i; i < rule[0].rules_number; i++)
 	  {
-	      strcpy(msg_d2flist.item.path, rule[i].path);
-	      strcpy(msg_d2flist.item.pid, rule[i].pid);
-	      strcpy(msg_d2flist.item.perms, rule[i].perms);
+	      strncpy(msg_d2flist.item.path, rule[i].path, PATHSIZE);
+	      strncpy(msg_d2flist.item.pid, rule[i].pid, PIDLENGTH);
+	      strncpy(msg_d2flist.item.perms, rule[i].perms, PERMSLENGTH);
 	      msg_d2flist.item.is_active = rule[i].is_active;
 	      msg_d2flist.item.nfmark_out = rule[i].nfmark_out;
 	      _msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0);
@@ -558,15 +558,15 @@ int   fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, 
     }
 
   //first remember what we are sending
-  strcpy(sent_to_fe_struct.path, path);
-  strcpy(sent_to_fe_struct.pid, pid);
+  strncpy(sent_to_fe_struct.path, path, PATHSIZE);
+  strncpy(sent_to_fe_struct.pid, pid, PIDLENGTH);
   sent_to_fe_struct.stime = *stime;
 
   //prepare a msg and send it to frontend
   d2f_msg msg;
-  strcpy(msg.item.path, path);
-  strcpy(msg.item.pid, pid);
-  strcpy(msg.item.addr, daddr);
+  strncpy(msg.item.path, path, PATHSIZE);
+  strcpy(msg.item.pid, pid, PIDLENGTH);
+  strncpy(msg.item.addr, daddr, INET_ADDRSTRLEN);
   msg.item.sport = *sport;
   msg.item.dport = *dport;
   msg.item.command = D2FCOMM_ASK_OUT;
@@ -590,15 +590,15 @@ int fe_ask_in(const char *path, const char *pid, const unsigned long long *stime
     }
 
   //first remember what we are sending
-  strcpy(sent_to_fe_struct.path, path);
-  strcpy(sent_to_fe_struct.pid, pid);
+  strncpy(sent_to_fe_struct.path, path, PATHSIZE);
+  strncpy(sent_to_fe_struct.pid, pid, PIDLENGTH);
   sent_to_fe_struct.stime = *stime;
 
   //prepare a msg and send it to frontend
   d2f_msg msg;
-  strcpy(msg.item.path, path);
-  strcpy(msg.item.pid, pid);
-  strcpy(msg.item.addr, saddr);
+  strncpy(msg.item.path, path, PATHSIZE);
+  strncpy(msg.item.pid, pid, PIDLENGTH);
+  strncpy(msg.item.addr, saddr, INET_ADDRSTRLEN);
   msg.item.sport = *sport;
   msg.item.dport = *dport;
   msg.item.command = D2FCOMM_ASK_IN;

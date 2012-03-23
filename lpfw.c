@@ -514,9 +514,9 @@ ruleslist * ruleslist_copy()
   int i = 1;
   for (i; i < first_rule->rules_number; i++)
   {
-      strcpy ( copy_rule[i].path, rule->path );
-      strcpy ( copy_rule[i].perms, rule->perms );
-      strcpy ( copy_rule[i].pid, rule->pid );
+      strncpy ( copy_rule[i].path, rule->path, PATHSIZE );
+      strncpy ( copy_rule[i].perms, rule->perms, PERMSLENGTH );
+      strncpy ( copy_rule[i].pid, rule->pid, PIDLENGTH );
       copy_rule[i].is_active = rule->is_active;
       copy_rule[i].nfmark_out = rule->nfmark_out;
       rule = rule->next;
@@ -574,9 +574,9 @@ int ruleslist_add ( const char *path, const char *pid, const char *perms, const 
   rule = rule->next;
   //initialize fields
   rule->next = NULL;
-  strcpy ( rule->path, path );
-  strcpy ( rule->pid, pid );
-  strcpy ( rule->perms, perms );
+  strncpy ( rule->path, path, PATHSIZE);
+  strncpy ( rule->pid, pid, PIDLENGTH );
+  strncpy ( rule->perms, perms, PERMSLENGTH );
   rule->is_active = active;
   rule->stime = stime;
   assert(sha != NULL);
@@ -703,8 +703,8 @@ int search_pid_and_socket_cache_in(const long *socket, char *path, char *pid, in
             {
               if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
               else retval = CACHE_TRIGGERED_DENY;
-              strcpy(path, temp->path);
-              strcpy(pid, temp->pid);
+	      strncpy(path, temp->path, PATHSIZE);
+	      strncpy(pid, temp->pid, PIDLENGTH);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
 	      *nfmark_to_set_in = temp->nfmark_out;
 	      _pthread_mutex_unlock(&dlist_mutex);
@@ -736,8 +736,8 @@ int search_pid_and_socket_cache_out(const long *socket, char *path, char *pid, i
             {
               if (!strcmp(temp->perms, ALLOW_ONCE) || !strcmp(temp->perms, ALLOW_ALWAYS)) retval = CACHE_TRIGGERED_ALLOW;
 	      else {retval = CACHE_TRIGGERED_DENY;}
-              strcpy(path, temp->path);
-              strcpy(pid, temp->pid);
+	      strncpy(path, temp->path, PATHSIZE);
+	      strncpy(pid, temp->pid, PIDLENGTH);
 	      if (temp->stime != starttimeGet(atoi (temp->pid))) {return SPOOFED_PID;}
 	      *nfmark_to_set_out = temp->nfmark_out;
 	      _pthread_mutex_unlock(&dlist_mutex);
@@ -782,9 +782,9 @@ void* build_pid_and_socket_cache ( void *ptr )
 	  rule = rule->next;
 	  if (!rule->is_active || !strcmp(rule->path, KERNEL_PROCESS)) continue;
 	  proc_pid_fd_pathlen = strlen(rule->pidfdpath);
-	  strcpy(proc_pid_fd_path, rule->pidfdpath);
+	  strncpy(proc_pid_fd_path, rule->pidfdpath, sizeof(proc_pid_fd_path));
 	  rewinddir(rule->dirstream);
-          i = 0;
+	  i = 0;
           errno=0;
 	  while (m_dirent = readdir ( rule->dirstream ))
             {
@@ -945,8 +945,8 @@ void* refresh_thread ( void* ptr )
 	      {
 		  char path[PATHSIZE];
 		  char pid[PIDLENGTH];
-		  strcpy (path, rule->path);
-		  strcpy (pid, rule->pid);
+		  strncpy (path, rule->path, PATHSIZE);
+		  strncpy (pid, rule->pid, PIDLENGTH);
 		  _pthread_mutex_unlock ( &dlist_mutex );
 		  ruleslist_del ( path, pid );
 		  continue;
@@ -964,8 +964,8 @@ void* refresh_thread ( void* ptr )
 			  // is there really a need for dlistdel? apart from the fact that frontend deletes by path :(
 			  char path[PATHSIZE];
 			  char pid[PIDLENGTH];
-			  strcpy (path, rule->path);
-			  strcpy (pid, rule->pid);
+			  strncpy (path, rule->path, PATHSIZE);
+			  strncpy (pid, rule->pid, PIDLENGTH);
 			  _pthread_mutex_unlock ( &dlist_mutex );
 			  ruleslist_del ( path, pid );
 			  goto loop;
@@ -1333,23 +1333,27 @@ inkernel:
 //if another rule with this path is in dlist already, check if our process is fork()ed or a new instance
 int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime)
 {
+  struct stat exestat;
+  ruleslist* rule_iterator;
+  FILE *stream;
+  int retval;
+
   _pthread_mutex_lock ( &dlist_mutex );
-  ruleslist* temp = first_rule->next;
-  while ( temp != NULL )
+  rule_iterator = first_rule->next;
+  while ( rule_iterator != NULL )
     {
-      if ( !strcmp ( temp->path, path ) )
+      if ( !strcmp ( rule_iterator->path, path ) )
         {
-          if (!temp->is_active) //rule in dlist has been added from rulesfile and hasn't seen traffic yet.
+	  if (!rule_iterator->is_active) //rule in dlist has been added from rulesfile and hasn't seen traffic yet.
             //Exesize and shasum our process once
             {
-              struct stat exestat;
               if ( stat ( path, &exestat ) == -1 )
                 {
                   M_PRINTF ( MLOG_INFO, "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
 		  _pthread_mutex_unlock ( &dlist_mutex );
 		  return CANT_READ_EXE;
                 }
-              if ( temp->exesize != exestat.st_size )
+	      if ( rule_iterator->exesize != exestat.st_size )
                 {
                   M_PRINTF ( MLOG_INFO, "Exe sizes dont match.  %s in %s, %d\n", path, __FILE__, __LINE__ );
 		  _pthread_mutex_unlock ( &dlist_mutex );
@@ -1358,7 +1362,6 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
 
               //TODO mutex will be held for way too long here, find a way to decrease time
 	      unsigned char sha[DIGEST_SIZE];
-              FILE *stream;
               if ((stream = fopen ( path, "r" )) == NULL)
                 {
                   M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
@@ -1367,27 +1370,26 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
                 }
               sha512_stream ( stream, ( void * ) sha );
 	      _fclose ( stream );
-              if ( memcmp ( temp->sha, sha, DIGEST_SIZE ) )
+	      if ( memcmp ( rule_iterator->sha, sha, DIGEST_SIZE ) )
                 {
-                  M_PRINTF ( MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", temp->path, __FILE__, __LINE__ );
+		  M_PRINTF ( MLOG_INFO, "Shasums dont match. Impersonation attempt detected by %s in %s, %d\n", rule_iterator->path, __FILE__, __LINE__ );
 		  _pthread_mutex_unlock ( &dlist_mutex );
                   return SHA_DONT_MATCH;
                 }
 
-              strcpy ( temp->pid, pid ); //update entry's PID and inode
-              temp->is_active = TRUE;
-              temp->stime = *stime;
-              strcpy(temp->pidfdpath,"/proc/");
-              strcat(temp->pidfdpath, temp->pid);
-              strcat(temp->pidfdpath, "/fd/");
-	      _opendir (temp->dirstream, temp->pidfdpath );
+	      strncpy ( rule_iterator->pid, pid, PIDLENGTH ); //update entry's PID and inode
+	      rule_iterator->is_active = TRUE;
+	      rule_iterator->stime = *stime;
+	      strcpy(rule_iterator->pidfdpath,"/proc/");
+	      strcat(rule_iterator->pidfdpath, rule_iterator->pid);
+	      strcat(rule_iterator->pidfdpath, "/fd/");
+	      _opendir (rule_iterator->dirstream, rule_iterator->pidfdpath );
 
-              int retval;
-              if ( !strcmp ( temp->perms, ALLOW_ONCE ) || !strcmp ( temp->perms, ALLOW_ALWAYS ) )
+	      if ( !strcmp ( rule_iterator->perms, ALLOW_ONCE ) || !strcmp ( rule_iterator->perms, ALLOW_ALWAYS ) )
                 {
                   retval = PATH_FOUND_IN_DLIST_ALLOW;
                 }
-              else if ( !strcmp ( temp->perms, DENY_ONCE ) || !strcmp ( temp->perms, DENY_ALWAYS ) )
+	      else if ( !strcmp ( rule_iterator->perms, DENY_ONCE ) || !strcmp ( rule_iterator->perms, DENY_ALWAYS ) )
                 {
                   retval = PATH_FOUND_IN_DLIST_DENY;
                 }
@@ -1403,7 +1405,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
 	      }
               return retval;
             }
-          else if ( temp->is_active )
+	  else if ( rule_iterator->is_active )
             {
 
 //determine if this is new instance or fork()d child
@@ -1442,11 +1444,11 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
               char tempperms[PERMSLENGTH];
               char tempsha [DIGEST_SIZE];
               char temppid [PIDLENGTH-1];
-              off_t parent_size = temp->exesize;
-              unsigned long long saved_stime = temp->stime;
-              strcpy ( tempperms, temp->perms );
-              strcpy ( temppid, temp->pid );
-              memcpy ( tempsha, temp->sha, DIGEST_SIZE );
+	      off_t parent_size = rule_iterator->exesize;
+	      unsigned long long saved_stime = rule_iterator->stime;
+	      strncpy ( tempperms, rule_iterator->perms, PERMSLENGTH );
+	      strncpy ( temppid, rule_iterator->pid, PIDLENGTH );
+	      memcpy ( tempsha, rule_iterator->sha, DIGEST_SIZE );
 
 //is it a fork()ed child? the "parent" above may not be the actual parent of this fork, e.g. there may be
 //two or three instances of an app running aka three "parents". We have to rescan dlist to ascertain
@@ -1471,7 +1473,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
                       char tempperms2[PERMSLENGTH];
                       char tempsha2 [DIGEST_SIZE];
                       off_t parent_size2 = temp->exesize;
-                      strcpy ( tempperms2, temp->perms );
+		      strncpy ( tempperms2, temp->perms, PERMSLENGTH );
                       memcpy ( tempsha2, temp->sha, DIGEST_SIZE );
 
 		      _pthread_mutex_unlock ( &dlist_mutex );
@@ -1574,7 +1576,7 @@ int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *p
 
             } // else if (temp->current_pid == '1')
         } //  if (!strcmp(temp->path, path)) {
-      temp = temp->next;
+      rule_iterator = rule_iterator->next;
     } //while (temp != NULL)
 
 quit:
@@ -1624,7 +1626,7 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
         }
       while ( m_dirent = readdir ( m_dir ) )
         {
-          strcpy ( path2, path );
+	strncpy ( path2, path, sizeof(path2));
           strcat ( path2, m_dirent->d_name ); //path2 contains /proc/PID/fd/1,2,3 etc. which are symlinks
           memset ( socketbuf, 0, SOCKETBUFSIZE );
           readlink ( path2, socketbuf, SOCKETBUFSIZE ); //no trailing 0
@@ -2667,7 +2669,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       verdict = socket_handle_tcp_in ( &socket, &nfmark_to_set_in, path, pid, &starttime );
       }
 	  verdict = global_rules_filter(DIRECTION_IN, PROTO_TCP, dport_hostbo, verdict);
-
 	  if (verdict == PATH_IN_DLIST_NOT_FOUND)
 	  {
 	      if (fe_was_busy_in)
@@ -2753,7 +2754,6 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
       nfct_set_attr_u8 (ct_in, ATTR_L3PROTO, AF_INET);
       nfct_set_attr_u16(ct_in, ATTR_PORT_SRC, sport_netbo);
       nfct_set_attr_u16(ct_in, ATTR_PORT_DST, dport_netbo) ;
-
 
       //EBUSY returned, when there's too much activity in conntrack. Requery the packet
       while (nfct_query(setmark_handle_in, NFCT_Q_GET, ct_in) == -1)
@@ -3339,19 +3339,23 @@ int parse_command_line(int argc, char* argv[])
       test, end};
 
   // Set default values
-  char *stdout_pointer = malloc(strlen("stdout")+1);
+  char *stdout_pointer;
+  _malloc(stdout_pointer, strlen("stdout")+1);
   strcpy (stdout_pointer, "stdout");
   logging_facility->sval[0] = stdout_pointer;
 
-  char *rulesfile_pointer = malloc(strlen(RULESFILE)+1);
+  char *rulesfile_pointer;
+  _malloc(rulesfile_pointer, strlen(RULESFILE)+1);
   strcpy (rulesfile_pointer, RULESFILE);
   rules_file->filename[0] = rulesfile_pointer;
 
-  char *pidfile_pointer = malloc(strlen(PIDFILE)+1);
+  char *pidfile_pointer;
+  _malloc(pidfile_pointer, strlen(PIDFILE)+1);
   strcpy (pidfile_pointer, PIDFILE);
   pid_file->filename[0] = pidfile_pointer;
 
-  char *lpfw_logfile_pointer = malloc(strlen(LPFW_LOGFILE)+1);
+  char *lpfw_logfile_pointer;
+  _malloc(lpfw_logfile_pointer, strlen(LPFW_LOGFILE)+1);
   strcpy (lpfw_logfile_pointer, LPFW_LOGFILE);
   log_file->filename[0] = lpfw_logfile_pointer;
 
