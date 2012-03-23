@@ -10,6 +10,7 @@
 #include <sys/capability.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/mman.h> //for mmap
 #include <fcntl.h>
 #include <dirent.h>
 #include <stdlib.h> //for malloc
@@ -1220,7 +1221,6 @@ void rules_load()
 void rulesfileWrite()
 {
   FILE *fd, *stream;
-  struct stat m_stat;
   int i;
   unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
   unsigned char shachar[3] = "";
@@ -3732,48 +3732,91 @@ void save_own_path()
 }
 #endif
 
+//check periodically if iptables rules were changed by another process
+void* iptables_check_thread (void *ptr)
+{
+  struct stat mstat;
+  int fd_output, fd_input, fd_newoutput, fd_newinput;
+  char *addr_output, *addr_input, *addr_newoutput, *addr_newinput;
+  int size_output, size_input, size_newoutput, size_newinput;
+  char save_output[MAX_LINE_LENGTH] = "iptables -L OUTPUT > ";
+  char save_input[MAX_LINE_LENGTH] = "iptables -L INPUT >";
+  strcat (save_output, SAVE_IPTABLES_OUTPUT_FILE);
+  strcat (save_input, SAVE_IPTABLES_INPUT_FILE);
+
+  //commit to memory the contents of the files
+  fd_output = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
+  CALL (stat, ==-1, SAVE_IPTABLES_OUTPUT_FILE , &mstat);
+  size_output = mstat.st_size;
+  addr_output = mmap (NULL, size_output, PROT_READ, MAP_PRIVATE, fd_output, 0);
+  close (fd_output);
+  if (addr_output == MAP_FAILED) {perror("mmap"); exit(0);}
+
+  fd_input = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
+  CALL (stat, ==-1, SAVE_IPTABLES_INPUT_FILE , &mstat);
+  size_input = mstat.st_size;
+  addr_input = mmap (NULL, size_input, PROT_READ, MAP_PRIVATE, fd_input, 0);
+  close (fd_input);
+  if (addr_input == MAP_FAILED) {perror("mmap"); exit(0);}
+
+  while (1)
+  {
+    sleep(3);
+    CALL (system, ==-1, save_output);
+    CALL (system, ==-1, save_input);
+
+    fd_newoutput = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
+    CALL (stat, ==-1, SAVE_IPTABLES_OUTPUT_FILE , &mstat);
+    size_newoutput = mstat.st_size;
+    addr_newoutput = mmap (NULL, size_newoutput, PROT_READ, MAP_PRIVATE, fd_newoutput, 0);
+    close (fd_newoutput);
+    if (addr_newoutput == MAP_FAILED) {perror("mmap"); exit(0);}
+
+    fd_newinput = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
+    CALL (stat, ==-1, SAVE_IPTABLES_INPUT_FILE , &mstat);
+    size_newinput = mstat.st_size;
+    addr_newinput = mmap (NULL, size_newinput, PROT_READ, MAP_PRIVATE, fd_newinput, 0);
+    close (fd_newinput);
+    if (addr_input == MAP_FAILED) {perror("mmap"); exit(0);}
+
+    int i,j;
+    if (size_output != size_newoutput) goto alarm;
+    if (size_input != size_newinput) goto alarm;
+    if (i = memcmp(addr_output, addr_newoutput, size_output)) goto alarm;
+    if (j = memcmp(addr_input, addr_newinput, size_input)) goto alarm;
+
+    munmap (addr_newoutput, size_newoutput);
+    munmap (addr_newinput, size_newinput);
+  }
+  alarm:
+  printf ("IPTABLES RULES CHANGE DETECTED\n");
+  printf ("Leopard Flower (LF) has detected that some other process has changed\n");
+  printf ("iptables rules. Applications like Firestarter and NetworkManager\n");
+  printf ("are known to change iptables rules. Since LF relies heavily on iptables,\n");
+  printf ("most likely LF will not work correctly until it is restarted.\n");
+  printf ("It is advised that you terminate LF.\n");
+}
+
 void init_iptables()
 {
-    if ( system ( "iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-    if ( system ( "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-    if ( system ( "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-    if ( system ( "iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-    /*
-    if ( system ( "iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-      */
-    if ( system ( "iptables -I OUTPUT 1 -d localhost -j ACCEPT" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-    if ( system ( "iptables -I INPUT 1 -d localhost -j ACCEPT" ) == -1 )
-      {
-	M_PRINTF ( MLOG_INFO, "system: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	exit (0);
-      }
-
-
-
+  CALL (system, ==-1, "iptables -F INPUT");
+  CALL (system, ==-1, "iptables -F OUTPUT");
+  CALL (system, ==-1, "iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223");
+  CALL (system, ==-1, "iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220");
+  CALL (system, ==-1, "iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222");
+  CALL (system, ==-1, "iptables -I INPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11221");
+  //CALL (system, ==-1, "iptables -I OUTPUT 1 -m state --state NEW -m owner --gid-owner lpfwuser2 -j NFQUEUE --queue-num 22222");
+  CALL (system, ==-1, "iptables -I OUTPUT 1 -d localhost -j ACCEPT");
+  CALL (system, ==-1, "iptables -I INPUT 1 -d localhost -j ACCEPT");
+  //save and start checking if iptables rules altered
+  char save_output[MAX_LINE_LENGTH] = "iptables -L OUTPUT > ";
+  char save_input[MAX_LINE_LENGTH] = "iptables -L INPUT >";
+  strcat (save_output, SAVE_IPTABLES_OUTPUT_FILE);
+  strcat (save_input, SAVE_IPTABLES_INPUT_FILE);
+  CALL (system, ==-1, save_output);
+  CALL (system, ==-1, save_input);
+  pthread_t iptables_check;
+  if (pthread_create ( &iptables_check, NULL, iptables_check_thread, NULL) != 0) {perror ("pthread_create"); exit(0);}
 }
 
 void init_nfq_handlers()

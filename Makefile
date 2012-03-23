@@ -1,6 +1,6 @@
 DESTDIR = ./
 DEBUG =
-GCCFLAGS = -g
+GCCFLAGS = -gdwarf-2 -g3
 
 #SOURCES 	=	lpfw.c \
 #			lpfw.h \

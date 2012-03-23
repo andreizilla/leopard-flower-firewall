@@ -15,7 +15,7 @@
     m_printf (loglevel, logstring); \
     pthread_mutex_unlock(&logstring_mutex);
 
-//wrap a system function in error code checking, error is in the form ==EOF or <0 etc.
+//wrap a system function in error code checking; error is in the form ==EOF or <0 etc.
 #define CALL(func, error, ...) \
   do{ \
     if (func(__VA_ARGS__) error ){ \

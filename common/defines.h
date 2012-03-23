@@ -61,6 +61,8 @@
 #define LPFW_LOGFILE "/tmp/lpfw.log"
 #define TEST_LOGFILE "/tmp/lpfw.test_log"
 #define TEST_TRAFFIC_LOG "/tmp/lpfw.test_traffic_log"
+#define SAVE_IPTABLES_OUTPUT_FILE "/tmp/lpfw.output"
+#define SAVE_IPTABLES_INPUT_FILE "/tmp/lpfw.input"
 #define CLI_FILE "lpfwcli"
 #define GUI_FILE "lpfwpygui"
 
