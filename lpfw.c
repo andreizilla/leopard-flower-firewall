@@ -42,7 +42,7 @@ struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *global
 
 //command line arguments available globally
 struct arg_str *logging_facility;
-struct arg_file *rules_file, *pid_file, *log_file, *test_log_path;
+struct arg_file *rules_file, *pid_file, *log_file, *test_log_path, *allow_rule;
 struct arg_int *log_info, *log_traffic, *log_debug;
 //Paths of various frontends kept track of in order to chown&chown them
 struct arg_file *cli_path, *gui_path, *pygui_path;
@@ -3874,6 +3874,7 @@ int parse_command_line(int argc, char* argv[])
   pid_file = arg_file0 ( NULL, "pid-file", "<path to file>", "PID output file" );
   log_file = arg_file0 ( NULL, "log-file", "<path to file>", "Log output file" );
   test_log_path = arg_file0 ( NULL, "test-log-file", "<path to file>", "Test log output file" );
+  allow_rule = arg_file0 ( NULL, "addrule", "<path to executable>", "Add executable to rulesfile as ALLOW ALWAYS" );
 
 
 #ifndef WITHOUT_SYSVIPC
@@ -3897,7 +3898,7 @@ int parse_command_line(int argc, char* argv[])
 #ifndef WITHOUT_SYSVIPC
 		      cli_path, pygui_path,
 #endif
-		      log_info, log_traffic, log_debug, help, version,
+		      log_info, log_traffic, log_debug, allow_rule, help, version,
 #ifdef DEBUG
 		      test, test_log_path,
 #endif
@@ -3957,6 +3958,11 @@ int parse_command_line(int argc, char* argv[])
 	  printf ( "%s\n", VERSION );
 	  exit (0);
 	}
+      else if (allow_rule->count == 1)
+      {
+	add_to_rulesfile(allow_rule->filename[0]);
+	exit(0);
+      }
     }/* --leave this for future debugging purposes
 	printf("\nArguments detected:\n");
 	printf("--ipc-method = %s \n", ipc_method->sval[0]);
@@ -3981,6 +3987,84 @@ int parse_command_line(int argc, char* argv[])
   // Free memory - don't do this cause args needed later on
   //  arg_freetable(argtable, sizeof (argtable) / sizeof (argtable[0]));
 }
+
+//add an executable (from command line) with ALLOW ALWAYS permissions
+void add_to_rulesfile(const char *exefile_path)
+{
+  if (access(exefile_path, R_OK) == -1){
+    printf("access: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+    return;
+  }
+  FILE *exefile_stream;
+  if ((exefile_stream = fopen ( exefile_path, "r" )) == NULL){
+      printf ("fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  unsigned char sha[DIGEST_SIZE];
+  sha512_stream ( exefile_stream, ( void * ) sha );
+  fclose (exefile_stream);
+  struct stat exestat;
+  char size[16];
+  if ( stat ( exefile_path, &exestat ) == -1 ){
+      printf ( "stat: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  sprintf(size, "%d", (int)exestat.st_size);
+
+  //Open rules file and add to the bottom of it
+  FILE *rulesfile_stream;
+  if ( access ( rules_file->filename[0], F_OK ) == -1 )
+  {
+    printf ( "CONFIG doesnt exist..creating" );
+    if ( ( rulesfile_stream = fopen ( rules_file->filename[0], "w" ) ) == NULL )
+      {
+	printf ( "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+	return;
+      }
+  }
+  if ( ( rulesfile_stream = fopen ( rules_file->filename[0], "a" ) ) == NULL ){
+      printf ( "fopen RULESFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  if (fseek(rulesfile_stream, 0, SEEK_END) == -1){
+    printf ( "fseek: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+    return;
+  }
+  if ( fputs ( exefile_path, rulesfile_stream ) == EOF ){
+      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  fputc ( '\n', rulesfile_stream );
+  if ( fputs ( ALLOW_ALWAYS , rulesfile_stream ) == EOF ){
+      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  fputc ( '\n', rulesfile_stream );
+  if ( fputs ( size , rulesfile_stream ) == EOF ){
+      printf ( "fputs: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
+      return;
+  }
+  fputc ( '\n', rulesfile_stream );
+
+  unsigned char shastring[DIGEST_SIZE * 2 + 1] = "";
+  shastring[0] = 0;
+  unsigned char shachar[3] = "";
+  int i;
+  for ( i = 0; i < DIGEST_SIZE; ++i )
+    {
+      //pad single digits with a leading zero
+      sprintf ( shachar, "%02x", sha[i] );
+      //The next line causes gdb to go nutty: has to do with char vs. unsigned char
+      strcat ( shastring, shachar );
+    }
+  shastring[DIGEST_SIZE * 2] = 0;
+
+  fputs ( shastring, rulesfile_stream );
+  fputc ( '\n', rulesfile_stream );
+  fputc ( '\n', rulesfile_stream );
+  fclose ( rulesfile_stream );
+}
+
 
 void capabilities_setup()
 {

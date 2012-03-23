@@ -145,6 +145,7 @@ void* refresh_thread ( void* ptr );
 void global_rule_add( const char *str_direction, char *str_ports);
 void rules_load();
 void rulesfileWrite();
+void add_to_rulesfile( const char *executable);
 
 //chack if path+pid combo is already in ruleslist
 int path_find_in_ruleslist ( int *nfmark_to_set, const char *path, const char *pid, unsigned long long *stime);
