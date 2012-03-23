@@ -95,7 +95,6 @@ int test_send_tcp ()
 {
 
   //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
-  //Also check if the packet actually hits the NFQUEUE handler
   int sock;
   struct sockaddr_in server;
   const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
@@ -157,10 +156,52 @@ int test_send_tcp ()
     }
 }
 
+//Test if the TCP packet has been logged successfully
+int test_traffic_output_tcp()
+{
+  FILE *test_traffic_stream;
+  char line[MAX_LINE_LENGTH];
+  if ( ( test_traffic_stream = fopen ( TEST_TRAFFIC_LOG, "r") ) == NULL )
+    {
+      perror ( "open testlog" );
+    }
+
+  while (fgets(line, MAX_LINE_LENGTH-1, test_traffic_stream) != NULL)
+  {
+    if (strncmp (line, "<TCP src 48879 dst 1.1.1.1:1", 28)) continue;
+    else {
+      fclose (test_traffic_stream);
+      return 1;
+    }
+  }
+  return -1;
+}
+
+//Test if the UDP packet has been logged successfully
+int test_traffic_output_udp()
+{
+  FILE *test_traffic_stream;
+  char line[MAX_LINE_LENGTH];
+  if ( ( test_traffic_stream = fopen ( TEST_TRAFFIC_LOG, "r") ) == NULL )
+    {
+      perror ( "open testlog" );
+    }
+
+  while (fgets(line, MAX_LINE_LENGTH-1, test_traffic_stream) != NULL)
+  {
+    if (strncmp (line, "<UDP src 48878 dst 1.1.1.1:1", 28)) continue;
+    else {
+      fclose (test_traffic_stream);
+      return 1;
+    }
+  }
+  return -1;
+}
+
+
+//TEST send a udp out packet and check to see if it's pid&port is detected correctly
 int test_send_udp ()
 {
-
-  //TEST No2 send a tcp out packet and check to see if it's pid&port is detected correctly
   int sock;
   struct sockaddr_in server;
   const struct sockaddr_in client = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY,
@@ -223,6 +264,10 @@ int test_send_udp ()
     }
 }
 
+//TEST
+//1. Refresh thread should delete an entry from process terminates
+//2/3 Send TCP/UDP packet and check if socket was added to cache and do socket_procpidfd_search
+//4/5 Check correct logging of packets from 2/3
 
 
 void * unittest_thread(void *ptr)
@@ -245,6 +290,13 @@ void * unittest_thread(void *ptr)
   if (retval == 1){fprintf(test_log_stream, "Test 3 passed \n");}
   else{fprintf(test_log_stream, "Test 3 FAILED \n");}
 
+  retval = test_traffic_output_tcp();
+  if (retval == 1){fprintf(test_log_stream, "Test 4 passed \n");}
+  else{fprintf(test_log_stream, "Test 4 FAILED \n");}
+
+  retval = test_traffic_output_udp();
+  if (retval == 1){fprintf(test_log_stream, "Test 5 passed \n");}
+  else{fprintf(test_log_stream, "Test 5 FAILED \n");}
 
   exit(0);
 }
