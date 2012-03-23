@@ -44,7 +44,7 @@ struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *global
 struct arg_str *logging_facility;
 struct arg_file *rules_file, *pid_file, *log_file, *test_log_path, *allow_rule;
 struct arg_int *log_info, *log_traffic, *log_debug;
-//Paths of various frontends kept track of in order to chown&chown them
+//Paths of various frontends kept track of in order to chown&chmod them
 struct arg_file *cli_path, *gui_path, *pygui_path;
 
 FILE *fileloginfo_stream, *filelogtraffic_stream, *filelogdebug_stream;
@@ -163,6 +163,8 @@ ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 int global_rules_filter(const int m_direction, const int protocol, const int port, const int verdict)
 {
   int direction;
+  ports_list_t *ports_list;
+
   if (verdict > GLOBAL_RULES_VERDICT_MAX) return verdict;
   if (m_direction == DIRECTION_OUT)
   {
@@ -174,7 +176,6 @@ int global_rules_filter(const int m_direction, const int protocol, const int por
     if (protocol == PROTO_TCP) direction = TCP_IN_ALLOW;
     else if (protocol == PROTO_UDP) direction =  UDP_IN_ALLOW;
   }
-  ports_list_t *ports_list;
   ports_list = ports_list_array[direction];
   while (ports_list != NULL)
   {
@@ -207,8 +208,8 @@ int global_rules_filter(const int m_direction, const int protocol, const int por
 
 void denied_traffic_add (const int direction, const int mark, const int bytes)
 {
+  int i;
     pthread_mutex_lock ( &ct_entries_mutex);
-    int i;
     for (i = 0; ct_array[i][0] != 0; ++i)
       {
 	if (ct_array[i][0] != mark) continue;
@@ -246,14 +247,14 @@ void fe_active_flag_set ( const unsigned char boolean )
 
 void capabilities_modify(const int capability, const int set, const int action)
 {
-    //enable CAP_SETGID in effective set
     cap_t cap_current;
+    const cap_value_t caps_list[] = {capability};
+
     cap_current = cap_get_proc();
     if (cap_current == NULL)
       {
 	printf("cap_get_proc: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
       }
-    const cap_value_t caps_list[] = {capability};
     cap_set_flag(cap_current,  set, 1, caps_list, action);
     if (cap_set_proc(cap_current) == -1)
       {
@@ -276,7 +277,6 @@ int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
     found_flag = 0;
     while ((bytesread_tcp = read(tcpinfo_fd, tcp_smallbuf, 4060)) > 0)
       {
-	tcp_stats++;
 	if (bytesread_tcp == -1)
 	  {
 	    perror ("read");
@@ -320,7 +320,6 @@ int build_tcp6_port_and_socket_cache(long *socket_found, const int *port_to_find
     found_flag = 0;
     while ((bytesread_tcp6 = read(tcp6info_fd, tcp6_smallbuf, 4060)) > 0)
       {
-	tcp_stats++;
 	if (bytesread_tcp6 == -1)
 	  {
 	    perror ("read");
@@ -364,7 +363,6 @@ int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
     found_flag = 0;
     while ((bytesread_udp = read(udpinfo_fd, udp_smallbuf, 4060)) > 0)
     {
-      udp_stats++;
       if (bytesread_udp == -1)
       {
         perror ("read");
@@ -408,7 +406,6 @@ int build_udp6_port_and_socket_cache(long *socket_found, const int *port_to_find
     found_flag = 0;
     while ((bytesread_udp6 = read(udp6info_fd, udp6_smallbuf, 4060)) > 0)
       {
-	udp_stats++;
 	if (bytesread_udp6 == -1)
 	  {
 	    perror ("read");
@@ -844,25 +841,21 @@ int m_printf_stdout ( const int loglevel, const char * logstring )
       printf ( "%s", logstring );
       return 0;
     case MLOG_TRAFFIC:
-      // check if  logging enabled
       if ( !* ( log_traffic->ival ) ) return 0;
       printf ( "%s", logstring );
       return 0;
     case MLOG_DEBUG:
-      // check if  logging enabled
       if ( !* ( log_debug->ival ) ) return 0;
       printf ( "%s", logstring );
       return 0;
     case MLOG_DEBUG2:
 #ifdef DEBUG2
-      // check if  logging enabled
       if ( !* ( log_debug->ival ) ) return 0;
       printf ( "%s", logstring );
 #endif
       return 0;
     case MLOG_DEBUG3:
 #ifdef DEBUG3
-      // check if  logging enabled
       if ( !* ( log_debug->ival ) ) return 0;
       printf ( "%s", logstring );
 #endif
@@ -1048,7 +1041,7 @@ int ruleslist_add ( const char *path, const char *pid, const char *perms, const 
         {
 	  rule->nfmark_in = nfmark;
 	  retnfmark = rule->nfmark_out = nfmark - NFMARK_DELTA;
-        }
+	}
       else
         {
 	  retnfmark = rule->nfmark_out = nfmark;
@@ -2053,7 +2046,7 @@ quit:
 
 int socket_active_processes_search ( const long *mysocket, char *m_path, char *m_pid, int *nfmark_to_set)
 {
-  char find_socket[32]; //contains the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
+  char find_socket[32]; //the string we are searching in /proc/PID/fd/1,2,3 etc.  a-la socket:[1234]
   char path[32];
   char path2[32];
   char socketbuf[32];
@@ -2063,7 +2056,6 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
   char socketstr[32];
 
   sprintf ( socketstr, "%ld", *mysocket );  //convert inode from int to string
-
   strcpy ( find_socket, "socket:[" );
   strcat ( find_socket, socketstr );
   strcat ( find_socket, "]" );
@@ -2142,7 +2134,6 @@ int socket_active_processes_search ( const long *mysocket, char *m_path, char *m
 
 int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, unsigned long long *stime )
 {
-  //vars for scanning through /proc dir
   struct dirent *proc_dirent, *fd_dirent;
   DIR *proc_DIR, *fd_DIR;
   // holds path to /proc/<pid>/fd/<number_of_inode_opened>
@@ -2152,7 +2143,6 @@ int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, u
   char exepathbuf[PATHSIZE];
   char socketbuf[SOCKETBUFSIZE];
 
-  //convert inode from int to string
   char socketstr[32];
   sprintf ( socketstr, "%ld", *mysocket ); //convert int to char* for future use
   char find_socket[32] = "socket:[";
@@ -2160,72 +2150,56 @@ int socket_procpidfd_search ( const long *mysocket, char *m_path, char *m_pid, u
   strcat ( find_socket, "]" );
 
   proc_DIR = opendir ( "/proc" );
-  do
-    {
-      proc_dirent = readdir ( proc_DIR );
-      if ( !proc_dirent )
-        {
-          //perror("procdirent");
-          break;
-        } //EOF reached or some error
-      if ( ( 47 < proc_dirent->d_name[0] ) && ( proc_dirent->d_name[0] < 58 ) ) // starts with ASCII 1 through 9
-        {
-          path[0] = 0; //empty the path
-          strcpy ( path, "/proc/" );
-          strcat ( path, proc_dirent->d_name );
-          strcat ( path, "/fd" );
-          //we may get a NULL retval if process has exited since readdir(proc_DIR) call and path doesnt exist anymore
-          fd_DIR = opendir ( path );
-          if ( !fd_DIR )
-            {
-              cap_t cap = cap_get_proc();
-              printf("Running with capabilities: %s\n", cap_to_text(cap, NULL));
-              cap_free(cap);
-              //PID quit while scanning /proc
-              M_PRINTF ( MLOG_INFO, "opendir(%s):%s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
-              continue;
+  do{
+    proc_dirent = readdir ( proc_DIR );
+    if ( !proc_dirent ){ //EOF reached or some error
+      break;
+    }
+    if ( ( 47 < proc_dirent->d_name[0] ) && ( proc_dirent->d_name[0] < 58 ) ){ //ASCII 1 thru 9
+      path[0] = 0; //empty the path
+      strcpy ( path, "/proc/" );
+      strcat ( path, proc_dirent->d_name );
+      strcat ( path, "/fd" );
+      fd_DIR = opendir ( path );
+      if ( !fd_DIR ){ //NULL retval if process quit after readdir(proc_DIR) and path no longer exist
+	M_PRINTF ( MLOG_INFO, "opendir(%s):%s,%s,%d\n", path, strerror ( errno ), __FILE__, __LINE__ );
+	continue;
+      }
+      do{
+	fd_dirent = readdir ( fd_DIR );
+	if ( !fd_dirent ){ //EOF
+	  closedir ( fd_DIR );
+	  break;
+	}
+	//make sure theres no . in the path
+	if ( ! ( fd_dirent->d_name[0] == 46 ) )
+	{
+	  fdpath[0] = 0;
+	  strcat ( fdpath, path );
+	  strcat ( fdpath, "/" );
+	  strcat ( fdpath, fd_dirent->d_name );
+	  memset ( socketbuf, 0, SOCKETBUFSIZE );
+	  readlink ( fdpath, socketbuf, SOCKETBUFSIZE ); //no trailing 0
+	  if ( strcmp ( find_socket, socketbuf ) == 0 ) //we found our socket!!!!
+	  {
+	      //immediately get starttime
+	      *stime  = starttimeGet ( atoi ( proc_dirent->d_name ) );
 
-            } // permission denied or some other error
-          do
-            {
-              fd_dirent = readdir ( fd_DIR );
-              if ( !fd_dirent ) //EOF
-                {
-                  //perror("fddirent");
-                  closedir ( fd_DIR );
-                  break;
-                }
-              //make sure theres no . in the path
-              if ( ! ( fd_dirent->d_name[0] == 46 ) )
-                {
-                  fdpath[0] = 0;
-                  strcat ( fdpath, path );
-                  strcat ( fdpath, "/" );
-                  strcat ( fdpath, fd_dirent->d_name );
-                  memset ( socketbuf, 0, SOCKETBUFSIZE );
-                  readlink ( fdpath, socketbuf, SOCKETBUFSIZE ); //no trailing 0
-                  if ( strcmp ( find_socket, socketbuf ) == 0 ) //strcmp return 0 when match
-                    //we found our socket!!!!
-                    {
-                      //immediately get starttime
-                      *stime  = starttimeGet ( atoi ( proc_dirent->d_name ) );
+	      //return link /proc/<pid>/exe
+	      strcpy ( path, "/proc/" );
+	      strcat ( path, proc_dirent->d_name );
+	      strcat ( path, "/exe" );
+	      memset ( exepathbuf, 0, PATHSIZE );
+	      readlink ( path, exepathbuf, PATHSIZE - 1 );
 
-                      //return link /proc/<pid>/exe
-                      strcpy ( path, "/proc/" );
-                      strcat ( path, proc_dirent->d_name );
-                      strcat ( path, "/exe" );
-                      memset ( exepathbuf, 0, PATHSIZE );
-                      readlink ( path, exepathbuf, PATHSIZE - 1 );
-
-
-                      closedir ( fd_DIR );
-                      closedir ( proc_DIR );
-                      strcpy ( m_path, exepathbuf );
-                      strcpy ( m_pid, proc_dirent->d_name );
-		      return SOCKET_FOUND_IN_PROCPIDFD;
-                    }
-                }
-            }
+	      closedir ( fd_DIR );
+	      closedir ( proc_DIR );
+	      strcpy ( m_path, exepathbuf );
+	      strcpy ( m_pid, proc_dirent->d_name );
+	      return SOCKET_FOUND_IN_PROCPIDFD;
+	  }
+	}
+	}
           while ( fd_dirent );
         }
     }
