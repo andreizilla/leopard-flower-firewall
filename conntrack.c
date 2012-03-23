@@ -121,71 +121,22 @@ int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
 void  init_conntrack()
 {
   u_int8_t family = AF_INET;
-  if ((ct_out_tcp = nfct_new()) == NULL)
-    {
-      perror("new");
-    }
-  if ((ct_out_udp = nfct_new()) == NULL)
-    {
-      perror("new");
-    }
-  if ((ct_out_icmp = nfct_new()) == NULL)
-    {
-      perror("new");
-    }
-  if ((ct_in = nfct_new()) == NULL)
-    {
-      perror("new");
-    }
-  if ((dummy_handle_delete = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if (nfct_query(dummy_handle_delete, NFCT_Q_FLUSH, &family) == -1)
-  {
-      M_PRINTF ( MLOG_INFO, "nfct_query FLUSH %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-  }
-  if ((dummy_handle_setmark_out = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((dummy_handle_setmark_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((setmark_handle_out_tcp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((setmark_handle_out_udp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((setmark_handle_out_icmp = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((setmark_handle_in = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((nfct_callback_register(setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-  if ((nfct_callback_register(setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-  if ((nfct_callback_register(setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-  if ((nfct_callback_register(setmark_handle_in, NFCT_T_ALL, setmark_in, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
-  return;
+  CALL_RETVAL (nfct_new, ==NULL, ct_out_tcp);
+  CALL_RETVAL (nfct_new, ==NULL, ct_out_udp);
+  CALL_RETVAL (nfct_new, ==NULL, ct_out_icmp);
+  CALL_RETVAL (nfct_new, ==NULL, ct_in);
+  CALL_RETVAL (nfct_open, ==NULL, dummy_handle_delete, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL (nfct_query, ==-1, dummy_handle_delete, NFCT_Q_FLUSH, &family);
+  CALL_RETVAL (nfct_open, ==NULL, dummy_handle_setmark_out, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL_RETVAL (nfct_open, ==NULL, dummy_handle_setmark_in, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL_RETVAL (nfct_open, ==NULL, setmark_handle_out_tcp, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL_RETVAL (nfct_open, ==NULL, setmark_handle_out_udp, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL_RETVAL (nfct_open, ==NULL, setmark_handle_out_icmp, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL_RETVAL (nfct_open, ==NULL, setmark_handle_in, NFNL_SUBSYS_CTNETLINK, 0);
+  CALL (nfct_callback_register, ==-1, setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL);
+  CALL (nfct_callback_register, ==-1, setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL);
+  CALL (nfct_callback_register, ==-1, setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL);
+  CALL (nfct_callback_register, ==-1, setmark_handle_in, NFCT_T_ALL, setmark_in, NULL);
 }
 
 
