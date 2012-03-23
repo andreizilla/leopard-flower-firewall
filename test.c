@@ -25,17 +25,6 @@ extern long is_tcp_port_in_cache (const int *port);
 extern struct arg_file *test_log_path;
 FILE *test_log_stream;
 
-
-
-#define M_PRINTF(loglevel, ...) \
-    pthread_mutex_lock(&logstring_mutex); \
-    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
-    m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex); \
- 
-
-
-
 int test_refresh_thread()
 {
   //	Test if refresh_thread is working:

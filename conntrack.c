@@ -24,13 +24,6 @@ struct nf_conntrack *ct_out_tcp, *ct_out_udp, *ct_out_icmp, *ct_in;
 struct nfct_handle *dummy_handle_delete, *dummy_handle_setmark_out, *dummy_handle_setmark_in;
 struct nfct_handle *setmark_handle_out_tcp, *setmark_handle_in, *setmark_handle_out_udp, *setmark_handle_out_icmp;
 
-//macros enables any thread to use logging concurrently
-#define M_PRINTF(loglevel, ...) \
-    pthread_mutex_lock(&logstring_mutex); \
-    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
-    m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex);
-
 //this array is used internally by lpfw to prepare for export
 ulong ct_array[CT_ENTRIES_EXPORT_MAX][9] = {};
 //this array is built for export to frontend based on ct_array

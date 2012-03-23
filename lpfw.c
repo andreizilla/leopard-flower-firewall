@@ -102,32 +102,6 @@ tcp6_port_and_socket_cache[MEMBUF_SIZE], udp6_port_and_socket_cache[MEMBUF_SIZE]
 //array of global ports rules
 ports_list_t * ports_list_array[8] = {NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL};
 
-//macros enables any thread to use logging concurrently
-#define M_PRINTF(loglevel, ...) \
-    pthread_mutex_lock(&logstring_mutex); \
-    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
-    m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex);
-
-//wrap a system function in error code checking, error is in the form ==EOF or <0 etc.
-#define CALL(func, error, ...) \
-  do{ \
-    if (func(__VA_ARGS__) error ){ \
-      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
-      return; \
-    } \
-  } while(0)
-
-//wrap a system function with return value in error code checking
-#define CALL_RETVAL(func, error, retval, ...) \
-  do{ \
-    if ((retval = func(__VA_ARGS__)) error ){ \
-      M_PRINTF ( MLOG_INFO, "%s: %s,%s,%d\n", #func,  strerror ( errno ), __FILE__, __LINE__ ); \
-      return; \
-    } \
-  } while(0)
-
-
 int global_rules_filter(const int m_direction, const int protocol, const int port, const int verdict)
 {
   int direction;

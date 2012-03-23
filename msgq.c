@@ -18,12 +18,6 @@
 #include "lpfw.h"
 #include "msgq.h"
 
-#define M_PRINTF(loglevel, ...) \
-    pthread_mutex_lock(&logstring_mutex); \
-    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
-    m_printf (loglevel, logstring); \
-    pthread_mutex_unlock(&logstring_mutex); \
- 
 int awaiting_reply_from_fe;
 
 //message queue id - communication link beteeen daemon and frontend

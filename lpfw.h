@@ -25,8 +25,6 @@ extern int sha512_stream(FILE *stream, void *resblock);
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
 
-
-
 //add a new rule and if nfmark is not specified, return a new nfmark for the newly added rule
 int ruleslist_add ( const char *path, const char *pid, const char *perms, const mbool current, const char *sha,
 		const unsigned long long stime, const off_t size, const int nfmark, const unsigned char first_instance );
