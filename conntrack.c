@@ -74,19 +74,19 @@ void* ct_delete_mark_thread ( void* ptr )
 
   while(1)
     {
-      pthread_mutex_lock(&condvar_mutex);
+      _pthread_mutex_lock(&condvar_mutex);
       while(predicate == FALSE)
 	{
 	  pthread_cond_wait(&condvar, &condvar_mutex);
 	}
       predicate = FALSE;
-      pthread_mutex_unlock(&condvar_mutex);
-      pthread_mutex_lock(&ct_dump_mutex);
+      _pthread_mutex_unlock(&condvar_mutex);
+      _pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1)
 	{
 	  perror("query-DELETE");
 	}
-      pthread_mutex_unlock(&ct_dump_mutex);
+      _pthread_mutex_unlock(&ct_dump_mutex);
     }
 }
 
@@ -233,16 +233,16 @@ void * ct_dump_thread( void *ptr)
 	  ct_array[i][1] = ct_array[i][2] = ct_array_export[i][0] = ct_array_export[i][1] =
 		  ct_array_export[i][2] = ct_array_export[i][3] = ct_array_export[i][4] = 0;
 	}
-      pthread_mutex_lock(&ct_dump_mutex);
+      _pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(ct_dump_handle, NFCT_Q_DUMP, &family) == -1)
 	{
 	  perror("query-DELETE");
 	}
-      pthread_mutex_unlock(&ct_dump_mutex);
+      _pthread_mutex_unlock(&ct_dump_mutex);
 //we get here only when dumping operation finishes and traffic_callback has created a new array of
 //conntrack entries
 
-      pthread_mutex_lock(&ct_entries_mutex);
+      _pthread_mutex_lock(&ct_entries_mutex);
 
       for (i = 0; ct_array[i][0] != 0; ++i)
 	{
@@ -305,7 +305,7 @@ next:
 ;
       }
 
-      pthread_mutex_unlock(&ct_entries_mutex);
+      _pthread_mutex_unlock(&ct_entries_mutex);
 
 #ifdef DEBUG
       for (i = 0; ct_array_export[i][0] != 0; ++i)
@@ -318,14 +318,11 @@ next:
       msg.type = 1;
       memcpy (msg.ct_array_export, ct_array_export, sizeof(msg.ct_array_export));
 
-      msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
+      _msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
       //don't send if there is already some data down the queue that frontend hasn't yet received
       if (msgqid_d2ftraffic->msg_qnum == 0)
 	{
-	  if ( msgsnd ( mqd_d2ftraffic, &msg, sizeof (msg.ct_array_export), IPC_NOWAIT ) == -1 )
-	    {
-	      M_PRINTF (MLOG_INFO, "msgsnd: %d %s,%s,%d\n",errno, strerror ( errno ), __FILE__, __LINE__ );
-	    }
+	  _msgsnd ( mqd_d2ftraffic, &msg, sizeof (msg.ct_array_export), IPC_NOWAIT );
 	}
       sleep(1);
     }
@@ -334,7 +331,7 @@ next:
 void denied_traffic_add (const int direction, const int mark, const int bytes)
 {
   int i;
-    pthread_mutex_lock ( &ct_entries_mutex);
+    _pthread_mutex_lock ( &ct_entries_mutex);
     for (i = 0; ct_array[i][0] != 0; ++i)
       {
 	if (ct_array[i][0] != mark) continue;
@@ -346,7 +343,7 @@ void denied_traffic_add (const int direction, const int mark, const int bytes)
 	{
 	    ct_array[i][7] += bytes;
 	}
-	pthread_mutex_unlock ( &ct_entries_mutex);
+	_pthread_mutex_unlock ( &ct_entries_mutex);
 	return;
       }
     //the entry is not yet in array, adding now
@@ -359,6 +356,6 @@ void denied_traffic_add (const int direction, const int mark, const int bytes)
     {
 	ct_array[i][7] += bytes;
     }
-    pthread_mutex_unlock ( &ct_entries_mutex);
+    _pthread_mutex_unlock ( &ct_entries_mutex);
     return ;
 }
