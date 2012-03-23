@@ -76,6 +76,13 @@ char logstring[PATHSIZE];
 struct arg_file *log_file, *zenity_path;
 struct arg_int *log_debug, *nozenity;
 
+//macros enables any thread to use logging concurrently
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex);
+
 int m_printf_file(const int loglevel, const char * logstring)
 {
   write ( fileno ( logfilefd ), logstring, strlen ( logstring ) );

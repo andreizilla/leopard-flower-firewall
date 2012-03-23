@@ -23,12 +23,20 @@ extern void farray_add(ruleslist rule);
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
 
+//macros enables any thread to use logging concurrently
+#define M_PRINTF(loglevel, ...) \
+    pthread_mutex_lock(&logstring_mutex); \
+    snprintf (logstring, PATHSIZE, __VA_ARGS__); \
+    m_printf (loglevel, logstring); \
+    pthread_mutex_unlock(&logstring_mutex);
+
+
 void msgq_list()
 {
   msg_f2d.item.command = F2DCOMM_LIST;
   if (msgsnd(mqd_f2d, &msg_f2d, sizeof (msg_f2d.item), 0) == -1)
     {
-      M_PRINTF(MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
+      M_PRINTF (MLOG_INFO, "msgsnd: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     };
   farray_clear();
   while (1)
