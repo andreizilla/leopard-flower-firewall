@@ -3209,9 +3209,7 @@ void pidfile_check()
   // use stat() to check if PIDFILE exists.
   //TODO The check is quick'n'dirty. Consider making more elaborate check later
   struct stat m_stat;
-  FILE *pidfd;
-  FILE *procfd;
-  FILE *newpid;
+  FILE *pidfd , *procfd, *newpid;
   char pidbuf[8];
   char procstring[20];
   char procbuf[20];
@@ -3223,13 +3221,9 @@ void pidfile_check()
   //stat() returns 0 if file exists
   if ( stat ( pid_file->filename[0], &m_stat ) == 0 )
     {
-      if ( ( pidfd = fopen ( pid_file->filename[0], "r" ) ) == NULL )
-	{
-	  M_PRINTF ( MLOG_INFO, "fopen PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-	  exit(0);
-	};
-      fgets ( pidbuf, 8, pidfd );
-      fclose ( pidfd );
+    CALL_RETVAL (fopen, ==NULL, pidfd, pid_file->filename[0], "r");
+    CALL (fgets, ==NULL, pidbuf, 8, pidfd);
+    CALL (fclose, ==EOF, pidfd);
       pidbuf[7] = 0;
       pid = atoi ( pidbuf );
       if ( pid > 0 )
@@ -3240,14 +3234,10 @@ void pidfile_check()
 	      strcpy ( procstring, "/proc/" );
 	      strcat ( procstring, pidbuf );
 	      strcat ( procstring, "/comm" );
-	      if ( ( procfd = fopen ( procstring, "r" )) == NULL)
-		{
-		  M_PRINTF ( MLOG_INFO, "fopen: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-		  exit(0);
-		}
+	      CALL_RETVAL (fopen, ==NULL, procfd, procstring, "r");
 	      //let's replace 0x0A with 0x00
-	      fgets ( procbuf, 19, procfd );
-	      fclose(procfd);
+	      CALL (fgets, ==NULL, procbuf, 19, procfd);
+	      CALL (fclose, ==EOF, procfd);
 	      ptr = strstr ( procbuf, srchstr );
 	      *ptr = 0;
 	      //compare the actual string, if found => carry on
@@ -3271,21 +3261,13 @@ void pidfile_check()
 
 
   //else if pidfile doesn't exist/contains dead PID, create/truncate it and write our pid into it
-  if ( ( newpid = fopen ( pid_file->filename[0], "w" ) ) == NULL )
-    {
-      M_PRINTF ( MLOG_DEBUG, "creat PIDFILE: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-    }
+  CALL_RETVAL (fopen, ==NULL, newpid, pid_file->filename[0], "w");
+
   sprintf ( pid2str, "%d", ( int ) getpid() );
   ssize_t size;
   newpidfd = fileno(newpid);
-  if ( ( size = write ( newpidfd, pid2str, 8 ) == -1 ) )
-    {
-      M_PRINTF ( MLOG_INFO, "write: %s,%s,%d\n", strerror ( errno ), __FILE__, __LINE__ );
-      return;
-    }
-  //close(newpidfd);
-  fclose ( newpid );
+  CALL_RETVAL (write, ==-1, size,newpidfd, pid2str, 8);
+  CALL (fclose, ==EOF, newpid);
 }
 
 //initiate message queue and send to first lpfw instance, our pid, tty and display and quit.

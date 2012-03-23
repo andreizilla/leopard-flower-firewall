@@ -146,6 +146,7 @@ void setgid_lpfwuser();
 // uid == 0. It is not full-fledged root because it has stripped capabilities
 void setuid_root();
 void init_iptables();
+void* iptables_check_thread (void *ptr);
 void init_nfq_handlers();
 void init_ruleslist();
 void open_proc_net_files();
