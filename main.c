@@ -32,7 +32,7 @@
 #include "common/defines.h"
 #include "argtable/argtable2.h"
 #include "version.h" //for version string during packaging
-#include "lpfw.h"
+#include "main.h"
 #include "msgq.h"
 #include "conntrack.h"
 #include "test.h"

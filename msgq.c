@@ -15,7 +15,7 @@
 
 #include "common/defines.h"
 #include "common/includes.h"
-#include "lpfw.h"
+#include "main.h"
 #include "msgq.h"
 
 int awaiting_reply_from_fe;

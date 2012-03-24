@@ -5,7 +5,7 @@
 #include <sys/msg.h>
 
 #include "conntrack.h"
-#include "lpfw.h"
+#include "main.h"
 #include "msgq.h" //for extern int mqd_d2ftraffic;
 #include "common/includes.h"
 
