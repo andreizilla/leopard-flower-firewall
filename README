@@ -31,7 +31,7 @@ CAP_SYS_PTRACE, CAP_NET_ADMIN, CAP_DAC_READ_SEARCH, CAP_SETUID, CAP_SETGID, CAP_
 
     30-lpfw.conf can be placed into /etc/rsyslog.d if you want logs to go to syslog
 
-    Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "./lpfw --cli" or "./lpfw --gui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfw --cli --no-zenity)
+    Assuming lpfw was launched either by upstart or manually as root, in a terminal window of an X session launch "./lpfwcli" or "./lpfwpygui" as a regular user (not root). You will see an ncurses-based/graphical frontend.(By default lpfwcli uses zenity popups. If you don't want to use zenity run ./lpfwcli --no-zenity)
 
 
 
