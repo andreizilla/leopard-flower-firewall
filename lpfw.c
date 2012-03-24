@@ -3648,13 +3648,13 @@ void* iptables_check_thread (void *ptr)
   fd_output = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
   stat (SAVE_IPTABLES_OUTPUT_FILE , &mstat);
   size_output = mstat.st_size;
-  mmap (addr_output, size_output, PROT_READ, MAP_PRIVATE, fd_output, 0);
+  addr_output = mmap (0, size_output, PROT_READ, MAP_PRIVATE, fd_output, 0);
   close (fd_output);
 
   fd_input = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
   stat (SAVE_IPTABLES_INPUT_FILE , &mstat);
   size_input = mstat.st_size;
-  mmap (addr_input, size_input, PROT_READ, MAP_PRIVATE, fd_input, 0);
+  addr_input = mmap (0, size_input, PROT_READ, MAP_PRIVATE, fd_input, 0);
   close (fd_input);
 
   while (1)
@@ -3666,13 +3666,13 @@ void* iptables_check_thread (void *ptr)
     fd_newoutput = open(SAVE_IPTABLES_OUTPUT_FILE, O_RDONLY);
     stat (SAVE_IPTABLES_OUTPUT_FILE , &mstat);
     size_newoutput = mstat.st_size;
-    mmap (addr_newoutput, size_newoutput, PROT_READ, MAP_PRIVATE, fd_newoutput, 0);
+    addr_newoutput = mmap (0, size_newoutput, PROT_READ, MAP_PRIVATE, fd_newoutput, 0);
     close (fd_newoutput);
 
     fd_newinput = open(SAVE_IPTABLES_INPUT_FILE, O_RDONLY);
     stat (SAVE_IPTABLES_INPUT_FILE , &mstat);
     size_newinput = mstat.st_size;
-    mmap (addr_newinput, size_newinput, PROT_READ, MAP_PRIVATE, fd_newinput, 0);
+    addr_newinput = mmap (0, size_newinput, PROT_READ, MAP_PRIVATE, fd_newinput, 0);
     close (fd_newinput);
 
     int i,j;

@@ -19,6 +19,7 @@
 
 extern pthread_mutex_t logstring_mutex;
 extern char logstring[PATHSIZE];
+extern int (*m_printf)(int loglevel, char *logstring);
 
 FILE* __real_fopen (const char* filename, const char* mode);
 DIR*  __real_opendir (const char *dirname);

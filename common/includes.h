@@ -9,6 +9,7 @@
 #include <pthread.h>
 
 //macros enables any thread to use logging concurrently
+//don't change __VA_ARGS__ to va_list. va_list is broken on 64-bit
 #define M_PRINTF(loglevel, ...) \
     pthread_mutex_lock(&logstring_mutex); \
     snprintf (logstring, PATHSIZE, __VA_ARGS__); \
