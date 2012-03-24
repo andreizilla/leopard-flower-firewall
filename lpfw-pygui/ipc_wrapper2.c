@@ -245,7 +245,8 @@ void* d2ftrafficthread(void * ptr) {
 	    printf("msgrcv: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
 	    exit(0);
 	};
-	strcpy(message, "TRAFFIC ");
+	strcpy(message, "TRAFFIC");
+	strcat (message, escape_sequence);
 
 	int i;
 	char int2str[16];

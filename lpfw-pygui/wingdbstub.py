@@ -113,7 +113,7 @@ kExitOnFailure = 0
 # Find Wing debugger installation location
 
 # Edit this to point to your Wing installation or set to None to use env setting
-WINGHOME="/usr/local/lib/wingide4.0"
+WINGHOME="/home/wwwwww/apps/wing3"
 
 if sys.hexversion >= 0x03000000:
   def has_key(o, key):
