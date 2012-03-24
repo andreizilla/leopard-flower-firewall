@@ -15,7 +15,6 @@
 
 #include "common/defines.h"
 #include "common/includes.h"
-#include "common/syscall_wrappers.h"
 #include "lpfw.h"
 #include "msgq.h"
 
@@ -58,7 +57,7 @@ interrupted:
       goto interrupted;
     }
   //extract last sender's PID and check the binary path is the same path as this lpfw instance
-  _msgctl(mqd_creds, IPC_STAT, msgqid_creds);
+  msgctl(mqd_creds, IPC_STAT, msgqid_creds);
   pid_t pid;
   char procpath[32] = "/proc/";
   char exepath[PATHSIZE];
@@ -71,7 +70,7 @@ interrupted:
 
   //lpfw --cli sleeps only 3 secs, after which procpath isnt available, so no breakpoints before
   //the next line
-  _readlink(procpath, exepath, PATHSIZE - 1);
+  readlink(procpath, exepath, PATHSIZE - 1);
 
 #ifdef DEBUG
   printf("%s, %s\n",  exepath, ownpath);
@@ -113,10 +112,10 @@ interrupted:
 
       //enable CAP_SETUID in effective set
       cap_t cap_current;
-      _cap_get_proc(cap_current);
+      cap_current = cap_get_proc();
       const cap_value_t caps_list[] = {CAP_SETUID};
-      _cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
-      _cap_set_proc(cap_current);
+      cap_set_flag(cap_current,  CAP_EFFECTIVE, 1, caps_list, CAP_SET);
+      cap_set_proc(cap_current);
       //setuid and immediately remove CAP_SETUID from both perm. and eff. sets
       if (setuid(msg_creds.item.uid) == -1)
         {
@@ -203,7 +202,7 @@ interrupted:
           fe_active_flag_set(FALSE);
         }
       M_PRINTF(MLOG_INFO, "frontend exited\n");
-      _pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
+      pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
       return;
 
     }
@@ -263,10 +262,10 @@ interrupted:
 	      strncpy(msg_d2flist.item.perms, rule[i].perms, PERMSLENGTH);
 	      msg_d2flist.item.is_active = rule[i].is_active;
 	      msg_d2flist.item.nfmark_out = rule[i].nfmark_out;
-	      _msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0);
+	      msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0);
 	  };
 	  strcpy(msg_d2flist.item.path, "EOF");
-	  _msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0);
+	  msgsnd(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0);
 	  free(rule);
           continue;
 
@@ -312,7 +311,7 @@ interrupted:
           strcat(exepath, "/exe");
           char exepathbuf[PATHSIZE];
           memset ( exepathbuf, 0, PATHSIZE );
-	  _readlink (exepath, exepathbuf, PATHSIZE-1 );
+	  readlink (exepath, exepathbuf, PATHSIZE-1 );
           if (strcmp(exepathbuf, sent_to_fe_struct.path))
             {
               M_PRINTF(MLOG_INFO, "Frontend asked to add a process that is no longer running,%s,%d\n", __FILE__, __LINE__);
@@ -326,14 +325,14 @@ interrupted:
           if (!strcmp(msg_f2d.item.perms,ALLOW_ALWAYS) || !strcmp(msg_f2d.item.perms,DENY_ALWAYS))
             {
               //Calculate the size of the executable
-	      _stat(sent_to_fe_struct.path, &exestat);
+	      stat(sent_to_fe_struct.path, &exestat);
 
               //Calculate sha of executable
               FILE *stream;
               memset(sha, 0, DIGEST_SIZE+1);
-	      _fopen(stream, sent_to_fe_struct.path, "r");
+	      stream = fopen(sent_to_fe_struct.path, "r");
               sha512_stream(stream, (void *) sha);
-	      _fclose(stream);
+	      fclose(stream);
             }
           //check if we were really dealing with the correct process all along
           unsigned long long stime;
@@ -390,12 +389,12 @@ interrupted:
 
 void init_msgq()
 {
-  _malloc(msgqid_d2f, sizeof (struct msqid_ds));
-  _malloc(msgqid_f2d, sizeof (struct msqid_ds));
-  _malloc(msgqid_d2flist, sizeof (struct msqid_ds));
+  msgqid_d2f = malloc(sizeof (struct msqid_ds));
+  msgqid_f2d = malloc(sizeof (struct msqid_ds));
+  msgqid_d2flist = malloc(sizeof (struct msqid_ds));
   //msgqid_d2fdel = malloc(sizeof (struct msqid_ds)); //not in use
-  _malloc(msgqid_creds, sizeof (struct msqid_ds));
-  _malloc(msgqid_d2ftraffic, sizeof (struct msqid_ds));
+  msgqid_creds = malloc(sizeof (struct msqid_ds));
+  msgqid_d2ftraffic = malloc(sizeof (struct msqid_ds));
 
   //TODO some capabilities may be needed here, in cases when TMPFILE was created by a different user
   // or message queue with the same ID was created by a different user. Needs investigation.
@@ -418,22 +417,22 @@ void init_msgq()
       M_PRINTF(MLOG_INFO, "creat: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
     }
   //-----------------------------------
-  _ftok(ipckey_d2f, TMPFILE, FTOKID_D2F);
+  ipckey_d2f = ftok(TMPFILE, FTOKID_D2F);
   M_PRINTF(MLOG_DEBUG, "D2FKey: %d\n", ipckey_d2f);
 
-  _ftok(ipckey_f2d, TMPFILE, FTOKID_F2D);
+  ipckey_f2d = ftok(TMPFILE, FTOKID_F2D);
   M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_f2d);
 
-  _ftok(ipckey_d2flist, TMPFILE, FTOKID_D2FLIST);
+  ipckey_d2flist = ftok(TMPFILE, FTOKID_D2FLIST);
   M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2flist);
 
-  _ftok(ipckey_d2fdel, TMPFILE, FTOKID_D2FDEL);
+  ipckey_d2fdel = ftok(TMPFILE, FTOKID_D2FDEL);
   M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2fdel);
 
-  _ftok(ipckey_creds, TMPFILE, FTOKID_CREDS);
+  ipckey_creds = ftok(TMPFILE, FTOKID_CREDS);
   M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_creds);
 
-  _ftok(ipckey_d2ftraffic, TMPFILE, FTOKID_D2FTRAFFIC);
+  ipckey_d2ftraffic = ftok(TMPFILE, FTOKID_D2FTRAFFIC);
   M_PRINTF(MLOG_DEBUG, "Key: %d\n", ipckey_d2ftraffic);
 
   /* Set up the message queue to communicate between daemon and GUI*/
@@ -458,60 +457,60 @@ void init_msgq()
 //creds_bits require special treatment b/c when user launches ./lpfw --gui, we don't know in advance
 //what the user's UID is. So we allow any user to invoke the frontend.
 
-  _msgget(mqd_d2f, ipckey_d2f, IPC_CREAT | perm_bits);
+  mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits);
   //remove queue
-  _msgctl(mqd_d2f, IPC_RMID, 0);
+  msgctl(mqd_d2f, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_d2f, ipckey_d2f, IPC_CREAT | perm_bits);
+  mqd_d2f = msgget(ipckey_d2f, IPC_CREAT | perm_bits);
   M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2f);
   //----------------------------------------------------
-  _msgget(mqd_d2flist, ipckey_d2flist, IPC_CREAT | perm_bits);
+  mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits);
   //remove queue
-  _msgctl(mqd_d2flist, IPC_RMID, 0);
+  msgctl(mqd_d2flist, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_d2flist, ipckey_d2flist, IPC_CREAT | perm_bits);
+  mqd_d2flist = msgget(ipckey_d2flist, IPC_CREAT | perm_bits);
   M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2flist);
 
   //---------------------------------------------------------
 
-  _msgget(mqd_f2d, ipckey_f2d, IPC_CREAT | perm_bits);
+  mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits);
   //remove queue
-  _msgctl(mqd_f2d, IPC_RMID, 0);
+  msgctl(mqd_f2d, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_f2d, ipckey_f2d, IPC_CREAT | perm_bits);
+  mqd_f2d = msgget(ipckey_f2d, IPC_CREAT | perm_bits);
   M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_f2d);
 
   //------------------------------------------------------
-  _msgget(mqd_d2fdel, ipckey_d2fdel, IPC_CREAT | perm_bits);
+  mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits);
   //remove queue
-  _msgctl(mqd_d2fdel, IPC_RMID, 0);
+  msgctl(mqd_d2fdel, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_d2fdel, ipckey_d2fdel, IPC_CREAT | perm_bits);
+  mqd_d2fdel = msgget(ipckey_d2fdel, IPC_CREAT | perm_bits);
   M_PRINTF(MLOG_DEBUG, "Message identifier %d\n", mqd_d2fdel);
 
   //------------------------------------------------------
   //This particular message queue should be writable by anyone, hence permission 0002
   //because we don't know in advance what user will be invoking the frontend
 
-  _msgget(mqd_creds, ipckey_creds, IPC_CREAT | creds_bits);
+  mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits);
   //remove queue
-  _msgctl(mqd_creds, IPC_RMID, 0);
+  msgctl(mqd_creds, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_creds, ipckey_creds, IPC_CREAT | creds_bits);
+  mqd_creds = msgget(ipckey_creds, IPC_CREAT | creds_bits);
   M_PRINTF(MLOG_DEBUG, "Creds msgq id %d\n", mqd_creds);
 
   //-------------------------------------------------
 
-  _msgget(mqd_d2ftraffic, ipckey_d2ftraffic, IPC_CREAT | perm_bits);
+  mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits);
   //remove queue
-  _msgctl(mqd_d2ftraffic, IPC_RMID, 0);
+  msgctl(mqd_d2ftraffic, IPC_RMID, 0);
   //create it again
-  _msgget(mqd_d2ftraffic, ipckey_d2ftraffic, IPC_CREAT | perm_bits);
+  mqd_d2ftraffic = msgget(ipckey_d2ftraffic, IPC_CREAT | perm_bits);
   M_PRINTF(MLOG_DEBUG, "Traffic msgq id %d\n", mqd_d2ftraffic);
 
   //------------------------------------------------------------
 
-  _pthread_create(&command_thread, NULL, commandthread, NULL);
+  pthread_create(&command_thread, NULL, commandthread, NULL);
   //pthread_create(&regfrontend_thread, NULL, fe_reg_thread, NULL);
 
 }
@@ -553,7 +552,7 @@ int   fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, 
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
   if (awaiting_reply_from_fe)
     {
-      _pthread_mutex_unlock(&msgq_mutex);
+      pthread_mutex_unlock(&msgq_mutex);
       return FRONTEND_BUSY;
     }
 
@@ -565,16 +564,16 @@ int   fe_ask_out(char *path, char *pid, unsigned long long *stime, char *daddr, 
   //prepare a msg and send it to frontend
   d2f_msg msg;
   strncpy(msg.item.path, path, PATHSIZE);
-  strcpy(msg.item.pid, pid, PIDLENGTH);
+  strncpy(msg.item.pid, pid, PIDLENGTH);
   strncpy(msg.item.addr, daddr, INET_ADDRSTRLEN);
   msg.item.sport = *sport;
   msg.item.dport = *dport;
   msg.item.command = D2FCOMM_ASK_OUT;
   msg.type = 1;
 
-  _msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
+  msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
   awaiting_reply_from_fe = TRUE;
-  _pthread_mutex_unlock(&msgq_mutex);
+  pthread_mutex_unlock(&msgq_mutex);
   return SENT_TO_FRONTEND;
 }
 
@@ -585,7 +584,7 @@ int fe_ask_in(const char *path, const char *pid, const unsigned long long *stime
   if (pthread_mutex_trylock(&msgq_mutex) != 0) return FRONTEND_BUSY;
   if (awaiting_reply_from_fe)
     {
-      _pthread_mutex_unlock(&msgq_mutex);
+      pthread_mutex_unlock(&msgq_mutex);
       return FRONTEND_BUSY;
     }
 
@@ -604,9 +603,9 @@ int fe_ask_in(const char *path, const char *pid, const unsigned long long *stime
   msg.item.command = D2FCOMM_ASK_IN;
   msg.type = 1;
 
-  _msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
+  msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
   awaiting_reply_from_fe = TRUE;
-  _pthread_mutex_unlock(&msgq_mutex);
+  pthread_mutex_unlock(&msgq_mutex);
   return SENT_TO_FRONTEND;
 }
 
@@ -616,5 +615,5 @@ int fe_list()
   memset(&msg, 0, sizeof(msg));
   msg.item.command = D2FCOMM_LIST;
   msg.type = 1;
-  _msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
+  msgsnd(mqd_d2f, &msg, sizeof (msg.item), IPC_NOWAIT);
 }

@@ -8,8 +8,6 @@
 #include "lpfw.h"
 #include "msgq.h" //for extern int mqd_d2ftraffic;
 #include "common/includes.h"
-#include "common/syscall_wrappers.h"
-
 
 //ct_delete_mark_thread uses waiting on condition
 pthread_cond_t condvar = PTHREAD_COND_INITIALIZER;
@@ -63,30 +61,21 @@ void* ct_delete_mark_thread ( void* ptr )
 {
   u_int8_t family = AF_INET; //used by conntrack
   struct nfct_handle *deletemark_handle;
-  if ((deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0)) == NULL)
-    {
-      perror("nfct_open");
-    }
-  if ((nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL) == -1))
-    {
-      perror("cb_reg");
-    }
+  deletemark_handle = nfct_open(NFNL_SUBSYS_CTNETLINK, 0);
+  nfct_callback_register(deletemark_handle, NFCT_T_ALL, ct_delete_mark_cb, NULL);
 
   while(1)
     {
-      _pthread_mutex_lock(&condvar_mutex);
+      pthread_mutex_lock(&condvar_mutex);
       while(predicate == FALSE)
 	{
 	  pthread_cond_wait(&condvar, &condvar_mutex);
 	}
       predicate = FALSE;
-      _pthread_mutex_unlock(&condvar_mutex);
-      _pthread_mutex_lock(&ct_dump_mutex);
-      if (nfct_query(deletemark_handle, NFCT_Q_DUMP, &family) == -1)
-	{
-	  perror("query-DELETE");
-	}
-      _pthread_mutex_unlock(&ct_dump_mutex);
+      pthread_mutex_unlock(&condvar_mutex);
+      pthread_mutex_lock(&ct_dump_mutex);
+      nfct_query(deletemark_handle, NFCT_Q_DUMP, &family);
+      pthread_mutex_unlock(&ct_dump_mutex);
     }
 }
 
@@ -122,24 +111,23 @@ int setmark_in (enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *
 void  init_conntrack()
 {
   u_int8_t family = AF_INET;
-  _nfct_new (ct_out_tcp);
-  _nfct_new (ct_out_udp);
-  _nfct_new (ct_out_icmp);
-  _nfct_new (ct_in);
-  _nfct_open (dummy_handle_delete, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_query (dummy_handle_delete, NFCT_Q_FLUSH, &family);
-  _nfct_open (dummy_handle_setmark_out, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_open (dummy_handle_setmark_in, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_open (setmark_handle_out_tcp, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_open (setmark_handle_out_udp, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_open (setmark_handle_out_icmp, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_open (setmark_handle_in, NFNL_SUBSYS_CTNETLINK, 0);
-  _nfct_callback_register (setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL);
-  _nfct_callback_register (setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL);
-  _nfct_callback_register (setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL);
-  _nfct_callback_register (setmark_handle_in, NFCT_T_ALL, setmark_in, NULL);
+  ct_out_tcp = nfct_new ();
+  ct_out_udp = nfct_new ();
+  ct_out_icmp = nfct_new ();
+  ct_in = nfct_new ();
+  dummy_handle_delete = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  nfct_query (dummy_handle_delete, NFCT_Q_FLUSH, &family);
+  dummy_handle_setmark_out = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  dummy_handle_setmark_in = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  setmark_handle_out_tcp = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  setmark_handle_out_udp = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  setmark_handle_out_icmp = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  setmark_handle_in = nfct_open (NFNL_SUBSYS_CTNETLINK, 0);
+  nfct_callback_register (setmark_handle_out_tcp, NFCT_T_ALL, setmark_out_tcp, NULL);
+  nfct_callback_register (setmark_handle_out_udp, NFCT_T_ALL, setmark_out_udp, NULL);
+  nfct_callback_register (setmark_handle_out_icmp, NFCT_T_ALL, setmark_out_icmp, NULL);
+  nfct_callback_register (setmark_handle_in, NFCT_T_ALL, setmark_in, NULL);
 }
-
 
 
 int ct_delete_mark_cb(enum nf_conntrack_msg_type type, struct nf_conntrack *mct,void *data)
@@ -233,16 +221,16 @@ void * ct_dump_thread( void *ptr)
 	  ct_array[i][1] = ct_array[i][2] = ct_array_export[i][0] = ct_array_export[i][1] =
 		  ct_array_export[i][2] = ct_array_export[i][3] = ct_array_export[i][4] = 0;
 	}
-      _pthread_mutex_lock(&ct_dump_mutex);
+      pthread_mutex_lock(&ct_dump_mutex);
       if (nfct_query(ct_dump_handle, NFCT_Q_DUMP, &family) == -1)
 	{
 	  perror("query-DELETE");
 	}
-      _pthread_mutex_unlock(&ct_dump_mutex);
+      pthread_mutex_unlock(&ct_dump_mutex);
 //we get here only when dumping operation finishes and traffic_callback has created a new array of
 //conntrack entries
 
-      _pthread_mutex_lock(&ct_entries_mutex);
+      pthread_mutex_lock(&ct_entries_mutex);
 
       for (i = 0; ct_array[i][0] != 0; ++i)
 	{
@@ -305,7 +293,7 @@ next:
 ;
       }
 
-      _pthread_mutex_unlock(&ct_entries_mutex);
+      pthread_mutex_unlock(&ct_entries_mutex);
 
 #ifdef DEBUG
       for (i = 0; ct_array_export[i][0] != 0; ++i)
@@ -318,11 +306,11 @@ next:
       msg.type = 1;
       memcpy (msg.ct_array_export, ct_array_export, sizeof(msg.ct_array_export));
 
-      _msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
+      msgctl(mqd_d2ftraffic, IPC_STAT, msgqid_d2ftraffic);
       //don't send if there is already some data down the queue that frontend hasn't yet received
       if (msgqid_d2ftraffic->msg_qnum == 0)
 	{
-	  _msgsnd ( mqd_d2ftraffic, &msg, sizeof (msg.ct_array_export), IPC_NOWAIT );
+	  msgsnd ( mqd_d2ftraffic, &msg, sizeof (msg.ct_array_export), IPC_NOWAIT );
 	}
       sleep(1);
     }
@@ -331,7 +319,7 @@ next:
 void denied_traffic_add (const int direction, const int mark, const int bytes)
 {
   int i;
-    _pthread_mutex_lock ( &ct_entries_mutex);
+    pthread_mutex_lock ( &ct_entries_mutex);
     for (i = 0; ct_array[i][0] != 0; ++i)
       {
 	if (ct_array[i][0] != mark) continue;
@@ -343,7 +331,7 @@ void denied_traffic_add (const int direction, const int mark, const int bytes)
 	{
 	    ct_array[i][7] += bytes;
 	}
-	_pthread_mutex_unlock ( &ct_entries_mutex);
+	pthread_mutex_unlock ( &ct_entries_mutex);
 	return;
       }
     //the entry is not yet in array, adding now
@@ -356,6 +344,6 @@ void denied_traffic_add (const int direction, const int mark, const int bytes)
     {
 	ct_array[i][7] += bytes;
     }
-    _pthread_mutex_unlock ( &ct_entries_mutex);
+    pthread_mutex_unlock ( &ct_entries_mutex);
     return ;
 }

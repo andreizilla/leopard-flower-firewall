@@ -9,6 +9,7 @@
 #include <sys/resource.h>
 #include "../common/includes.h"
 
+char escape_sequence[2] = {'\a','\0'};
 
 void send_message (char *message)
 {
@@ -106,6 +107,9 @@ void* f2dthread(void * ptr) {
 void* d2fthread(void * ptr) {
     key_t ipckey_d2f;
     int mqd_d2f;
+    d2f_msg msg;
+    char message[MAX_LINE_LENGTH];
+    char port[16];
 
     if ((ipckey_d2f = ftok(TMPFILE, FTOKID_D2F)) == -1) {
 	printf("ftok: %s,%s,%d\n", strerror(errno), __FILE__, __LINE__);
@@ -115,8 +119,6 @@ void* d2fthread(void * ptr) {
 	exit(0);
     };
 
-    d2f_msg msg;
-    char message[MAX_LINE_LENGTH];
     while (1)
     {
 	memset(message, 0, sizeof(message));
@@ -126,28 +128,28 @@ void* d2fthread(void * ptr) {
 	};
 	switch (msg.item.command) {
 	    case D2FCOMM_ASK_OUT:
-		strcpy(message, "D2FCOMM_ASK_OUT ");
+		strcpy(message, "D2FCOMM_ASK_OUT");
 		break;
 	    case D2FCOMM_ASK_IN:
-		strcpy(message, "D2FCOMM_ASK_IN ");
+		strcpy(message, "D2FCOMM_ASK_IN");
 		break;
 	    case D2FCOMM_LIST:
-		strcpy(message, "D2FCOMM_LIST ");
+		strcpy(message, "D2FCOMM_LIST");
 		break;
 	    default:
 		printf("Received an invalid command. Please report %s,%d\n",__FILE__, __LINE__);
 		break;
 	}
+	strcat (message, escape_sequence);
 	strcat (message, msg.item.path);
-	strcat (message, " ");
+	strcat (message, escape_sequence);
 	strcat (message, msg.item.pid);
-	strcat (message, " ");
+	strcat (message, escape_sequence);
 	strcat (message, msg.item.addr);
-	strcat (message, " ");
-	char port[16];
+	strcat (message, escape_sequence);
 	sprintf(port, "%d", msg.item.sport);
 	strcat (message, port);
-	strcat (message, " ");
+	strcat (message, escape_sequence);
 	sprintf(port, "%d", msg.item.dport);
 	strcat (message, port);
 	send_message(message);
@@ -172,7 +174,8 @@ void* d2flistthread(void * ptr) {
     while (1)
     {
 	memset(message, 0, sizeof(message));
-	strcat (message, "RULESLIST ");
+	strcat (message, "RULESLIST");
+	strcat (message, escape_sequence);
 	while (1)
 	{
 	    if (msgrcv(mqd_d2flist, &msg_d2flist, sizeof (msg_d2flist.item), 0, 0) == -1) {
@@ -190,26 +193,28 @@ void* d2flistthread(void * ptr) {
 	    else
 	    {
 		strcat (message, msg_d2flist.item.path);
-		strcat (message, " ");
+		strcat (message, escape_sequence);
 		strcat (message, msg_d2flist.item.pid);
-		strcat (message, " ");
-		if (!strcmp (msg_d2flist.item.perms, ALLOW_ONCE)) strcat(message, "ALLOW_ONCE ");
-		else if (!strcmp (msg_d2flist.item.perms, ALLOW_ALWAYS)) strcat(message, "ALLOW_ALWAYS ");
-		else if (!strcmp (msg_d2flist.item.perms, DENY_ONCE)) strcat(message, "DENY_ONCE ");
-		else if (!strcmp (msg_d2flist.item.perms, DENY_ALWAYS)) strcat(message, "DENY_ALWAYS ");
+		strcat (message, escape_sequence);
+		if (!strcmp (msg_d2flist.item.perms, ALLOW_ONCE)) strcat(message, "ALLOW_ONCE");
+		else if (!strcmp (msg_d2flist.item.perms, ALLOW_ALWAYS)) strcat(message, "ALLOW_ALWAYS");
+		else if (!strcmp (msg_d2flist.item.perms, DENY_ONCE)) strcat(message, "DENY_ONCE");
+		else if (!strcmp (msg_d2flist.item.perms, DENY_ALWAYS)) strcat(message, "DENY_ALWAYS");
 		else
 		{
 		    printf("A rule without permission set detected %s,%d\n",__FILE__, __LINE__);
 		}
-		if (msg_d2flist.item.is_active) strcat (message, "ACTIVE ");
-		else strcat (message, "NOTACTIVE ");
+		strcat (message, escape_sequence);
+		if (msg_d2flist.item.is_active) strcat (message, "ACTIVE");
+		else strcat (message, "NOTACTIVE");
+		strcat (message, escape_sequence);
 		char nfmark_str[16];
 		sprintf(nfmark_str, "%d", msg_d2flist.item.nfmark_out);
 #ifdef DEBUG
 		printf ("%s nfmark %d\n", msg_d2flist.item.path, msg_d2flist.item.nfmark_out);
 #endif
 		strcat (message, nfmark_str);
-		strcat(message, " ");
+		strcat (message, escape_sequence);
 	    }
 	}
     }
@@ -248,19 +253,19 @@ void* d2ftrafficthread(void * ptr) {
 	{
 	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][0]);
 	    strcat(message, int2str);
-	    strcat(message, " ");
+	    strcat (message, escape_sequence);
 	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][1]);
 	    strcat(message, int2str);
-	    strcat(message, " ");
+	    strcat (message, escape_sequence);
 	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][2]);
 	    strcat(message, int2str);
-	    strcat(message, " ");
+	    strcat (message, escape_sequence);
 	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][3]);
 	    strcat(message, int2str);
-	    strcat(message, " ");
+	    strcat (message, escape_sequence);
 	    sprintf(int2str, "%lu", msg_d2ftraffic.ct_array_export[i][4]);
 	    strcat(message, int2str);
-	    strcat(message, " ");
+	    strcat (message, escape_sequence);
 	}
 	strcat (message, "EOF");
 	send_message(message);

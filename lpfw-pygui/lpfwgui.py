@@ -141,7 +141,7 @@ def stdoutthread(stdout):
     while 1:
         message = stdout.readline() #readline needs \n to unblock, it doesnt clear that \n though        
         msglist = []
-        msglist = message.split(' ')    
+        msglist = message.split('\a')    
         if msglist[0] == "RULESLIST":
             #rules in format (path, pid, perms, isactive, nfmark) with trailing EOF
             print msglist
