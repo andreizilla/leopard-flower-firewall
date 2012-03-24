@@ -53,9 +53,9 @@ SYSCALLS := fopen			\
 	    msgctl			\
 
 SYSCALL_WRAP := $(foreach syscall,$(SYSCALLS),-Wl,-wrap,$(syscall))
-
-OBJS := main.o sha.o msgq.o conntrack.o syscall_wrap.o test.o \
-argtable2.o arg_end.o arg_file.o arg_int.o arg_lit.o arg_rem.o arg_str.o
+OBJS := main.o sha512/sha.o msgq.o conntrack.o syscall_wrap.o test.o \
+argtable/argtable2.o argtable/arg_end.o argtable/arg_file.o argtable/arg_int.o \
+argtable/arg_lit.o argtable/arg_rem.o argtable/arg_str.o
 
 ifeq ($(DESTDIR), ./)
     DESTDIR = $(shell pwd)
@@ -70,45 +70,9 @@ lpfw: Makefile $(OBJS)
 # pull in dependency info for *existing* .o files
 -include $(OBJS:.o=.d)
 
-main.o:	main.c
-	gcc $(GCCFLAGS) -c main.c
+%.o: %.c
+	gcc $(GCCFLAGS) -c $*.c -o $*.o
 	gcc -MM $(GCCFLAGS) $*.c > $*.d
-sha.o:	sha512/sha.c sha512/sha.h sha512/u64.h
-	gcc $(GCCFLAGS) -c sha512/sha.c
-	gcc -MM $(GCCFLAGS) sha512/$*.c > $*.d
-msgq.o: msgq.c msgq.h main.h common/defines.h common/includes.h
-	gcc $(GCCFLAGS) -c msgq.c
-	gcc -MM $(GCCFLAGS) $*.c > $*.d
-conntrack.o: conntrack.c conntrack.h
-	gcc $(GCCFLAGS) -c conntrack.c
-	gcc -MM $(GCCFLAGS) $*.c > $*.d
-syscall_wrap.o: syscall_wrap.c
-	gcc $(GCCFLAGS) -c syscall_wrap.c
-	gcc -MM $(GCCFLAGS) $*.c > $*.d
-test.o: test.c test.h common/includes.h
-	gcc $(GCCFLAGS) -c test.c
-	gcc -MM $(GCCFLAGS) $*.c > $*.d
-argtable2.o : argtable/argtable2.c
-	gcc $(GCCFLAGS) -c argtable/argtable2.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_end.o : argtable/arg_end.c
-	gcc $(GCCFLAGS) -c argtable/arg_end.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_file.o : argtable/arg_file.c
-	gcc $(GCCFLAGS) -c argtable/arg_file.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_int.o : argtable/arg_int.c
-	gcc $(GCCFLAGS) -c argtable/arg_int.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_lit.o : argtable/arg_lit.c
-	gcc $(GCCFLAGS) -c argtable/arg_lit.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_rem.o : argtable/arg_rem.c
-	gcc $(GCCFLAGS) -c argtable/arg_rem.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
-arg_str.o : argtable/arg_str.c
-	gcc $(GCCFLAGS) -c argtable/arg_str.c
-	gcc -MM $(GCCFLAGS) argtable/$*.c > $*.d
 
 lpfwcli:
 	cd lpfw-cli; make $(DEBUG); make DESTDIR=$(DESTDIR) install
@@ -128,3 +92,5 @@ dummy: lpfw
 
 clean:
 	rm *.d *.o
+	cd sha512; rm *.d *.o
+	cd argtable; rm *.d *.o
