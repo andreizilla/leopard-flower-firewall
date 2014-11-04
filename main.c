@@ -198,14 +198,14 @@ int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
             sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
             tcp_port_and_socket_cache[i*2] = (long)port;
             tcp_port_and_socket_cache[i*2+1] = socket;
-            if (*port_to_find != port)
+            if (*port_to_find == port)
             {
                 i++;
                 *socket_found = socket;
+				found_flag = 1;
                 continue;
             }
             //else
-            found_flag = 1;
             i++;
         }
     }
@@ -245,14 +245,14 @@ int build_tcp6_port_and_socket_cache(long *socket_found, const int *port_to_find
             sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
             tcp6_port_and_socket_cache[i*2] = (long)port;
             tcp6_port_and_socket_cache[i*2+1] = socket;
-            if (*port_to_find != port)
+            if (*port_to_find == port)
             {
                 i++;
                 *socket_found = socket;
+				found_flag = 1;
                 continue;
             }
             //else
-            found_flag = 1;
             i++;
         }
     }
@@ -292,14 +292,14 @@ int build_udp_port_and_socket_cache(long *socket_found, const int *port_to_find)
             sscanf(token, "%*s %*8s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
             udp_port_and_socket_cache[i*2] = (long)port;
             udp_port_and_socket_cache[i*2+1] = socket;
-            if (*port_to_find != port)
+            if (*port_to_find == port)
             {
                 i++;
                 *socket_found = socket;
+				found_flag = 1;
                 continue;
             }
             //else
-            found_flag = 1;
             i++;
         }
     }
@@ -339,14 +339,14 @@ int build_udp6_port_and_socket_cache(long *socket_found, const int *port_to_find
             sscanf(token, "%*s %*32s:%4X %*s %*s %*s %*s %*s %*s %*s %ld \n", &port, &socket);
             udp6_port_and_socket_cache[i*2] = (long)port;
             udp6_port_and_socket_cache[i*2+1] = socket;
-            if (*port_to_find != port)
+            if (*port_to_find == port)
             {
                 i++;
                 *socket_found = socket;
+				found_flag = 1;
                 continue;
             }
             //else
-            found_flag = 1;
             i++;
         }
     }
