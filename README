@@ -1,7 +1,7 @@
 Config files:
 /etc/lpfw.conf - gets edited by lpfw frontend
 
-/etc/lpfw.init: rules to specify what process can access what address. Example content:
+/etc/lpfw.ini: rules to specify what process can access what address. Example content:
 
 [/bin/wget]
 Allow=linux.org,12.23.34.45,!google.com,!12.12.12.12
