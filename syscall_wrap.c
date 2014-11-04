@@ -445,7 +445,7 @@ ssize_t __wrap_readlink(const char* path, char* buf,
        size_t bufsize) {
   ssize_t retval = __real_readlink (path, buf, bufsize);
   if (retval == -1){
-    M_PRINTF ( MLOG_INFO, "readlink: %s,%s,%d\n",  strerror ( errno ), __FILE__, __LINE__ );
+    M_PRINTF ( MLOG_INFO, "readlink(%s): %s,%s,%d\n",  path, strerror ( errno ), __FILE__, __LINE__ );
   }
   return retval;
 }

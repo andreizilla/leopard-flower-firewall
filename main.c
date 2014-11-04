@@ -822,6 +822,7 @@ void* build_pid_and_socket_cache ( void *ptr )
                 proc_pid_fd_path[proc_pid_fd_pathlen]=0;
                 strcat(proc_pid_fd_path, m_dirent->d_name);
                 memset (proc_pid_exe, 0 , sizeof(proc_pid_exe));
+				// TODO: Ignore . or ..
                 if (readlink ( proc_pid_fd_path, proc_pid_exe, SOCKETBUFSIZE ) == -1)  //not a symlink but . or ..
                 {
                     errno=0;
