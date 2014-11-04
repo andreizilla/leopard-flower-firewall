@@ -1,0 +1,24 @@
+Hello... I know that Leopard Flower firewall is not supported or anything like that. I have been editing the code for it (from the development branch, which has many updates from the user 'abirvalg') and I found that there is a part of code which is a big error in how the firewall works.
+
+Basically, in the method `build_tcp_port_and_socket_cache` it loops over every line read from the tcpinfo_fd file descriptor and searches for a matching port so that it can get the socket number from the open port.
+
+Inside the loop there is a bit of code that sets the `socket_found` variable when the matching port is found.
+
+The error that I notice is that the code sets the `socket_found` variable if the this if statement is true: if (*port_to_find != port)
+
+The problem with this is that it sets an incorrect socket_found variable because the port we are checking is not the port we are looking for. The fix for this is to change the != to a ==, and then to move the code `found_flag = 1` inside of the if statement.
+
+(This problem is in 4 methods: build_tcp_port_and_socket_cache, build_tcp6_port_and_socket_cache, build_udp_port_and_socket_cache, build_udp6_port_and_socket_cache)
+
+Sometimes the code does find the correct socket on subsequent calls to the method... I honestly have not investigated it much further as the current code causes great delays for allowed applications.
+
+With these changes, the firewall works fine, but without this change, there are 2 big problems: 1) There is a great delay with applications which are allowed because their initial attempts to connect are denied because the wrong socket is found (a socket for a different application is found.) 2) An app which is not configured to be allowed to connect is allowed to connect if the wrong socket found belongs to an application that is allowed to connect.
+
+I have uploaded a .tar.gx archive of the git repository from sf.net (the `development` branch code) with my changes to main.c (see the changes in commit b1a13051db5eff436a0f8db9ec9dbe1058eb144e)
+
+---- File: ----
+The archive can be downloaded here: https://app.box.com/s/rri6swu2prxb6nvo9l80
+The specific patch which I am refering to that is required to fix this problem
+(NOTE: The archive will need the package `libglib2.0-dev` to be installed on your system [apt-get install libglib2.0-dev] because I also wrote some code in change a5e011f490a0eaa9bda30c1693f2067ba5b16b1b which limits the addresses that certain processes are allowed to connect to)
+
+Please let me know if the original behavior is correct and I am missing something... because the current changes make the firewall work more correct for me.
