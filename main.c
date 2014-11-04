@@ -203,6 +203,7 @@ int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
                 i++;
                 *socket_found = socket;
 				found_flag = 1;
+				M_PRINTF(MLOG_DEBUG, "build_tcp_port_and_socket_cache found port %d socket %d\n", port, socket);
                 continue;
             }
             //else
@@ -2691,8 +2692,18 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
         if ((socket = is_tcp_port_in_cache(& dport_hostbo)) == -1) //not found in cache
         {
             //No need to rebuild the cache b/c likelihood is very high that port is not there
-            verdict = DSTPORT_NOT_FOUND_IN_PROC;
-            break;
+			// NEW: Rebuild cache to allow us to SSH back in
+			// TODO: Does this need to be for UDP so that DNS masquarade daemon works?
+
+			if (build_tcp_port_and_socket_cache(&socket, &dport_hostbo) == -1)
+			{
+				if (build_tcp6_port_and_socket_cache(&socket, &dport_hostbo) == -1)
+				{
+					//the packet has no inode associated with it
+					verdict = DSTPORT_NOT_FOUND_IN_PROC;
+					break;
+				}
+			}
         }
         if (socket == 0) {
             verdict = inkernel_check_tcp(&dport_hostbo);
@@ -3745,9 +3756,8 @@ void init_iptables()
     char save_output[MAX_LINE_LENGTH] = "iptables -L OUTPUT > ";
     char save_input[MAX_LINE_LENGTH] = "iptables -L INPUT >";
 
-    system
-    ("iptables -F INPUT");
-    system ("iptables -F OUTPUT");
+    //system("iptables -F INPUT");
+    //system ("iptables -F OUTPUT");
     system ("iptables -I OUTPUT 1 -m state --state NEW -j NFQUEUE --queue-num 11223");
     system ("iptables -I OUTPUT 1 -p tcp -m state --state NEW -j NFQUEUE --queue-num 11220");
     system ("iptables -I OUTPUT 1 -p udp -m state --state NEW -j NFQUEUE --queue-num 11222");
