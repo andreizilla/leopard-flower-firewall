@@ -5,6 +5,7 @@
 These instructions apply specifically to Ubuntu 10.10 but are very likely to work on other Linux distributions.
 
 The following packaged must be installed for lpfw daemon to compile:
+	libglib2.0-dev
     libnetfilter-queue-dev
     libnetfilter-conntrack-dev
     libcap-dev

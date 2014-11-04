@@ -1,3 +1,13 @@
+Config files:
+/etc/lpfw.conf - gets edited by lpfw frontend
+
+/etc/lpfw.init: rules to specify what process can access what address. Example content:
+
+[/bin/wget]
+Allow=linux.org,12.23.34.45,!google.com,!12.12.12.12
+
+(the ! means not, so do not allow that address. Any addresses not matched will also not be allowed. If no rule for program exists, then all addresses will be allowed. An empty Allow= rule means the program can not initiate outbound connections but can accept connections (like a web server, vnc server, ...)
+
 <<<----Leopard Flower 0.4 (released Feb 2012)---->>>
 
   Leopard Flower personal firewall for Linux (LPFW) gives the user control over which applications are allowed to use the network. It consist of a backend/daemon and a frontend which comes in two flavours: text based "lpfwcli" and graphical "lpfwpygui".
