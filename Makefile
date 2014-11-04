@@ -1,6 +1,6 @@
 DESTDIR = ./
 DEBUG =
-GCCFLAGS = -gdwarf-2 -g3
+GCCFLAGS = -gdwarf-2 -g3 `pkg-config --cflags glib-2.0`
 
 SYSCALLS := fopen			\
 	    opendir			\
@@ -65,7 +65,7 @@ all: lpfw install lpfwcli lpfwpygui
 
 lpfw: Makefile $(OBJS)
 	gcc $(GCCFLAGS) $(SYSCALL_WRAP) $(OBJS) \
-	    -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
+	    `pkg-config --libs glib-2.0` -lnetfilter_queue -lnetfilter_conntrack -lpthread -lcap -o lpfw
 
 # pull in dependency info for *existing* .o files
 -include $(OBJS:.o=.d)

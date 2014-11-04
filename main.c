@@ -28,6 +28,10 @@
 #include <linux/netfilter.h> //for NF_ACCEPT, NF_DROP etc
 #include <assert.h>
 
+#include <glib.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
 #include "common/includes.h"
 #include "common/defines.h"
 #include "argtable/argtable2.h"
@@ -36,6 +40,15 @@
 #include "msgq.h"
 #include "conntrack.h"
 #include "test.h"
+
+GKeyFile* addressRules = NULL;
+
+void init_address_rules() {
+	M_PRINTF(MLOG_INFO, "Loading address rules...\n");
+
+	addressRules = g_key_file_new ();
+	g_key_file_load_from_file(addressRules, "/etc/lpfw.ini", G_KEY_FILE_NONE, NULL);
+}
 
 //should be available globally to call nfq_close from sigterm handler
 struct nfq_handle *globalh_out_tcp, *globalh_out_udp, *globalh_out_rest, *globalh_in, *globalh_gid;
@@ -2837,6 +2850,89 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     }
 }
 
+void check_address_rules(char* proto, int* verdict, char* path, char* daddr) {
+	// do nothing if were we
+	//if(strcmp(path, "/home/after/leopardflower-code/lpfw") == 0)
+	//	return;
+
+	// Do address-specific filtering
+	//M_PRINTF(MLOG_DEBUG, "Checking for %s in addr rules\n", path);
+	if(g_key_file_has_group(addressRules, path)) {
+		M_PRINTF(MLOG_INFO, "==> %s %s Found rules for \"%s\" in address rules\n", proto, daddr, path);
+
+		if(g_key_file_has_key(addressRules, path, "Rules", NULL)) {
+			M_PRINTF(MLOG_INFO, "=> Checking Allow rules...\n");
+
+			gsize strings_length = 0;
+			gchar** addr_strings = g_key_file_get_string_list(addressRules, path, "Rules",
+				&strings_length, NULL);
+			int string_cnt;
+			int matched = 0;
+
+			for(string_cnt = 0; string_cnt < strings_length; string_cnt++) {
+				int dest_verdict = 0;
+				char* verdict_name = NULL;
+
+				if(addr_strings[string_cnt][0] == '!') {
+					// deny
+					addr_strings[string_cnt]++;
+					dest_verdict = PATH_FOUND_IN_DLIST_DENY;
+					verdict_name = "DENY";
+
+					M_PRINTF(MLOG_INFO, "checking: deny %s\n", addr_strings[string_cnt]);
+				} else {
+					// allow
+					M_PRINTF(MLOG_INFO, "checking: allow %s\n", addr_strings[string_cnt]);
+					dest_verdict = PATH_FOUND_IN_DLIST_ALLOW;
+					verdict_name = "ALLOW";
+				}
+
+				if(g_hostname_is_ip_address(addr_strings[string_cnt])) {
+					if(strcmp(daddr, addr_strings[string_cnt]) == 0) {
+						M_PRINTF(MLOG_INFO, "Destination address \"%s\" matches rule address \"%s\" - %s\n",
+							daddr, addr_strings[string_cnt], verdict_name);
+						*verdict = dest_verdict;
+						matched = 1;
+						break;
+					}
+				} else {
+					// get ip from hostname
+					struct addrinfo hints, *result = NULL;
+					struct addrinfo *res = NULL;
+					memset (&hints, 0, sizeof (hints));
+					hints.ai_socktype = SOCK_STREAM;
+					if(getaddrinfo(addr_strings[string_cnt], NULL, &hints, &result) == 0) {
+						/* loop over all returned results */
+						for (res = result; res != NULL; res = res->ai_next) {
+							struct sockaddr_in  *sockaddr_ipv4;
+							sockaddr_ipv4 = (struct sockaddr_in *)res->ai_addr;
+							char ipaddr[32];
+							sprintf(ipaddr, "%s", inet_ntoa(sockaddr_ipv4->sin_addr));
+							if(strcmp(daddr, ipaddr) == 0) {
+								M_PRINTF(MLOG_INFO, "Destination address \"%s\" matches rule address \"%s\" (hostname %s) - %s\n",
+									daddr, ipaddr, addr_strings[string_cnt], verdict_name);
+								*verdict = dest_verdict;
+								matched = 1;
+								break;
+							} else {
+								M_PRINTF(MLOG_INFO, "Checked dest %s against rule address %s\n", daddr, ipaddr);
+							}
+						}
+					}
+				}
+
+				if(matched)
+					break;
+			}
+
+			if(!matched) {
+				M_PRINTF(MLOG_INFO, "Tested all rules, no match - deny\n");
+				*verdict = PATH_FOUND_IN_DLIST_DENY;
+			}
+		}
+	}
+}
+
 int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfad, void *mdata )
 {
     pthread_mutex_lock(&lastpacket_mutex);
@@ -2888,6 +2984,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
         return 0;
     }
 
+	check_address_rules("REST", &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_ICMP, DIRECTION_OUT, daddr, 0, 0, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3010,6 +3107,8 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
+	check_address_rules("UDP", &verdict, &path, &daddr);
+
     print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, dstudp, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
     {
@@ -3137,6 +3236,8 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
+	check_address_rules("TCP", &verdict, &path, &daddr);
+
     print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3958,6 +4059,7 @@ int main ( int argc, char *argv[] )
 
     init_nfq_handlers();
     init_ruleslist();
+	init_address_rules();
     rules_load();
     open_proc_net_files();
 
