@@ -3018,7 +3018,8 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
         return 0;
     }
 
-	check_address_rules(PROTO_ICMP, &verdict, &path, &daddr);
+    if (verdict < ALLOW_VERDICT_MAX)
+		check_address_rules(PROTO_ICMP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_ICMP, DIRECTION_OUT, daddr, 0, 0, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3142,7 +3143,8 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
-	check_address_rules(PROTO_UDP, &verdict, &path, &daddr);
+    if (verdict < ALLOW_VERDICT_MAX)
+		check_address_rules(PROTO_UDP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, dstudp, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3271,7 +3273,8 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
-	check_address_rules(PROTO_TCP, &verdict, &path, &daddr);
+    if (verdict < ALLOW_VERDICT_MAX)
+		check_address_rules(PROTO_TCP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
