@@ -1,0 +1,14 @@
+[/usr/bin/vlc]
+Rules=
+
+[/usr/lib/vino/vino-server]
+Rules=
+
+[/usr/lib/apt/methods/http]
+Rules=us.archive.ubuntu.com
+
+[/bin/ping]
+Rules=127.0.1.1;google.com
+
+[/home/user1/leopard-flower-firewall/lpfw]
+Rules=127.0.1.1

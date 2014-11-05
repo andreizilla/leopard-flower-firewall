@@ -1,3 +1,5 @@
+#include <netinet/in.h>
+#include <netdb.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -29,8 +31,6 @@
 #include <assert.h>
 
 #include <glib.h>
-#include <netinet/in.h>
-#include <netdb.h>
 
 #include "common/includes.h"
 #include "common/defines.h"
@@ -216,7 +216,6 @@ int build_tcp_port_and_socket_cache(long *socket_found, const int *port_to_find)
                 i++;
                 *socket_found = socket;
 				found_flag = 1;
-				M_PRINTF(MLOG_DEBUG, "build_tcp_port_and_socket_cache found port %d socket %d\n", port, socket);
                 continue;
             }
             //else
@@ -2850,7 +2849,7 @@ int  nfq_handle_in ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq
     }
 }
 
-void check_address_rules(char* proto, int* verdict, char* path, char* daddr) {
+void check_address_rules(const int proto, int* verdict, char* path, char* daddr) {
 	// do nothing if were we
 	//if(strcmp(path, "/home/after/leopardflower-code/lpfw") == 0)
 	//	return;
@@ -2858,7 +2857,7 @@ void check_address_rules(char* proto, int* verdict, char* path, char* daddr) {
 	// Do address-specific filtering
 	//M_PRINTF(MLOG_DEBUG, "Checking for %s in addr rules\n", path);
 	if(g_key_file_has_group(addressRules, path)) {
-		M_PRINTF(MLOG_INFO, "==> %s %s Found rules for \"%s\" in address rules\n", proto, daddr, path);
+		M_PRINTF(MLOG_INFO, "==> %d %s Found rules for \"%s\" in address rules\n", proto, daddr, path);
 
 		if(g_key_file_has_key(addressRules, path, "Rules", NULL)) {
 			M_PRINTF(MLOG_INFO, "=> Checking Allow rules...\n");
@@ -2896,13 +2895,47 @@ void check_address_rules(char* proto, int* verdict, char* path, char* daddr) {
 						break;
 					}
 				} else {
+					// TODO: The bellow commented out crud can be removed
+					/*
+					gchar* argv[4];
+					argv[0] = "/usr/bin/dig";
+					argv[1] = "+short";
+					argv[2] = addr_strings[string_cnt];
+					argv[3] = NULL;
+					gboolean ret;
+					gchar *rebind_stdout = NULL;
+					gint exit_status = 0;
+					GError* error = NULL;
+
+					ret = g_spawn_sync(NULL, argv, NULL,  G_SPAWN_STDERR_TO_DEV_NULL,
+						 NULL, NULL, &rebind_stdout, NULL, &exit_status, &error);
+
+					M_PRINTF(MLOG_DEBUG, "OUTPUT: %s\n", rebind_stdout);
+					*/
+
+
 					// get ip from hostname
+					// TODO: This is set up for IPv4 for now.. coult be expanded to work with ipv6
 					struct addrinfo hints, *result = NULL;
 					struct addrinfo *res = NULL;
 					memset (&hints, 0, sizeof (hints));
-					hints.ai_socktype = SOCK_STREAM;
+					hints.ai_family = AF_INET;
+					//hints.ai_socktype = SOCK_DGRAM;
+					if(proto == PROTO_TCP)
+						hints.ai_protocol = IPPROTO_TCP;
+					else if(proto == PROTO_UDP)
+						hints.ai_protocol = IPPROTO_UDP;
+					//hints.ai_flags = AI_ADDRCONFIG;
+
+/*
+					struct hostent * he;
+					he = gethostbyname("google.com");
+					M_PRINTF(MLOG_DEBUG, "After GHHHHHH\n");
+					*/
+
+
+					//pthread_mutex_lock(&lastpacket_mutex);
 					if(getaddrinfo(addr_strings[string_cnt], NULL, &hints, &result) == 0) {
-						/* loop over all returned results */
 						for (res = result; res != NULL; res = res->ai_next) {
 							struct sockaddr_in  *sockaddr_ipv4;
 							sockaddr_ipv4 = (struct sockaddr_in *)res->ai_addr;
@@ -2919,6 +2952,7 @@ void check_address_rules(char* proto, int* verdict, char* path, char* daddr) {
 							}
 						}
 					}
+					//pthread_mutex_unlock(&lastpacket_mutex);
 				}
 
 				if(matched)
@@ -2984,7 +3018,7 @@ int  nfq_handle_out_rest ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, stru
         return 0;
     }
 
-	check_address_rules("REST", &verdict, &path, &daddr);
+	check_address_rules(PROTO_ICMP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_ICMP, DIRECTION_OUT, daddr, 0, 0, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3091,6 +3125,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
         verdict = socket_handle_udp_out ( &socket_found, &nfmark_to_set_out_udp, path, pid, &starttime );
     }
 
+	// TODO: shouldnt PROTO_TCP say PROTO_UDP?
     verdict = global_rules_filter(DIRECTION_OUT, PROTO_TCP, dstudp, verdict);
 
     if (verdict == PATH_IN_DLIST_NOT_FOUND)
@@ -3107,7 +3142,7 @@ int  nfq_handle_out_udp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
-	check_address_rules("UDP", &verdict, &path, &daddr);
+	check_address_rules(PROTO_UDP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_UDP, DIRECTION_OUT, daddr, srcudp, dstudp, path, pid, verdict);
     if (verdict < ALLOW_VERDICT_MAX)
@@ -3236,7 +3271,7 @@ int  nfq_handle_out_tcp ( struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struc
     }
 
 execute_verdict:
-	check_address_rules("TCP", &verdict, &path, &daddr);
+	check_address_rules(PROTO_TCP, &verdict, &path, &daddr);
 
     print_traffic_log(PROTO_TCP, DIRECTION_OUT, daddr, srctcp, dsttcp, path, pid, verdict);
 
